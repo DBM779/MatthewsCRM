@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matthews CRM</title>
+    <style>
+        * {box-sizing: border-box;}
+        html, body {height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #1f2937; background: #fff;}
+        body {display: flex; overflow: hidden;}
+        .sidebar {width: 200px; background: #1e1b4b; color: #e5e7eb; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; border-right: 1px solid #312e81;}
+        .sidebar-header {padding: 16px; border-bottom: 1px solid #312e81; font-weight: 600; color: #f3f4f6;}
+        .sidebar-nav {flex: 1; padding: 8px 0;}
+        .nav-item {padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent; transition: all 0.2s; color: #d1d5db; font-size: 13px;}
+        .nav-item:hover {background: rgba(255,255,255,0.05); color: #f3f4f6;}
+        .nav-item.active {background: rgba(99,102,241,0.1); border-left-color: #6366f1; color: #f3f4f6; font-weight: 500;}
+        .sidebar-footer {padding: 12px 16px; border-top: 1px solid #312e81; font-size: 12px; color: #9ca3af; max-height: 60px; overflow-y: auto;}
+        .sync-status {font-size: 11px; margin-bottom: 4px; padding: 4px 0;}
+        .status-indicator {display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px;}
+        .status-online {background: #22c55e;}
+        .status-offline {background: #ef4444;}
+        .main {flex: 1; display: flex; flex-direction: column; overflow: hidden;}
+        .topbar {height: 56px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 20px; gap: 16px; flex-shrink: 0;}
+        .breadcrumb {font-size: 13px; color: #6b7280;}
+        .breadcrumb a {color: #3b82f6; text-decoration: none; cursor: pointer;}
+        .breadcrumb a:hover {text-decoration: underline;}
+        .search-box {margin-left: auto; display: flex; align-items: center; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 12px; gap: 6px;}
+        .search-box input {border: none; background: transparent; outline: none; width: 200px; font-size: 13px;}
+        .content {flex: 1; overflow-y: auto; padding: 20px;}
+        .loading-state {display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #6b7280;}
+        .loading-spinner {width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;}
+        @keyframes spin {to {transform: rotate(360deg);}}
+        .card {background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px;}
+        .stat-cards {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;}
+        .stat-card {background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center;}
+        .stat-card .label {font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;}
+        .stat-card .value {font-size: 28px; font-weight: 700; color: #1f2937;}
+        .table-container {overflow-x: auto;}
+        table {width: 100%; border-collapse: collapse; font-size: 13px;}
+        th {background: #f9fafb; padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; cursor: pointer; user-select: none;}
+        th:hover {background: #f3f4f6;}
+        td {padding: 12px; border-bottom: 1px solid #e5e7eb;}
+        tr:hover {background: #f9fafb;}
+        .badge {display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;}
+        .tier-1-vip {background: #dcfce7; color: #166534;}
+        .tier-2 {background: #dbeafe; color: #1e40af;}
+        .tier-3 {background: #fef3c7; color: #92400e;}
+        .tier-4 {background: #f3f4f6; color: #374151;}
+        .tier-5 {background: #f0f0f0; color: #6b7280;}
+        .cat-ib {background: #e0e7ff; color: #3730a3;}
+        .cat-bovine {background: #fed7aa; color: #92400e;}
+        .cat-personal {background: #ccfbf1; color: #134e4a;}
+        .stage-prospect {background: #f3f4f6; color: #374151;}
+        .stage-pitch {background: #dbeafe; color: #1e40af;}
+        .stage-mandate {background: #e9d5ff; color: #6b21a8;}
+        .stage-duediligence {background: #fef3c7; color: #92400e;}
+        .stage-negotiation {background: #fed7aa; color: #92400e;}
+        .stage-closedwon {background: #dcfce7; color: #166534;}
+        .stage-closedlost {background: #fee2e2; color: #991b1b;}
+        .activity-score {display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle;}
+        .as-green {background: #22c55e;}
+        .as-yellow {background: #eab308;}
+        .as-red {background: #ef4444;}
+        .as-gray {background: #d1d5db;}
+        button {padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #374151; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s;}
+        button:hover {background: #f3f4f6; border-color: #9ca3af;}
+        .btn-primary {background: #3b82f6; color: #fff; border-color: #3b82f6;}
+        .btn-primary:hover {background: #2563eb; border-color: #2563eb;}
+        .btn-small {padding: 4px 8px; font-size: 12px;}
+        .form-group {margin-bottom: 16px;}
+        label {display: block; font-weight: 500; margin-bottom: 4px; color: #374151; font-size: 13px;}
+        input, textarea, select {width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: inherit;}
+        input:focus, textarea:focus, select:focus {outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);}
+        textarea {resize: vertical; min-height: 80px;}
+        .modal {display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;}
+        .modal.show {display: flex;}
+        .modal-content {background: #fff; border-radius: 8px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.2);}
+        .modal-header {font-size: 18px; font-weight: 700; margin-bottom: 16px;}
+        .modal-footer {display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;}
+        .kanban-board {display: flex; gap: 16px; overflow-x: auto; padding-bottom: 10px;}
+        .kanban-column {flex: 0 0 280px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;}
+        .kanban-header {font-weight: 600; font-size: 13px; margin-bottom: 12px; color: #374151;}
+        .kanban-card {background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s;}
+        .kanban-card:hover {box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: #3b82f6;}
+        .kanban-card-title {font-weight: 600; font-size: 13px; margin-bottom: 6px;}
+        .kanban-card-meta {font-size: 11px; color: #6b7280; margin-bottom: 6px;}
+        .timeline {position: relative; padding-left: 24px;}
+        .timeline-item {margin-bottom: 16px; position: relative;}
+        .timeline-item::before {content: ''; position: absolute; left: -24px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #3b82f6; border: 2px solid #fff;}
+        .timeline-item.call::before {background: #6366f1;}
+        .timeline-item.email::before {background: #3b82f6;}
+        .timeline-item.meeting::before {background: #8b5cf6;}
+        .timeline-item.task::before {background: #f59e0b;}
+        .timeline-date {font-size: 11px; color: #6b7280; margin-bottom: 2px;}
+        .timeline-title {font-weight: 500; font-size: 13px; margin-bottom: 2px;}
+        .timeline-note {font-size: 12px; color: #6b7280;}
+        .detail-header {display: flex; align-items: center; gap: 16px; margin-bottom: 20px;}
+        .detail-header h1 {margin: 0; font-size: 24px;}
+        .detail-sidebar {width: 280px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; position: sticky; top: 0; max-height: calc(100vh - 76px); overflow-y: auto;}
+        .detail-main {flex: 1;}
+        .detail-container {display: flex; gap: 16px;}
+        .info-row {margin-bottom: 12px; font-size: 13px;}
+        .info-label {color: #6b7280; font-weight: 500; margin-bottom: 2px;}
+        .info-value {color: #1f2937; word-break: break-all;}
+        .info-value a {color: #3b82f6; text-decoration: none; cursor: pointer;}
+        .info-value a:hover {text-decoration: underline;}
+        .tabs {display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;}
+        .tab {padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #6b7280; font-weight: 500; transition: all 0.2s;}
+        .tab:hover {color: #374151;}
+        .tab.active {border-bottom-color: #3b82f6; color: #3b82f6;}
+        .tab-content {display: none;}
+        .tab-content.active {display: block;}
+        input[type="checkbox"] {width: auto; margin-right: 8px; cursor: pointer;}
+        .map-container {display: flex; gap: 16px; height: calc(100vh - 76px);}
+        .map-sidebar {width: 300px; border-right: 1px solid #e5e7eb; overflow-y: auto;}
+        .map-main {flex: 1;}
+        .map-item {padding: 12px; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s;}
+        .map-item:hover {background: #f9fafb;}
+        .map-item.active {background: #e0e7ff; border-left: 3px solid #3b82f6;}
+        .map-item-name {font-weight: 600; font-size: 13px; margin-bottom: 4px;}
+        .map-item-address {font-size: 12px; color: #6b7280;}
+        iframe {width: 100%; height: 100%; border: none;}
+        ::-webkit-scrollbar {width: 8px; height: 8px;}
+        ::-webkit-scrollbar-track {background: transparent;}
+        ::-webkit-scrollbar-thumb {background: #d1d5db; border-radius: 4px;}
+        ::-webkit-scrollbar-thumb:hover {background: #9ca3af;}
+        .text-muted {color: #6b7280;}
+        h2 {margin: 0 0 16px 0; font-size: 20px;}
+        h3 {margin: 0 0 12px 0; font-size: 16px;}
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">Matthews CRM</div>
+        <div class="sidebar-nav">
+            <div class="nav-item active" onclick="app.navigate('dashboard')">Dashboard</div>
+            <div class="nav-item" onclick="app.navigate('contacts')">Contacts</div>
+            <div class="nav-item" onclick="app.navigate('accounts')">Accounts</div>
+            <div class="nav-item" onclick="app.navigate('deals')">Pipeline</div>
+            <div class="nav-item" onclick="app.navigate('activities')">Activities</div>
+            <div class="nav-item" onclick="app.navigate('map')">Map View</div>
+            <div class="nav-item" onclick="app.navigate('referrals')">Referrals</div>
+            <div class="nav-item" onclick="app.navigate('settings')">Settings</div>
+        </div>
+        <div class="sidebar-footer">
+            <div class="sync-status">
+                <span class="status-indicator status-online" id="statusIndicator"></span>
+                <span id="statusText">Ready</span>
+            </div>
+            <div>v1.0 - Dave Matthews</div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="topbar">
+            <div class="breadcrumb" id="breadcrumb">Dashboard</div>
+            <div class="search-box">
+                <input type="text" id="globalSearch" placeholder="Search..." onkeyup="app.globalSearch(this.value)">
+            </div>
+        </div>
+
+        <div class="content" id="content"></div>
+    </div>
+
+    <div class="modal" id="modalContact">
+        <div class="modal-content">
+            <div class="modal-header">Contact</div>
+            <form id="formContact">
+                <input type="hidden" id="contactId">
+                <div class="form-group"><label>Name *</label><input type="text" id="contactName" required></div>
+                <div class="form-group"><label>Email</label><input type="email" id="contactEmail"></div>
+                <div class="form-group"><label>Mobile</label><input type="tel" id="contactMobile"></div>
+                <div class="form-group"><label>Phone</label><input type="tel" id="contactPhone"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="contactAddress"></div>
+                <div class="form-group"><label>Company</label><select id="contactCompany"></select></div>
+                <div class="form-group"><label>Tier</label><select id="contactTier"><option value="1-VIP">1-VIP</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+                <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
+                <div class="form-group"><label>Birthdate</label><input type="date" id="contactBirthdate"></div>
+                <div class="form-group"><label>Title</label><input type="text" id="contactTitle"></div>
+                <div class="form-group"><label>Instagram</label><input type="text" id="contactInstagram"></div>
+                <div class="form-group"><label>LinkedIn</label><input type="url" id="contactLinkedin"></div>
+                <div class="form-group"><label>LinkedIn/Social Notes</label><textarea id="contactLiSnP"></textarea></div>
+                <div class="form-group"><label>Notes</label><textarea id="contactNotes"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalContact')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalAccount">
+        <div class="modal-content">
+            <div class="modal-header">Account</div>
+            <form id="formAccount">
+                <input type="hidden" id="accountId">
+                <div class="form-group"><label>Name *</label><input type="text" id="accountName" required></div>
+                <div class="form-group"><label>Industry</label><input type="text" id="accountIndustry"></div>
+                <div class="form-group"><label>Website</label><input type="url" id="accountWebsite"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="accountAddress"></div>
+                <div class="form-group"><label>Type</label><select id="accountType"><option value="Client">Client</option><option value="Prospect">Prospect</option><option value="Partner">Partner</option><option value="Own Company">Own Company</option><option value="Vendor">Vendor</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Notes</label><textarea id="accountNotes"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalAccount')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalDeal">
+        <div class="modal-content">
+            <div class="modal-header">Deal</div>
+            <form id="formDeal">
+                <input type="hidden" id="dealId">
+                <div class="form-group"><label>Name *</label><input type="text" id="dealName" required></div>
+                <div class="form-group"><label>Account *</label><select id="dealAccount" required></select></div>
+                <div class="form-group"><label>Value (M)</label><input type="number" id="dealValue" step="0.1"></div>
+                <div class="form-group"><label>Stage</label><select id="dealStage"><option value="Prospect">Prospect</option><option value="Pitch">Pitch</option><option value="Mandate">Mandate</option><option value="Due Diligence">Due Diligence</option><option value="Negotiation">Negotiation</option><option value="Closed Won">Closed Won</option><option value="Closed Lost">Closed Lost</option></select></div>
+                <div class="form-group"><label>Sector</label><input type="text" id="dealSector"></div>
+                <div class="form-group"><label>Probability (%)</label><input type="number" id="dealProbability" min="0" max="100"></div>
+                <div class="form-group"><label>Close Date</label><input type="date" id="dealCloseDate"></div>
+                <div class="form-group"><label>Notes</label><textarea id="dealNotes"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalDeal')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalActivity">
+        <div class="modal-content">
+            <div class="modal-header">Activity</div>
+            <form id="formActivity">
+                <input type="hidden" id="activityId">
+                <div class="form-group"><label>Type</label><select id="activityType"><option value="Call">Call</option><option value="Email">Email</option><option value="Meeting">Meeting</option><option value="Follow-up">Follow-up</option><option value="Note">Note</option><option value="Task">Task</option></select></div>
+                <div class="form-group"><label>Subject *</label><input type="text" id="activitySubject" required></div>
+                <div class="form-group"><label>Contact</label><select id="activityContact"></select></div>
+                <div class="form-group"><label>Account</label><select id="activityAccount"></select></div>
+                <div class="form-group"><label>Deal</label><select id="activityDeal"></select></div>
+                <div class="form-group"><label>Due Date</label><input type="date" id="activityDueDate"></div>
+                <div class="form-group"><label>Status</label><select id="activityStatus"><option value="Open">Open</option><option value="Closed">Closed</option></select></div>
+                <div class="form-group"><label>Notes</label><textarea id="activityNotes"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalActivity')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+const SUPABASE_URL = 'https://bnkuieueimlyjovjilqi.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_Xj5u9741yzSNpZ7HXcY_iw_5JVrQmUN';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const app = {
+    currentView: 'dashboard',
+    currentRecord: null,
+    isLoading: true,
+    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: []},
+
+    async init() {
+        await this.loadDataFromSupabase();
+        this.setupEventListeners();
+        this.renderDashboard();
+        this.updateSelectOptions();
+    },
+
+    async loadDataFromSupabase() {
+        try {
+            this.updateStatus('Syncing...', false);
+            const [contactsRes, accountsRes, dealsRes, activitiesRes, emailsRes, referralsRes, dealContactsRes] = await Promise.all([
+                supabase.from('contacts').select('*'),
+                supabase.from('accounts').select('*'),
+                supabase.from('deals').select('*'),
+                supabase.from('activities').select('*'),
+                supabase.from('emails').select('*'),
+                supabase.from('referrals').select('*'),
+                supabase.from('deal_contacts').select('*')
+            ]);
+
+            if (contactsRes.data && contactsRes.data.length > 0) {
+                this.data.contacts = contactsRes.data.map(c => this.dbToApp('contact', c));
+                this.data.accounts = accountsRes.data.map(a => this.dbToApp('account', a));
+                this.data.deals = dealsRes.data.map(d => this.dbToApp('deal', d));
+                this.data.activities = activitiesRes.data.map(a => this.dbToApp('activity', a));
+                this.data.emails = emailsRes.data || [];
+                this.data.referrals = referralsRes.data || [];
+                this.data.dealContacts = dealContactsRes.data || [];
+                this.updateStatus('Ready', true);
+            } else {
+                await this.seedDataFromLocalStorage();
+                this.updateStatus('Ready', true);
+            }
+        } catch (err) {
+            console.error('Load error:', err);
+            this.updateStatus('Offline', false);
+            await this.seedDataFromLocalStorage();
+        }
+        this.isLoading = false;
+    },
+
+    async seedDataFromLocalStorage() {
+        const seedData = this.getSeedData();
+        try {
+            const results = await Promise.all([
+                supabase.from('accounts').insert(seedData.accounts.map(a => this.appToDb('account', a))),
+                supabase.from('contacts').insert(seedData.contacts.map(c => this.appToDb('contact', c))),
+                supabase.from('deals').insert(seedData.deals.map(d => this.appToDb('deal', d))),
+                supabase.from('activities').insert(seedData.activities.map(a => this.appToDb('activity', a)))
+            ]);
+            this.data = seedData;
+        } catch (err) {
+            console.log('Seed note:', err.message);
+            this.data = seedData;
+        }
+    },
+
+    appToDb(type, obj) {
+        if (!obj) return obj;
+        const mapped = {...obj};
+        const mapping = {
+            accountId: 'account_id', contactId: 'contact_id', dealId: 'deal_id',
+            dueDate: 'due_date', closeDate: 'close_date', fromAddr: 'from_addr',
+            toAddr: 'to_addr', liSnP: 'li_sn_p', createdAt: 'created_at',
+            fromId: 'from_id', toId: 'to_id'
+        };
+        for (const [camel, snake] of Object.entries(mapping)) {
+            if (camel in mapped) {
+                mapped[snake] = mapped[camel];
+                delete mapped[camel];
+            }
+        }
+        return mapped;
+    },
+
+    dbToApp(type, obj) {
+        if (!obj) return obj;
+        const mapped = {...obj};
+        const mapping = {
+            account_id: 'accountId', contact_id: 'contactId', deal_id: 'dealId',
+            due_date: 'dueDate', close_date: 'closeDate', from_addr: 'fromAddr',
+            to_addr: 'toAddr', li_sn_p: 'liSnP', created_at: 'createdAt',
+            from_id: 'fromId', to_id: 'toId'
+        };
+        for (const [snake, camel] of Object.entries(mapping)) {
+            if (snake in mapped) {
+                mapped[camel] = mapped[snake];
+                delete mapped[snake];
+            }
+        }
+        return mapped;
+    },
+
+    updateStatus(text, isOnline) {
+        const indicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        if (indicator && statusText) {
+            indicator.className = 'status-indicator ' + (isOnline ? 'status-online' : 'status-offline');
+            statusText.textContent = text;
+        }
+    },
+
+    async syncFromSupabase() {
+        await this.loadDataFromSupabase();
+        this.render();
+    },
+
+    async saveContact(e) {
+        e.preventDefault();
+        const id = document.getElementById('contactId').value;
+        const contact = {
+            name: document.getElementById('contactName').value,
+            email: document.getElementById('contactEmail').value,
+            mobile: document.getElementById('contactMobile').value,
+            phone: document.getElementById('contactPhone').value,
+            address: document.getElementById('contactAddress').value,
+            accountId: document.getElementById('contactCompany').value || null,
+            tier: document.getElementById('contactTier').value,
+            la: document.getElementById('contactLA').value || null,
+            birthdate: document.getElementById('contactBirthdate').value || null,
+            title: document.getElementById('contactTitle').value || null,
+            instagram: document.getElementById('contactInstagram').value || null,
+            linkedin: document.getElementById('contactLinkedin').value || null,
+            liSnP: document.getElementById('contactLiSnP').value || null,
+            notes: document.getElementById('contactNotes').value || null
+        };
+
+        try {
+            if (id) {
+                await supabase.from('contacts').update(this.appToDb('contact', contact)).eq('id', id);
+                const idx = this.data.contacts.findIndex(c => c.id === id);
+                if (idx >= 0) this.data.contacts[idx] = {...this.data.contacts[idx], ...contact};
+            } else {
+                const dbContact = this.appToDb('contact', {...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()});
+                const result = await supabase.from('contacts').insert([dbContact]);
+                if (result.data && result.data.length) {
+                    this.data.contacts.push(this.dbToApp('contact', result.data[0]));
+                }
+            }
+            this.closeModal('modalContact');
+            this.render();
+        } catch (err) {
+            alert('Error saving contact: ' + err.message);
+        }
+    },
+
+    async saveAccount(e) {
+        e.preventDefault();
+        const id = document.getElementById('accountId').value;
+        const account = {
+            name: document.getElementById('accountName').value,
+            industry: document.getElementById('accountIndustry').value || null,
+            website: document.getElementById('accountWebsite').value || null,
+            address: document.getElementById('accountAddress').value || null,
+            type: document.getElementById('accountType').value,
+            notes: document.getElementById('accountNotes').value || null
+        };
+
+        try {
+            if (id) {
+                await supabase.from('accounts').update(this.appToDb('account', account)).eq('id', id);
+                const idx = this.data.accounts.findIndex(a => a.id === id);
+                if (idx >= 0) this.data.accounts[idx] = {...this.data.accounts[idx], ...account};
+            } else {
+                const dbAccount = this.appToDb('account', {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()});
+                const result = await supabase.from('accounts').insert([dbAccount]);
+                if (result.data && result.data.length) {
+                    this.data.accounts.push(this.dbToApp('account', result.data[0]));
+                }
+            }
+            this.closeModal('modalAccount');
+            this.render();
+        } catch (err) {
+            alert('Error saving account: ' + err.message);
+        }
+    },
+
+    async saveDeal(e) {
+        e.preventDefault();
+        const id = document.getElementById('dealId').value;
+        const deal = {
+            name: document.getElementById('dealName').value,
+            accountId: document.getElementById('dealAccount').value,
+            value: parseFloat(document.getElementById('dealValue').value) || 0,
+            stage: document.getElementById('dealStage').value,
+            sector: document.getElementById('dealSector').value || null,
+            probability: parseInt(document.getElementById('dealProbability').value) || 0,
+            closeDate: document.getElementById('dealCloseDate').value || null,
+            notes: document.getElementById('dealNotes').value || null
+        };
+
+        try {
+            if (id) {
+                await supabase.from('deals').update(this.appToDb('deal', deal)).eq('id', id);
+                const idx = this.data.deals.findIndex(d => d.id === id);
+                if (idx >= 0) this.data.deals[idx] = {...this.data.deals[idx], ...deal};
+            } else {
+                const dbDeal = this.appToDb('deal', {...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()});
+                const result = await supabase.from('deals').insert([dbDeal]);
+                if (result.data && result.data.length) {
+                    this.data.deals.push(this.dbToApp('deal', result.data[0]));
+                }
+            }
+            this.closeModal('modalDeal');
+            this.render();
+        } catch (err) {
+            alert('Error saving deal: ' + err.message);
+        }
+    },
+
+    async saveActivity(e) {
+        e.preventDefault();
+        const id = document.getElementById('activityId').value;
+        const activity = {
+            type: document.getElementById('activityType').value,
+            subject: document.getElementById('activitySubject').value,
+            contactId: document.getElementById('activityContact').value || null,
+            accountId: document.getElementById('activityAccount').value || null,
+            dealId: document.getElementById('activityDeal').value || null,
+            dueDate: document.getElementById('activityDueDate').value || null,
+            status: document.getElementById('activityStatus').value,
+            notes: document.getElementById('activityNotes').value || null
+        };
+
+        try {
+            if (id) {
+                await supabase.from('activities').update(this.appToDb('activity', activity)).eq('id', id);
+                const idx = this.data.activities.findIndex(a => a.id === id);
+                if (idx >= 0) this.data.activities[idx] = {...this.data.activities[idx], ...activity};
+            } else {
+                const dbActivity = this.appToDb('activity', {...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()});
+                const result = await supabase.from('activities').insert([dbActivity]);
+                if (result.data && result.data.length) {
+                    this.data.activities.push(this.dbToApp('activity', result.data[0]));
+                }
+            }
+            this.closeModal('modalActivity');
+            this.render();
+        } catch (err) {
+            alert('Error saving activity: ' + err.message);
+        }
+    },
+
+    async deleteContact(id) {
+        if (!confirm('Delete this contact?')) return;
+        try {
+            await supabase.from('contacts').delete().eq('id', id);
+            this.data.contacts = this.data.contacts.filter(c => c.id !== id);
+            this.render();
+        } catch (err) {
+            alert('Error deleting contact: ' + err.message);
+        }
+    },
+
+    async deleteAccount(id) {
+        if (!confirm('Delete this account?')) return;
+        try {
+            await supabase.from('accounts').delete().eq('id', id);
+            this.data.accounts = this.data.accounts.filter(a => a.id !== id);
+            this.render();
+        } catch (err) {
+            alert('Error deleting account: ' + err.message);
+        }
+    },
+
+    async deleteDeal(id) {
+        if (!confirm('Delete this deal?')) return;
+        try {
+            await supabase.from('deals').delete().eq('id', id);
+            this.data.deals = this.data.deals.filter(d => d.id !== id);
+            this.render();
+        } catch (err) {
+            alert('Error deleting deal: ' + err.message);
+        }
+    },
+
+    async deleteActivity(id) {
+        if (!confirm('Delete this activity?')) return;
+        try {
+            await supabase.from('activities').delete().eq('id', id);
+            this.data.activities = this.data.activities.filter(a => a.id !== id);
+            this.render();
+        } catch (err) {
+            alert('Error deleting activity: ' + err.message);
+        }
+    },
+
+    setupEventListeners() {
+        document.getElementById('formContact').addEventListener('submit', (e) => this.saveContact(e));
+        document.getElementById('formAccount').addEventListener('submit', (e) => this.saveAccount(e));
+        document.getElementById('formDeal').addEventListener('submit', (e) => this.saveDeal(e));
+        document.getElementById('formActivity').addEventListener('submit', (e) => this.saveActivity(e));
+    },
+
+    calculateDSLA(laStr) {
+        if (!laStr) return null;
+        const la = new Date(laStr);
+        const now = new Date();
+        return Math.floor((now - la) / (1000 * 60 * 60 * 24));
+    },
+
+    calculateAS(dsla) {
+        if (dsla === null || dsla === undefined) return 'gray';
+        if (dsla <= 30) return 'green';
+        if (dsla <= 90) return 'yellow';
+        return 'red';
+    },
+
+    getSeedData() {
+        const accounts = [
+            {id: 'acc-1', name: 'Meridian Capital', industry: 'Financial Services', website: '', address: '375 Park Ave, New York, NY 10152', type: 'Client', notes: 'Key IB relationship. Multiple live mandates in Healthcare and Consumer.', createdAt: new Date().toISOString()},
+            {id: 'acc-2', name: 'Bovine Media', industry: 'Media & Entertainment', website: 'www.bovinemedia.com', address: '2911 Turtle Creek Blvd, Dallas, TX 75219', type: 'Own Company', notes: 'Personal venture. Raising Series A (5M target). Refreshing Salesforce weekly.', createdAt: new Date().toISOString()},
+            {id: 'acc-3', name: 'Atlas Search', industry: 'Recruiting', website: 'atlassearch.com', address: '1 World Trade Center, New York, NY 10007', type: 'Vendor', notes: 'IB recruiting firm. Danny ONeill reached out 3/17 re: Associate roles.', createdAt: new Date().toISOString()},
+            {id: 'acc-4', name: 'North Dallas Landscapes', industry: 'Services', website: 'northdallaslandscapes.com', address: 'PO Box 38153, Dallas, TX 75238', type: 'Vendor', notes: 'Home landscape maintenance. Ongoing turf service dispute. Alan/Jake managing. Awaiting call to clarify weekly scope.', createdAt: new Date().toISOString()},
+            {id: 'acc-5', name: 'Jefferies', industry: 'Investment Banking', website: 'jefferies.com', address: 'Dallas, TX', type: 'Own Company', notes: 'Current employer. IB Associate role.', createdAt: new Date().toISOString()},
+            {id: 'acc-6', name: 'Lincoln International', industry: 'Investment Banking', website: 'lincolninternational.com', address: '', type: 'Prospect', notes: 'Multiple contacts. Middle-market IB.', createdAt: new Date().toISOString()},
+            {id: 'acc-7', name: 'Bain & Company', industry: 'Consulting', website: 'bain.com', address: '', type: 'Prospect', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-8', name: 'Lazard', industry: 'Investment Banking', website: 'lazard.com', address: '', type: 'Prospect', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-9', name: 'EY', industry: 'Professional Services', website: 'ey.com', address: '', type: 'Prospect', notes: 'Two contacts: Maurice Berbel and Nick Myers.', createdAt: new Date().toISOString()},
+            {id: 'acc-10', name: 'Corey Ford Construction', industry: 'Construction', website: '', address: 'Dallas, TX', type: 'Vendor', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-12', name: 'Linters', industry: 'Services', website: 'linters.com', address: '', type: 'Prospect', notes: 'Jacob Goetz contact.', createdAt: new Date().toISOString()}
+        ];
+
+        const contacts = [
+            {id: 'con-1', name: 'Adam Kaiser', email: 'adamkaiser18@gmail.com', mobile: '(214) 437-8863', phone: '', address: 'Denver, CO', accountId: '', tier: '1-VIP', la: '2025-12-13', dsla: 95, birthdate: '1991-05-18', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'Last email: Fwd BMW Dallas Marathon Bib Assignment 12/13/2025.', createdAt: new Date().toISOString()},
+            {id: 'con-25', name: 'Jake Builder - Corey Ford Construction', email: '', mobile: '', phone: '', address: '', accountId: 'acc-10', tier: '1-VIP', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'Builder. Connected to Corey Ford.', createdAt: new Date().toISOString()},
+            {id: 'con-33', name: 'Jacob Goetz', email: 'jacob@linters.com', mobile: '(214) 801-3797', phone: '', address: '', accountId: 'acc-12', tier: '2', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: '', createdAt: new Date().toISOString()},
+            {id: 'con-49', name: 'Maurice Berbel', email: 'maurice.berbel@ey.com', mobile: '(713) 857-4989', phone: '(214) 969-8404', address: '', accountId: 'acc-9', tier: '3', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'EY Dallas.', createdAt: new Date().toISOString()},
+            {id: 'con-50', name: 'Nick Myers', email: 'nick.myers@ey.com', mobile: '(972) 765-6930', phone: '', address: '', accountId: 'acc-9', tier: '4', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'EY Dallas.', createdAt: new Date().toISOString()}
+        ];
+
+        const deals = [
+            {id: 'deal-1', name: 'Meridian Healthcare Roll-up', accountId: 'acc-1', contactIds: [], value: 45, stage: 'Due Diligence', sector: 'Healthcare', probability: 60, closeDate: '2026-06-30', notes: '', createdAt: new Date().toISOString()},
+            {id: 'deal-2', name: 'Bovine Series A Raise', accountId: 'acc-2', contactIds: [], value: 5, stage: 'Pitch', sector: 'TMT', probability: 30, closeDate: '2026-09-30', notes: '', createdAt: new Date().toISOString()},
+            {id: 'deal-3', name: 'Consumer Brand M&A', accountId: 'acc-1', contactIds: [], value: 120, stage: 'Prospect', sector: 'Consumer', probability: 15, closeDate: '2026-12-31', notes: '', createdAt: new Date().toISOString()}
+        ];
+
+        const activities = [
+            {id: 'act-1', type: 'Call', subject: 'Follow up', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-20', status: 'Open', notes: '', createdAt: new Date().toISOString()},
+            {id: 'act-2', type: 'Email', subject: 'Initial outreach', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-25', status: 'Open', notes: '', createdAt: new Date().toISOString()},
+            {id: 'act-3', type: 'Meeting', subject: 'Discovery call', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-22', status: 'Open', notes: '', createdAt: new Date().toISOString()}
+        ];
+
+        return {contacts, accounts, deals, activities, emails: [], referrals: [], dealContacts: []};
+    },
+
+    navigate(view) {
+        this.currentView = view;
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        event.target.classList.add('active');
+        this.render();
+    },
+
+    render() {
+        if (this.isLoading) {
+            document.getElementById('content').innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading data...</p></div>';
+            return;
+        }
+        document.getElementById('breadcrumb').textContent = this.currentView.charAt(0).toUpperCase() + this.currentView.slice(1);
+        switch (this.currentView) {
+            case 'dashboard': this.renderDashboard(); break;
+            case 'contacts': this.renderContacts(); break;
+            case 'accounts': this.renderAccounts(); break;
+            case 'deals': this.renderDeals(); break;
+            case 'activities': this.renderActivities(); break;
+            case 'map': this.renderMap(); break;
+            case 'referrals': this.renderReferrals(); break;
+            case 'settings': this.renderSettings(); break;
+        }
+    },
+
+    renderDashboard() {
+        const html = `
+            <h2>Dashboard</h2>
+            <div class="stat-cards">
+                <div class="stat-card"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
+                <div class="stat-card"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
+                <div class="stat-card"><div class="label">Deals</div><div class="value">${this.data.deals.length}</div></div>
+                <div class="stat-card"><div class="label">Pipeline Value</div><div class="value">$${this.data.deals.reduce((s, d) => s + (d.value || 0), 0).toFixed(0)}M</div></div>
+            </div>
+            <div class="card">
+                <h3>Recent Activities</h3>
+                <div class="timeline">
+                    ${this.data.activities.slice(-5).reverse().map(a => `
+                        <div class="timeline-item ${a.type.toLowerCase()}">
+                            <div class="timeline-date">${new Date(a.createdAt).toLocaleDateString()}</div>
+                            <div class="timeline-title">${a.subject}</div>
+                            <div class="timeline-note">${a.type} - ${a.status}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderContacts() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Contacts</h2>
+                <button class="btn-primary" onclick="app.openContactForm()">New Contact</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th><th>Tier</th><th>LA</th><th>DSLA</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${this.data.contacts.map(c => {
+                                const dsla = this.calculateDSLA(c.la);
+                                const asClass = 'as-' + this.calculateAS(dsla);
+                                return `
+                                    <tr>
+                                        <td><a onclick="app.viewContact('${c.id}')" style="cursor: pointer; color: #3b82f6;">${c.name}</a></td>
+                                        <td>${c.email || ''}</td>
+                                        <td>${c.mobile || ''}</td>
+                                        <td>${this.data.accounts.find(a => a.id === c.accountId)?.name || ''}</td>
+                                        <td><span class="badge tier-${c.tier.replace('-', '').toLowerCase()}">${c.tier}</span></td>
+                                        <td>${c.la ? c.la : ''}</td>
+                                        <td><span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}</td>
+                                        <td>
+                                            <button class="btn-small" onclick="app.editContact('${c.id}')">Edit</button>
+                                            <button class="btn-small" onclick="app.deleteContact('${c.id}')">Delete</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderAccounts() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Accounts</h2>
+                <button class="btn-primary" onclick="app.openAccountForm()">New Account</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Name</th><th>Industry</th><th>Type</th><th>Website</th><th>Address</th><th>Contacts</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${this.data.accounts.map(a => `
+                                <tr>
+                                    <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: #3b82f6;">${a.name}</a></td>
+                                    <td>${a.industry || ''}</td>
+                                    <td>${a.type || ''}</td>
+                                    <td>${a.website || ''}</td>
+                                    <td>${a.address || ''}</td>
+                                    <td>${this.data.contacts.filter(c => c.accountId === a.id).length}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteAccount('${a.id}')">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderDeals() {
+        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation', 'Closed Won', 'Closed Lost'];
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Pipeline</h2>
+                <button class="btn-primary" onclick="app.openDealForm()">New Deal</button>
+            </div>
+            <div class="kanban-board">
+                ${stages.map(stage => `
+                    <div class="kanban-column">
+                        <div class="kanban-header">${stage}</div>
+                        ${this.data.deals.filter(d => d.stage === stage).map(d => `
+                            <div class="kanban-card" onclick="app.editDeal('${d.id}')">
+                                <div class="kanban-card-title">${d.name}</div>
+                                <div class="kanban-card-meta">$${d.value}M | ${d.probability}%</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderActivities() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Activities</h2>
+                <button class="btn-primary" onclick="app.openActivityForm()">New Activity</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Subject</th><th>Type</th><th>Contact</th><th>Account</th><th>Due Date</th><th>Status</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${this.data.activities.map(a => `
+                                <tr>
+                                    <td>${a.subject}</td>
+                                    <td>${a.type}</td>
+                                    <td>${this.data.contacts.find(c => c.id === a.contactId)?.name || ''}</td>
+                                    <td>${this.data.accounts.find(acc => acc.id === a.accountId)?.name || ''}</td>
+                                    <td>${a.dueDate || ''}</td>
+                                    <td>${a.status}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editActivity('${a.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteActivity('${a.id}')">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderMap() {
+        const html = `
+            <div class="map-container">
+                <div class="map-sidebar">
+                    ${this.data.accounts.filter(a => a.address).map(a => `
+                        <div class="map-item" onclick="app.showMapLocation('${a.address}')">
+                            <div class="map-item-name">${a.name}</div>
+                            <div class="map-item-address">${a.address}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="map-main">
+                    <iframe src="about:blank" id="mapFrame"></iframe>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    showMapLocation(address) {
+        const encoded = encodeURIComponent(address);
+        document.getElementById('mapFrame').src = `https://www.google.com/maps/embed/v1/place?key=AIzaSyA&q=${encoded}`;
+    },
+
+    renderReferrals() {
+        const html = `
+            <h2>Referrals</h2>
+            <div class="card">
+                <p class="text-muted">Referral tracking coming soon.</p>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderSettings() {
+        const html = `
+            <h2>Settings</h2>
+            <div class="card">
+                <h3>Data Management</h3>
+                <button class="btn-primary" onclick="app.syncFromSupabase()" style="margin-bottom: 12px;">Sync from Supabase</button>
+                <p class="text-muted" style="margin-top: 16px;">Last sync: Just now</p>
+                <h3 style="margin-top: 24px;">Export Data</h3>
+                <button class="btn-primary" onclick="app.exportJSON()">Export as JSON</button>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    exportJSON() {
+        const json = JSON.stringify(this.data, null, 2);
+        const blob = new Blob([json], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'crm-export.json';
+        a.click();
+    },
+
+    globalSearch(term) {
+        if (!term) {
+            this.render();
+            return;
+        }
+        const lowerTerm = term.toLowerCase();
+        const filtered = {
+            contacts: this.data.contacts.filter(c => c.name.toLowerCase().includes(lowerTerm) || c.email.toLowerCase().includes(lowerTerm)),
+            accounts: this.data.accounts.filter(a => a.name.toLowerCase().includes(lowerTerm)),
+            deals: this.data.deals.filter(d => d.name.toLowerCase().includes(lowerTerm))
+        };
+        const html = `
+            <h2>Search Results for "${term}"</h2>
+            <h3>Contacts (${filtered.contacts.length})</h3>
+            <div class="card">
+                ${filtered.contacts.length ? filtered.contacts.map(c => `
+                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
+                        <a onclick="app.viewContact('${c.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${c.name}</a>
+                        <div style="font-size: 12px; color: #6b7280;">${c.email || ''}</div>
+                    </div>
+                `).join('') : '<p class="text-muted">No contacts found</p>'}
+            </div>
+            <h3>Accounts (${filtered.accounts.length})</h3>
+            <div class="card">
+                ${filtered.accounts.length ? filtered.accounts.map(a => `
+                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
+                        <a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${a.name}</a>
+                        <div style="font-size: 12px; color: #6b7280;">${a.industry || ''}</div>
+                    </div>
+                `).join('') : '<p class="text-muted">No accounts found</p>'}
+            </div>
+            <h3>Deals (${filtered.deals.length})</h3>
+            <div class="card">
+                ${filtered.deals.length ? filtered.deals.map(d => `
+                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
+                        <a onclick="app.editDeal('${d.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${d.name}</a>
+                        <div style="font-size: 12px; color: #6b7280;">$${d.value}M - ${d.stage}</div>
+                    </div>
+                `).join('') : '<p class="text-muted">No deals found</p>'}
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    openContactForm() {
+        document.getElementById('contactId').value = '';
+        document.getElementById('contactName').value = '';
+        document.getElementById('contactEmail').value = '';
+        document.getElementById('contactMobile').value = '';
+        document.getElementById('contactPhone').value = '';
+        document.getElementById('contactAddress').value = '';
+        document.getElementById('contactCompany').value = '';
+        document.getElementById('contactTier').value = '3';
+        document.getElementById('contactLA').value = '';
+        document.getElementById('contactBirthdate').value = '';
+        document.getElementById('contactTitle').value = '';
+        document.getElementById('contactInstagram').value = '';
+        document.getElementById('contactLinkedin').value = '';
+        document.getElementById('contactLiSnP').value = '';
+        document.getElementById('contactNotes').value = '';
+        this.openModal('modalContact');
+    },
+
+    editContact(id) {
+        const contact = this.data.contacts.find(c => c.id === id);
+        if (!contact) return;
+        document.getElementById('contactId').value = contact.id;
+        document.getElementById('contactName').value = contact.name;
+        document.getElementById('contactEmail').value = contact.email || '';
+        document.getElementById('contactMobile').value = contact.mobile || '';
+        document.getElementById('contactPhone').value = contact.phone || '';
+        document.getElementById('contactAddress').value = contact.address || '';
+        document.getElementById('contactCompany').value = contact.accountId || '';
+        document.getElementById('contactTier').value = contact.tier || '3';
+        document.getElementById('contactLA').value = contact.la || '';
+        document.getElementById('contactBirthdate').value = contact.birthdate || '';
+        document.getElementById('contactTitle').value = contact.title || '';
+        document.getElementById('contactInstagram').value = contact.instagram || '';
+        document.getElementById('contactLinkedin').value = contact.linkedin || '';
+        document.getElementById('contactLiSnP').value = contact.liSnP || '';
+        document.getElementById('contactNotes').value = contact.notes || '';
+        this.openModal('modalContact');
+    },
+
+    viewContact(id) {
+        this.currentRecord = this.data.contacts.find(c => c.id === id);
+        if (!this.currentRecord) return;
+        this.editContact(id);
+    },
+
+    openAccountForm() {
+        document.getElementById('accountId').value = '';
+        document.getElementById('accountName').value = '';
+        document.getElementById('accountIndustry').value = '';
+        document.getElementById('accountWebsite').value = '';
+        document.getElementById('accountAddress').value = '';
+        document.getElementById('accountType').value = 'Prospect';
+        document.getElementById('accountNotes').value = '';
+        this.openModal('modalAccount');
+    },
+
+    editAccount(id) {
+        const account = this.data.accounts.find(a => a.id === id);
+        if (!account) return;
+        document.getElementById('accountId').value = account.id;
+        document.getElementById('accountName').value = account.name;
+        document.getElementById('accountIndustry').value = account.industry || '';
+        document.getElementById('accountWebsite').value = account.website || '';
+        document.getElementById('accountAddress').value = account.address || '';
+        document.getElementById('accountType').value = account.type || 'Prospect';
+        document.getElementById('accountNotes').value = account.notes || '';
+        this.openModal('modalAccount');
+    },
+
+    viewAccount(id) {
+        this.currentRecord = this.data.accounts.find(a => a.id === id);
+        if (!this.currentRecord) return;
+        this.editAccount(id);
+    },
+
+    openDealForm() {
+        document.getElementById('dealId').value = '';
+        document.getElementById('dealName').value = '';
+        document.getElementById('dealAccount').value = '';
+        document.getElementById('dealValue').value = '';
+        document.getElementById('dealStage').value = 'Prospect';
+        document.getElementById('dealSector').value = '';
+        document.getElementById('dealProbability').value = '';
+        document.getElementById('dealCloseDate').value = '';
+        document.getElementById('dealNotes').value = '';
+        this.openModal('modalDeal');
+    },
+
+    editDeal(id) {
+        const deal = this.data.deals.find(d => d.id === id);
+        if (!deal) return;
+        document.getElementById('dealId').value = deal.id;
+        document.getElementById('dealName').value = deal.name;
+        document.getElementById('dealAccount').value = deal.accountId || '';
+        document.getElementById('dealValue').value = deal.value || '';
+        document.getElementById('dealStage').value = deal.stage || 'Prospect';
+        document.getElementById('dealSector').value = deal.sector || '';
+        document.getElementById('dealProbability').value = deal.probability || '';
+        document.getElementById('dealCloseDate').value = deal.closeDate || '';
+        document.getElementById('dealNotes').value = deal.notes || '';
+        this.openModal('modalDeal');
+    },
+
+    openActivityForm() {
+        document.getElementById('activityId').value = '';
+        document.getElementById('activityType').value = 'Call';
+        document.getElementById('activitySubject').value = '';
+        document.getElementById('activityContact').value = '';
+        document.getElementById('activityAccount').value = '';
+        document.getElementById('activityDeal').value = '';
+        document.getElementById('activityDueDate').value = '';
+        document.getElementById('activityStatus').value = 'Open';
+        document.getElementById('activityNotes').value = '';
+        this.openModal('modalActivity');
+    },
+
+    editActivity(id) {
+        const activity = this.data.activities.find(a => a.id === id);
+        if (!activity) return;
+        document.getElementById('activityId').value = activity.id;
+        document.getElementById('activityType').value = activity.type || 'Call';
+        document.getElementById('activitySubject').value = activity.subject;
+        document.getElementById('activityContact').value = activity.contactId || '';
+        document.getElementById('activityAccount').value = activity.accountId || '';
+        document.getElementById('activityDeal').value = activity.dealId || '';
+        document.getElementById('activityDueDate').value = activity.dueDate || '';
+        document.getElementById('activityStatus').value = activity.status || 'Open';
+        document.getElementById('activityNotes').value = activity.notes || '';
+        this.openModal('modalActivity');
+    },
+
+    updateSelectOptions() {
+        const accountSelect = document.getElementById('contactCompany');
+        const dealAccountSelect = document.getElementById('dealAccount');
+        const activityContactSelect = document.getElementById('activityContact');
+        const activityAccountSelect = document.getElementById('activityAccount');
+        const activityDealSelect = document.getElementById('activityDeal');
+
+        accountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        dealAccountSelect.innerHTML = this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+    },
+
+    openModal(id) {
+        document.getElementById(id).classList.add('show');
+    },
+
+    closeModal(id) {
+        document.getElementById(id).classList.remove('show');
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => app.init());
+    </script>
+</body>
+</html>
