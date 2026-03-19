@@ -781,19 +781,28 @@ const app = {
     },
 
     renderMap() {
+        const contactsWithAddr = this.data.contacts.filter(c => c.address);
+        const accountsWithAddr = this.data.accounts.filter(a => a.address);
         const html = `
-            <div class="map-container">
-                <div class="map-sidebar">
-                    ${this.data.accounts.filter(a => a.address).map(a => `
-                        <div class="map-item" onclick="app.showMapLocation('${a.address}')">
-                            <div class="map-item-name">${a.name}</div>
-                            <div class="map-item-address">${a.address}</div>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="map-main">
-                    <iframe src="about:blank" id="mapFrame"></iframe>
-                </div>
+            <h2>Map View</h2>
+            <p style="color: #6b7280; margin-bottom: 16px;">Click any entry to open in Google Maps (logged into your account).</p>
+            <h3>Contacts (${contactsWithAddr.length})</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px;">
+                ${contactsWithAddr.map(c => `
+                    <div class="card" style="cursor: pointer; margin-bottom: 0;" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}', '_blank')">
+                        <div style="font-weight: 600; margin-bottom: 4px;">${c.name}</div>
+                        <div style="font-size: 12px; color: #6b7280;">${c.address}</div>
+                    </div>
+                `).join('')}
+            </div>
+            <h3>Accounts (${accountsWithAddr.length})</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+                ${accountsWithAddr.map(a => `
+                    <div class="card" style="cursor: pointer; margin-bottom: 0;" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.address)}', '_blank')">
+                        <div style="font-weight: 600; margin-bottom: 4px;">${a.name}</div>
+                        <div style="font-size: 12px; color: #6b7280;">${a.address}</div>
+                    </div>
+                `).join('')}
             </div>
         `;
         document.getElementById('content').innerHTML = html;
@@ -801,7 +810,7 @@ const app = {
 
     showMapLocation(address) {
         const encoded = encodeURIComponent(address);
-        document.getElementById('mapFrame').src = `https://www.google.com/maps/embed/v1/place?key=AIzaSyA&q=${encoded}`;
+        window.open(`https://www.google.com/maps/search/?api=1&query=${encoded}`, '_blank');
     },
 
     renderReferrals() {
