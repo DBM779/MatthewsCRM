@@ -242,7 +242,7 @@
     <script>
 const SUPABASE_URL = 'https://bnkuieueimlyjovjilqi.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Xj5u9741yzSNpZ7HXcY_iw_5JVrQmUN';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const app = {
     currentView: 'dashboard',
@@ -261,13 +261,13 @@ const app = {
         try {
             this.updateStatus('Syncing...', false);
             const [contactsRes, accountsRes, dealsRes, activitiesRes, emailsRes, referralsRes, dealContactsRes] = await Promise.all([
-                supabase.from('contacts').select('*'),
-                supabase.from('accounts').select('*'),
-                supabase.from('deals').select('*'),
-                supabase.from('activities').select('*'),
-                supabase.from('emails').select('*'),
-                supabase.from('referrals').select('*'),
-                supabase.from('deal_contacts').select('*')
+                sb.from('contacts').select('*'),
+                sb.from('accounts').select('*'),
+                sb.from('deals').select('*'),
+                sb.from('activities').select('*'),
+                sb.from('emails').select('*'),
+                sb.from('referrals').select('*'),
+                sb.from('deal_contacts').select('*')
             ]);
 
             if (contactsRes.data && contactsRes.data.length > 0) {
@@ -295,10 +295,10 @@ const app = {
         const seedData = this.getSeedData();
         try {
             const results = await Promise.all([
-                supabase.from('accounts').insert(seedData.accounts.map(a => this.appToDb('account', a))),
-                supabase.from('contacts').insert(seedData.contacts.map(c => this.appToDb('contact', c))),
-                supabase.from('deals').insert(seedData.deals.map(d => this.appToDb('deal', d))),
-                supabase.from('activities').insert(seedData.activities.map(a => this.appToDb('activity', a)))
+                sb.from('accounts').insert(seedData.accounts.map(a => this.appToDb('account', a))),
+                sb.from('contacts').insert(seedData.contacts.map(c => this.appToDb('contact', c))),
+                sb.from('deals').insert(seedData.deals.map(d => this.appToDb('deal', d))),
+                sb.from('activities').insert(seedData.activities.map(a => this.appToDb('activity', a)))
             ]);
             this.data = seedData;
         } catch (err) {
@@ -379,12 +379,12 @@ const app = {
 
         try {
             if (id) {
-                await supabase.from('contacts').update(this.appToDb('contact', contact)).eq('id', id);
+                await sb.from('contacts').update(this.appToDb('contact', contact)).eq('id', id);
                 const idx = this.data.contacts.findIndex(c => c.id === id);
                 if (idx >= 0) this.data.contacts[idx] = {...this.data.contacts[idx], ...contact};
             } else {
                 const dbContact = this.appToDb('contact', {...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()});
-                const result = await supabase.from('contacts').insert([dbContact]);
+                const result = await sb.from('contacts').insert([dbContact]);
                 if (result.data && result.data.length) {
                     this.data.contacts.push(this.dbToApp('contact', result.data[0]));
                 }
@@ -410,12 +410,12 @@ const app = {
 
         try {
             if (id) {
-                await supabase.from('accounts').update(this.appToDb('account', account)).eq('id', id);
+                await sb.from('accounts').update(this.appToDb('account', account)).eq('id', id);
                 const idx = this.data.accounts.findIndex(a => a.id === id);
                 if (idx >= 0) this.data.accounts[idx] = {...this.data.accounts[idx], ...account};
             } else {
                 const dbAccount = this.appToDb('account', {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()});
-                const result = await supabase.from('accounts').insert([dbAccount]);
+                const result = await sb.from('accounts').insert([dbAccount]);
                 if (result.data && result.data.length) {
                     this.data.accounts.push(this.dbToApp('account', result.data[0]));
                 }
@@ -443,12 +443,12 @@ const app = {
 
         try {
             if (id) {
-                await supabase.from('deals').update(this.appToDb('deal', deal)).eq('id', id);
+                await sb.from('deals').update(this.appToDb('deal', deal)).eq('id', id);
                 const idx = this.data.deals.findIndex(d => d.id === id);
                 if (idx >= 0) this.data.deals[idx] = {...this.data.deals[idx], ...deal};
             } else {
                 const dbDeal = this.appToDb('deal', {...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()});
-                const result = await supabase.from('deals').insert([dbDeal]);
+                const result = await sb.from('deals').insert([dbDeal]);
                 if (result.data && result.data.length) {
                     this.data.deals.push(this.dbToApp('deal', result.data[0]));
                 }
@@ -476,12 +476,12 @@ const app = {
 
         try {
             if (id) {
-                await supabase.from('activities').update(this.appToDb('activity', activity)).eq('id', id);
+                await sb.from('activities').update(this.appToDb('activity', activity)).eq('id', id);
                 const idx = this.data.activities.findIndex(a => a.id === id);
                 if (idx >= 0) this.data.activities[idx] = {...this.data.activities[idx], ...activity};
             } else {
                 const dbActivity = this.appToDb('activity', {...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()});
-                const result = await supabase.from('activities').insert([dbActivity]);
+                const result = await sb.from('activities').insert([dbActivity]);
                 if (result.data && result.data.length) {
                     this.data.activities.push(this.dbToApp('activity', result.data[0]));
                 }
@@ -496,7 +496,7 @@ const app = {
     async deleteContact(id) {
         if (!confirm('Delete this contact?')) return;
         try {
-            await supabase.from('contacts').delete().eq('id', id);
+            await sb.from('contacts').delete().eq('id', id);
             this.data.contacts = this.data.contacts.filter(c => c.id !== id);
             this.render();
         } catch (err) {
@@ -507,7 +507,7 @@ const app = {
     async deleteAccount(id) {
         if (!confirm('Delete this account?')) return;
         try {
-            await supabase.from('accounts').delete().eq('id', id);
+            await sb.from('accounts').delete().eq('id', id);
             this.data.accounts = this.data.accounts.filter(a => a.id !== id);
             this.render();
         } catch (err) {
@@ -518,7 +518,7 @@ const app = {
     async deleteDeal(id) {
         if (!confirm('Delete this deal?')) return;
         try {
-            await supabase.from('deals').delete().eq('id', id);
+            await sb.from('deals').delete().eq('id', id);
             this.data.deals = this.data.deals.filter(d => d.id !== id);
             this.render();
         } catch (err) {
@@ -529,7 +529,7 @@ const app = {
     async deleteActivity(id) {
         if (!confirm('Delete this activity?')) return;
         try {
-            await supabase.from('activities').delete().eq('id', id);
+            await sb.from('activities').delete().eq('id', id);
             this.data.activities = this.data.activities.filter(a => a.id !== id);
             this.render();
         } catch (err) {
