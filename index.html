@@ -131,6 +131,58 @@
         .text-muted {color: #6b7280;}
         h2 {margin: 0 0 16px 0; font-size: 20px;}
         h3 {margin: 0 0 12px 0; font-size: 16px;}
+        /* Detail views */
+        .detail-tabs {display: flex; gap: 0; border-bottom: 2px solid #e5e7eb; margin-bottom: 16px;}
+        .detail-tab {padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #6b7280; font-weight: 500; font-size: 13px; transition: all 0.2s;}
+        .detail-tab:hover {color: #374151;}
+        .detail-tab.active {border-bottom-color: #3b82f6; color: #3b82f6;}
+        .detail-back {display: inline-flex; align-items: center; gap: 4px; color: #3b82f6; cursor: pointer; font-size: 13px; margin-bottom: 12px;}
+        .detail-back:hover {text-decoration: underline;}
+        .detail-field {margin-bottom: 14px;}
+        .detail-field-label {font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 2px;}
+        .detail-field-value {font-size: 14px; color: #1f2937;}
+        .detail-field-value a {color: #3b82f6; text-decoration: none;}
+        .detail-field-value a:hover {text-decoration: underline;}
+        /* Task reminders */
+        .task-overdue {background: #fef2f2 !important;}
+        .task-overdue td {color: #991b1b;}
+        .task-today {background: #fffbeb !important;}
+        .task-badge {display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px;}
+        .task-badge-overdue {background: #fee2e2; color: #991b1b;}
+        .task-badge-today {background: #fef3c7; color: #92400e;}
+        .task-badge-upcoming {background: #dbeafe; color: #1e40af;}
+        /* Dashboard enhancements */
+        .dash-grid {display: grid; grid-template-columns: 1fr 1fr; gap: 16px;}
+        .dash-section {background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px;}
+        .dash-section h3 {margin: 0 0 12px 0;}
+        .dash-task-item {display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px;}
+        .dash-task-item:last-child {border-bottom: none;}
+        .birthday-item {display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px;}
+        .birthday-item:last-child {border-bottom: none;}
+        /* Charts */
+        .chart-bar-container {display: flex; align-items: flex-end; gap: 8px; height: 160px; padding-top: 8px;}
+        .chart-bar-wrapper {flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%;}
+        .chart-bar {width: 100%; border-radius: 4px 4px 0 0; transition: height 0.3s; min-height: 2px;}
+        .chart-bar-label {font-size: 10px; color: #6b7280; margin-top: 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;}
+        .chart-bar-value {font-size: 11px; font-weight: 600; margin-bottom: 4px;}
+        .chart-donut {position: relative; width: 120px; height: 120px; margin: 0 auto;}
+        .chart-legend {display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px;}
+        .chart-legend-item {display: flex; align-items: center; gap: 4px; font-size: 11px;}
+        .chart-legend-dot {width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;}
+        /* Referrals */
+        .ref-status-active {background: #dcfce7; color: #166534;}
+        .ref-status-pending {background: #fef3c7; color: #92400e;}
+        .ref-status-closed {background: #f3f4f6; color: #374151;}
+        /* CSV import */
+        .csv-drop-zone {border: 2px dashed #d1d5db; border-radius: 8px; padding: 40px; text-align: center; color: #6b7280; cursor: pointer; transition: all 0.2s;}
+        .csv-drop-zone:hover {border-color: #3b82f6; color: #3b82f6;}
+        .csv-drop-zone.dragover {border-color: #3b82f6; background: #eff6ff;}
+        .csv-preview-table {max-height: 300px; overflow: auto; margin-top: 12px;}
+        @media (max-width: 768px) {
+            .dash-grid {grid-template-columns: 1fr;}
+            .detail-container {flex-direction: column;}
+            .detail-sidebar {width: 100%; position: static; max-height: none;}
+        }
         /* Mobile hamburger */
         .mobile-header {display: none; background: #1e1b4b; color: #fff; padding: 12px 16px; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100;}
         .mobile-header h1 {margin: 0; font-size: 16px; font-weight: 600;}
@@ -180,7 +232,9 @@
             <div class="nav-item" onclick="app.navigate('deals')">Pipeline</div>
             <div class="nav-item" onclick="app.navigate('activities')">Activities</div>
             <div class="nav-item" onclick="app.navigate('map')">Map View</div>
+            <div class="nav-item" onclick="app.navigate('emails')">Emails</div>
             <div class="nav-item" onclick="app.navigate('referrals')">Referrals</div>
+            <div class="nav-item" onclick="app.navigate('reports')">Reports</div>
             <div class="nav-item" onclick="app.navigate('settings')">Settings</div>
         </div>
         <div class="sidebar-footer">
@@ -276,6 +330,58 @@
                 <div class="form-group"><label>Notes</label><textarea id="activityNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalActivity')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalReferral">
+        <div class="modal-content">
+            <div class="modal-header">Referral</div>
+            <form id="formReferral">
+                <input type="hidden" id="referralId">
+                <div class="form-group"><label>From Contact *</label><select id="referralFrom" required></select></div>
+                <div class="form-group"><label>To Contact *</label><select id="referralTo" required></select></div>
+                <div class="form-group"><label>Type</label><select id="referralType"><option value="Business">Business</option><option value="Personal">Personal</option><option value="Recruiting">Recruiting</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Status</label><select id="referralStatus"><option value="Pending">Pending</option><option value="Active">Active</option><option value="Closed">Closed</option></select></div>
+                <div class="form-group"><label>Date</label><input type="date" id="referralDate"></div>
+                <div class="form-group"><label>Notes</label><textarea id="referralNotes"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalReferral')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalEmail">
+        <div class="modal-content">
+            <div class="modal-header">Log Email</div>
+            <form id="formEmail">
+                <input type="hidden" id="emailId">
+                <div class="form-group"><label>Subject *</label><input type="text" id="emailSubject" required></div>
+                <div class="form-group"><label>From</label><input type="text" id="emailFrom"></div>
+                <div class="form-group"><label>To</label><input type="text" id="emailTo"></div>
+                <div class="form-group"><label>Contact</label><select id="emailContact"></select></div>
+                <div class="form-group"><label>Deal</label><select id="emailDeal"></select></div>
+                <div class="form-group"><label>Date</label><input type="date" id="emailDate"></div>
+                <div class="form-group"><label>Body</label><textarea id="emailBody" style="min-height: 120px;"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalEmail')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalCsvImport">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">Import CSV</div>
+            <div class="form-group">
+                <label>Import into</label>
+                <select id="csvTarget"><option value="contacts">Contacts</option><option value="accounts">Accounts</option><option value="deals">Deals</option></select>
+            </div>
+            <div class="csv-drop-zone" id="csvDropZone" onclick="document.getElementById('csvFile').click()">
+                Click to select a CSV file or drag & drop here
+                <input type="file" id="csvFile" accept=".csv" style="display:none;" onchange="app.handleCsvFile(this.files[0])">
+            </div>
+            <div id="csvPreview"></div>
+            <div class="modal-footer">
+                <button type="button" onclick="app.closeModal('modalCsvImport')">Cancel</button>
+                <button type="button" class="btn-primary" id="csvImportBtn" style="display:none;" onclick="app.executeCsvImport()">Import</button>
+            </div>
         </div>
     </div>
 
@@ -583,6 +689,12 @@ const app = {
         document.getElementById('formAccount').addEventListener('submit', (e) => this.saveAccount(e));
         document.getElementById('formDeal').addEventListener('submit', (e) => this.saveDeal(e));
         document.getElementById('formActivity').addEventListener('submit', (e) => this.saveActivity(e));
+        document.getElementById('formReferral').addEventListener('submit', (e) => this.saveReferral(e));
+        document.getElementById('formEmail').addEventListener('submit', (e) => this.saveEmail(e));
+        const dropZone = document.getElementById('csvDropZone');
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) this.handleCsvFile(e.dataTransfer.files[0]); });
     },
 
     calculateDSLA(laStr) {
@@ -653,34 +765,127 @@ const app = {
         switch (this.currentView) {
             case 'dashboard': this.renderDashboard(); break;
             case 'contacts': this.renderContacts(); break;
+            case 'contactDetail': this.renderContactDetail(); break;
             case 'accounts': this.renderAccounts(); break;
+            case 'accountDetail': this.renderAccountDetail(); break;
             case 'deals': this.renderDeals(); break;
             case 'activities': this.renderActivities(); break;
             case 'map': this.renderMap(); break;
+            case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
+            case 'reports': this.renderReports(); break;
             case 'settings': this.renderSettings(); break;
         }
     },
 
     renderDashboard() {
+        const today = new Date(); today.setHours(0,0,0,0);
+        const todayStr = today.toISOString().split('T')[0];
+        const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+        const in7Str = in7.toISOString().split('T')[0];
+        const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
+        const in30Str = in30.toISOString().split('T')[0];
+
+        const openActs = this.data.activities.filter(a => a.status === 'Open');
+        const overdue = openActs.filter(a => a.dueDate && a.dueDate < todayStr);
+        const dueToday = openActs.filter(a => a.dueDate === todayStr);
+        const upcoming = openActs.filter(a => a.dueDate > todayStr && a.dueDate <= in7Str);
+
+        const activeDeals = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const wonDeals = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lostDeals = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const pipelineVal = activeDeals.reduce((s, d) => s + (d.value || 0), 0);
+        const wonVal = wonDeals.reduce((s, d) => s + (d.value || 0), 0);
+
+        // Upcoming birthdays (next 30 days)
+        const birthdays = this.data.contacts.filter(c => {
+            if (!c.birthdate) return false;
+            const bd = new Date(c.birthdate);
+            const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+            if (thisYear < today) thisYear.setFullYear(thisYear.getFullYear() + 1);
+            return thisYear <= in30;
+        }).map(c => {
+            const bd = new Date(c.birthdate);
+            const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+            if (thisYear < today) thisYear.setFullYear(thisYear.getFullYear() + 1);
+            const daysAway = Math.ceil((thisYear - today) / (1000*60*60*24));
+            return {...c, nextBirthday: thisYear, daysAway};
+        }).sort((a, b) => a.daysAway - b.daysAway);
+
+        // Pipeline by stage
+        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation'];
+        const stageColors = ['#94a3b8', '#3b82f6', '#8b5cf6', '#f59e0b', '#f97316'];
+        const stageCounts = stages.map(s => this.data.deals.filter(d => d.stage === s).length);
+        const maxCount = Math.max(...stageCounts, 1);
+
         const html = `
             <h2>Dashboard</h2>
             <div class="stat-cards">
                 <div class="stat-card"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
-                <div class="stat-card"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
-                <div class="stat-card"><div class="label">Deals</div><div class="value">${this.data.deals.length}</div></div>
-                <div class="stat-card"><div class="label">Pipeline Value</div><div class="value">$${this.data.deals.reduce((s, d) => s + (d.value || 0), 0).toFixed(0)}M</div></div>
+                <div class="stat-card"><div class="label">Active Deals</div><div class="value">${activeDeals.length}</div></div>
+                <div class="stat-card"><div class="label">Pipeline Value</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
+                <div class="stat-card"><div class="label">Won Value</div><div class="value">$${wonVal.toFixed(0)}M</div></div>
+                <div class="stat-card"><div class="label">Overdue Tasks</div><div class="value" style="color:${overdue.length ? '#ef4444' : '#22c55e'}">${overdue.length}</div></div>
+                <div class="stat-card"><div class="label">Win Rate</div><div class="value">${(wonDeals.length + lostDeals.length) > 0 ? Math.round(wonDeals.length / (wonDeals.length + lostDeals.length) * 100) : 0}%</div></div>
             </div>
-            <div class="card">
-                <h3>Recent Activities</h3>
-                <div class="timeline">
-                    ${this.data.activities.slice(-5).reverse().map(a => `
-                        <div class="timeline-item ${a.type.toLowerCase()}">
-                            <div class="timeline-date">${new Date(a.createdAt).toLocaleDateString()}</div>
-                            <div class="timeline-title">${a.subject}</div>
-                            <div class="timeline-note">${a.type} - ${a.status}</div>
+            <div class="dash-grid">
+                <div class="dash-section">
+                    <h3>Pipeline by Stage</h3>
+                    <div class="chart-bar-container">
+                        ${stages.map((s, i) => `
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar-value">${stageCounts[i]}</div>
+                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
+                                    <div class="chart-bar" style="background:${stageColors[i]}; height:${Math.max(stageCounts[i] / maxCount * 100, 5)}%; width:100%;"></div>
+                                </div>
+                                <div class="chart-bar-label">${s}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="dash-section">
+                    <h3 style="color:${overdue.length ? '#ef4444' : '#374151'}">Overdue Tasks (${overdue.length})</h3>
+                    ${overdue.length ? overdue.slice(0, 5).map(a => `
+                        <div class="dash-task-item">
+                            <div><strong>${a.subject}</strong><br><span style="font-size:11px; color:#ef4444;">Due ${a.dueDate}</span></div>
+                            <span class="task-badge task-badge-overdue">${a.type}</span>
                         </div>
-                    `).join('')}
+                    `).join('') : '<p class="text-muted" style="font-size:13px;">No overdue tasks</p>'}
+                    <h3 style="margin-top: 16px;">Due Today (${dueToday.length})</h3>
+                    ${dueToday.length ? dueToday.map(a => `
+                        <div class="dash-task-item">
+                            <div><strong>${a.subject}</strong></div>
+                            <span class="task-badge task-badge-today">${a.type}</span>
+                        </div>
+                    `).join('') : '<p class="text-muted" style="font-size:13px;">Nothing due today</p>'}
+                    <h3 style="margin-top: 16px;">Upcoming This Week (${upcoming.length})</h3>
+                    ${upcoming.length ? upcoming.slice(0, 5).map(a => `
+                        <div class="dash-task-item">
+                            <div><strong>${a.subject}</strong><br><span style="font-size:11px; color:#6b7280;">Due ${a.dueDate}</span></div>
+                            <span class="task-badge task-badge-upcoming">${a.type}</span>
+                        </div>
+                    `).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming tasks</p>'}
+                </div>
+                <div class="dash-section">
+                    <h3>Upcoming Birthdays</h3>
+                    ${birthdays.length ? birthdays.map(c => `
+                        <div class="birthday-item">
+                            <div><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:#3b82f6; font-weight:500;">${c.name}</a><br><span style="font-size:11px; color:#6b7280;">${new Date(c.birthdate).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span></div>
+                            <span style="font-size:12px; color:#6b7280;">${c.daysAway === 0 ? 'Today!' : c.daysAway + 'd away'}</span>
+                        </div>
+                    `).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming birthdays</p>'}
+                </div>
+                <div class="dash-section">
+                    <h3>Recent Activities</h3>
+                    <div class="timeline">
+                        ${this.data.activities.slice(-6).reverse().map(a => `
+                            <div class="timeline-item ${a.type.toLowerCase()}">
+                                <div class="timeline-date">${a.dueDate || new Date(a.createdAt).toLocaleDateString()}</div>
+                                <div class="timeline-title">${a.subject}</div>
+                                <div class="timeline-note">${a.type} - ${a.status}</div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             </div>
         `;
@@ -787,6 +992,12 @@ const app = {
     },
 
     renderActivities() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const sorted = [...this.data.activities].sort((a, b) => {
+            if (a.status === 'Open' && b.status !== 'Open') return -1;
+            if (a.status !== 'Open' && b.status === 'Open') return 1;
+            return (a.dueDate || 'z').localeCompare(b.dueDate || 'z');
+        });
         const html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h2 style="margin: 0;">Activities</h2>
@@ -799,9 +1010,13 @@ const app = {
                             <tr><th>Subject</th><th>Type</th><th>Contact</th><th>Account</th><th>Due Date</th><th>Status</th><th>Actions</th></tr>
                         </thead>
                         <tbody>
-                            ${this.data.activities.map(a => `
-                                <tr>
-                                    <td>${a.subject}</td>
+                            ${sorted.map(a => {
+                                const isOverdue = a.status === 'Open' && a.dueDate && a.dueDate < todayStr;
+                                const isToday = a.status === 'Open' && a.dueDate === todayStr;
+                                const rowClass = isOverdue ? 'task-overdue' : isToday ? 'task-today' : '';
+                                return `
+                                <tr class="${rowClass}">
+                                    <td>${a.subject}${isOverdue ? '<span class="task-badge task-badge-overdue">OVERDUE</span>' : ''}${isToday ? '<span class="task-badge task-badge-today">TODAY</span>' : ''}</td>
                                     <td>${a.type}</td>
                                     <td>${this.data.contacts.find(c => c.id === a.contactId)?.name || ''}</td>
                                     <td>${this.data.accounts.find(acc => acc.id === a.accountId)?.name || ''}</td>
@@ -812,7 +1027,7 @@ const app = {
                                         <button class="btn-small" onclick="app.deleteActivity('${a.id}')">Delete</button>
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `;}).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -856,9 +1071,294 @@ const app = {
 
     renderReferrals() {
         const html = `
-            <h2>Referrals</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Referrals</h2>
+                <button class="btn-primary" onclick="app.openReferralForm()">New Referral</button>
+            </div>
             <div class="card">
-                <p class="text-muted">Referral tracking coming soon.</p>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>From</th><th>To</th><th>Type</th><th>Status</th><th>Date</th><th>Notes</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${this.data.referrals.length ? this.data.referrals.map(r => {
+                                const from = this.data.contacts.find(c => c.id === r.from_id);
+                                const to = this.data.contacts.find(c => c.id === r.to_id);
+                                return `<tr>
+                                    <td>${from ? `<a onclick="app.viewContact('${from.id}')" style="cursor:pointer; color:#3b82f6;">${from.name}</a>` : r.from_id || ''}</td>
+                                    <td>${to ? `<a onclick="app.viewContact('${to.id}')" style="cursor:pointer; color:#3b82f6;">${to.name}</a>` : r.to_id || ''}</td>
+                                    <td>${r.type || ''}</td>
+                                    <td><span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status || 'Pending'}</span></td>
+                                    <td>${r.date || ''}</td>
+                                    <td>${r.notes || ''}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editReferral('${r.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteReferral('${r.id}')">Delete</button>
+                                    </td>
+                                </tr>`;
+                            }).join('') : '<tr><td colspan="7" class="text-muted">No referrals yet. Click "New Referral" to create one.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    openReferralForm() {
+        document.getElementById('referralId').value = '';
+        document.getElementById('referralFrom').value = '';
+        document.getElementById('referralTo').value = '';
+        document.getElementById('referralType').value = 'Business';
+        document.getElementById('referralStatus').value = 'Pending';
+        document.getElementById('referralDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('referralNotes').value = '';
+        this.updateReferralSelects();
+        this.openModal('modalReferral');
+    },
+
+    editReferral(id) {
+        const r = this.data.referrals.find(x => x.id === id);
+        if (!r) return;
+        this.updateReferralSelects();
+        document.getElementById('referralId').value = r.id;
+        document.getElementById('referralFrom').value = r.from_id || '';
+        document.getElementById('referralTo').value = r.to_id || '';
+        document.getElementById('referralType').value = r.type || 'Business';
+        document.getElementById('referralStatus').value = r.status || 'Pending';
+        document.getElementById('referralDate').value = r.date || '';
+        document.getElementById('referralNotes').value = r.notes || '';
+        this.openModal('modalReferral');
+    },
+
+    updateReferralSelects() {
+        const opts = '<option value="">Select...</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        document.getElementById('referralFrom').innerHTML = opts;
+        document.getElementById('referralTo').innerHTML = opts;
+    },
+
+    async saveReferral(e) {
+        e.preventDefault();
+        const id = document.getElementById('referralId').value;
+        const referral = {
+            from_id: document.getElementById('referralFrom').value,
+            to_id: document.getElementById('referralTo').value,
+            type: document.getElementById('referralType').value,
+            status: document.getElementById('referralStatus').value,
+            date: document.getElementById('referralDate').value || null,
+            notes: document.getElementById('referralNotes').value || null
+        };
+        try {
+            if (id) {
+                await sb.from('referrals').update(referral).eq('id', id);
+                const idx = this.data.referrals.findIndex(r => r.id === id);
+                if (idx >= 0) this.data.referrals[idx] = {...this.data.referrals[idx], ...referral};
+            } else {
+                const newRef = {...referral, id: 'ref-' + Date.now(), created_at: new Date().toISOString()};
+                const result = await sb.from('referrals').insert([newRef]);
+                this.data.referrals.push(result.data && result.data.length ? result.data[0] : newRef);
+            }
+            this.closeModal('modalReferral');
+            this.render();
+        } catch (err) { alert('Error saving referral: ' + err.message); }
+    },
+
+    async deleteReferral(id) {
+        if (!confirm('Delete this referral?')) return;
+        try {
+            await sb.from('referrals').delete().eq('id', id);
+            this.data.referrals = this.data.referrals.filter(r => r.id !== id);
+            this.render();
+        } catch (err) { alert('Error: ' + err.message); }
+    },
+
+    renderEmails() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Emails</h2>
+                <button class="btn-primary" onclick="app.openEmailForm()">Log Email</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th><th>Contact</th><th>Deal</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${this.data.emails.length ? this.data.emails.sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(e => {
+                                const contact = this.data.contacts.find(c => c.id === e.contact_id);
+                                const deal = this.data.deals.find(d => d.id === e.deal_id);
+                                return `<tr>
+                                    <td>${e.date || ''}</td>
+                                    <td>${e.subject || ''}</td>
+                                    <td>${e.from_addr || ''}</td>
+                                    <td>${e.to_addr || ''}</td>
+                                    <td>${contact ? `<a onclick="app.viewContact('${contact.id}')" style="cursor:pointer; color:#3b82f6;">${contact.name}</a>` : ''}</td>
+                                    <td>${deal ? deal.name : ''}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editEmail('${e.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteEmail('${e.id}')">Delete</button>
+                                    </td>
+                                </tr>`;
+                            }).join('') : '<tr><td colspan="7" class="text-muted">No emails logged yet. Click "Log Email" to add one.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    openEmailForm() {
+        document.getElementById('emailId').value = '';
+        document.getElementById('emailSubject').value = '';
+        document.getElementById('emailFrom').value = '';
+        document.getElementById('emailTo').value = '';
+        document.getElementById('emailContact').value = '';
+        document.getElementById('emailDeal').value = '';
+        document.getElementById('emailDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('emailBody').value = '';
+        this.updateEmailSelects();
+        this.openModal('modalEmail');
+    },
+
+    editEmail(id) {
+        const e = this.data.emails.find(x => x.id === id);
+        if (!e) return;
+        this.updateEmailSelects();
+        document.getElementById('emailId').value = e.id;
+        document.getElementById('emailSubject').value = e.subject || '';
+        document.getElementById('emailFrom').value = e.from_addr || '';
+        document.getElementById('emailTo').value = e.to_addr || '';
+        document.getElementById('emailContact').value = e.contact_id || '';
+        document.getElementById('emailDeal').value = e.deal_id || '';
+        document.getElementById('emailDate').value = e.date || '';
+        document.getElementById('emailBody').value = e.body || '';
+        this.openModal('modalEmail');
+    },
+
+    updateEmailSelects() {
+        document.getElementById('emailContact').innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        document.getElementById('emailDeal').innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+    },
+
+    async saveEmail(e) {
+        e.preventDefault();
+        const id = document.getElementById('emailId').value;
+        const email = {
+            subject: document.getElementById('emailSubject').value,
+            from_addr: document.getElementById('emailFrom').value || null,
+            to_addr: document.getElementById('emailTo').value || null,
+            contact_id: document.getElementById('emailContact').value || null,
+            deal_id: document.getElementById('emailDeal').value || null,
+            date: document.getElementById('emailDate').value || null,
+            body: document.getElementById('emailBody').value || null
+        };
+        try {
+            if (id) {
+                await sb.from('emails').update(email).eq('id', id);
+                const idx = this.data.emails.findIndex(x => x.id === id);
+                if (idx >= 0) this.data.emails[idx] = {...this.data.emails[idx], ...email};
+            } else {
+                const newEmail = {...email, id: 'eml-' + Date.now(), created_at: new Date().toISOString()};
+                const result = await sb.from('emails').insert([newEmail]);
+                this.data.emails.push(result.data && result.data.length ? result.data[0] : newEmail);
+            }
+            this.closeModal('modalEmail');
+            this.render();
+        } catch (err) { alert('Error saving email: ' + err.message); }
+    },
+
+    async deleteEmail(id) {
+        if (!confirm('Delete this email record?')) return;
+        try {
+            await sb.from('emails').delete().eq('id', id);
+            this.data.emails = this.data.emails.filter(e => e.id !== id);
+            this.render();
+        } catch (err) { alert('Error: ' + err.message); }
+    },
+
+    renderReports() {
+        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation', 'Closed Won', 'Closed Lost'];
+        const stageColors = ['#94a3b8', '#3b82f6', '#8b5cf6', '#f59e0b', '#f97316', '#22c55e', '#ef4444'];
+        const stageValues = stages.map(s => this.data.deals.filter(d => d.stage === s).reduce((sum, d) => sum + (d.value || 0), 0));
+        const maxVal = Math.max(...stageValues, 1);
+
+        const wonDeals = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lostDeals = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const wonCount = wonDeals.length;
+        const lostCount = lostDeals.length;
+        const totalClosed = wonCount + lostCount;
+
+        const actTypes = ['Call', 'Email', 'Meeting', 'Follow-up', 'Note', 'Task'];
+        const actColors = ['#6366f1', '#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b'];
+        const actCounts = actTypes.map(t => this.data.activities.filter(a => a.type === t).length);
+        const maxAct = Math.max(...actCounts, 1);
+
+        const tiers = ['1-VIP', '2', '3', '4', '5'];
+        const tierColors = ['#22c55e', '#3b82f6', '#f59e0b', '#94a3b8', '#d1d5db'];
+        const tierCounts = tiers.map(t => this.data.contacts.filter(c => c.tier === t).length);
+        const totalContacts = this.data.contacts.length || 1;
+
+        const html = `
+            <h2>Reports</h2>
+            <div class="dash-grid">
+                <div class="dash-section">
+                    <h3>Pipeline Value by Stage ($M)</h3>
+                    <div class="chart-bar-container">
+                        ${stages.map((s, i) => `
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar-value">$${stageValues[i].toFixed(0)}M</div>
+                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
+                                    <div class="chart-bar" style="background:${stageColors[i]}; height:${Math.max(stageValues[i] / maxVal * 100, 3)}%; width:100%;"></div>
+                                </div>
+                                <div class="chart-bar-label">${s}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="dash-section">
+                    <h3>Win / Loss Rate</h3>
+                    ${totalClosed > 0 ? `
+                        <div style="display:flex; align-items:center; gap:24px; justify-content:center; padding:20px 0;">
+                            <div style="text-align:center;">
+                                <div style="font-size:48px; font-weight:700; color:#22c55e;">${Math.round(wonCount/totalClosed*100)}%</div>
+                                <div style="font-size:13px; color:#6b7280;">Win Rate</div>
+                            </div>
+                            <div style="width:1px; height:60px; background:#e5e7eb;"></div>
+                            <div>
+                                <div style="margin-bottom:8px;"><span style="display:inline-block; width:12px; height:12px; background:#22c55e; border-radius:2px; margin-right:8px;"></span>Won: ${wonCount} ($${wonDeals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M)</div>
+                                <div><span style="display:inline-block; width:12px; height:12px; background:#ef4444; border-radius:2px; margin-right:8px;"></span>Lost: ${lostCount} ($${lostDeals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M)</div>
+                            </div>
+                        </div>
+                    ` : '<p class="text-muted" style="text-align:center; padding:20px;">No closed deals yet</p>'}
+                </div>
+                <div class="dash-section">
+                    <h3>Activities by Type</h3>
+                    <div class="chart-bar-container">
+                        ${actTypes.map((t, i) => `
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar-value">${actCounts[i]}</div>
+                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
+                                    <div class="chart-bar" style="background:${actColors[i]}; height:${Math.max(actCounts[i] / maxAct * 100, 3)}%; width:100%;"></div>
+                                </div>
+                                <div class="chart-bar-label">${t}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="dash-section">
+                    <h3>Contact Tier Distribution</h3>
+                    <div style="padding:12px 0;">
+                        ${tiers.map((t, i) => `
+                            <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                                <div style="width:60px; font-size:13px; font-weight:500;">Tier ${t}</div>
+                                <div style="flex:1; background:#f3f4f6; border-radius:4px; height:24px; overflow:hidden;">
+                                    <div style="height:100%; background:${tierColors[i]}; width:${tierCounts[i]/totalContacts*100}%; border-radius:4px; display:flex; align-items:center; justify-content:flex-end; padding-right:6px; min-width:${tierCounts[i] > 0 ? '30px' : '0'};">
+                                        <span style="font-size:11px; font-weight:600; color:#fff;">${tierCounts[i]}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
@@ -869,10 +1369,20 @@ const app = {
             <h2>Settings</h2>
             <div class="card">
                 <h3>Data Management</h3>
-                <button class="btn-primary" onclick="app.syncFromSupabase()" style="margin-bottom: 12px;">Sync from Supabase</button>
-                <p class="text-muted" style="margin-top: 16px;">Last sync: Just now</p>
-                <h3 style="margin-top: 24px;">Export Data</h3>
-                <button class="btn-primary" onclick="app.exportJSON()">Export as JSON</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button class="btn-primary" onclick="app.syncFromSupabase()">Sync from Supabase</button>
+                </div>
+                <h3 style="margin-top: 24px;">Export</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button class="btn-primary" onclick="app.exportJSON()">Export as JSON</button>
+                    <button onclick="app.exportCsv('contacts')">Export Contacts CSV</button>
+                    <button onclick="app.exportCsv('accounts')">Export Accounts CSV</button>
+                    <button onclick="app.exportCsv('deals')">Export Deals CSV</button>
+                </div>
+                <h3 style="margin-top: 24px;">Import</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn-primary" onclick="app.openModal('modalCsvImport')">Import CSV</button>
+                </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
@@ -975,7 +1485,102 @@ const app = {
     viewContact(id) {
         this.currentRecord = this.data.contacts.find(c => c.id === id);
         if (!this.currentRecord) return;
-        this.editContact(id);
+        this.currentView = 'contactDetail';
+        this.render();
+    },
+
+    renderContactDetail() {
+        const c = this.currentRecord;
+        if (!c) { this.currentView = 'contacts'; this.render(); return; }
+        const account = this.data.accounts.find(a => a.id === c.accountId);
+        const activities = this.data.activities.filter(a => a.contactId === c.id);
+        const deals = this.data.deals.filter(d => (this.data.dealContacts || []).some(dc => dc.deal_id === d.id && dc.contact_id === c.id) || d.accountId === c.accountId);
+        const emails = this.data.emails.filter(e => e.contact_id === c.id);
+        const referralsFrom = this.data.referrals.filter(r => r.from_id === c.id);
+        const referralsTo = this.data.referrals.filter(r => r.to_id === c.id);
+        const dsla = this.calculateDSLA(c.la);
+        const asClass = 'as-' + this.calculateAS(dsla);
+
+        const html = `
+            <div class="detail-back" onclick="app.currentView='contacts'; app.render();">&#8592; Back to Contacts</div>
+            <div class="detail-header">
+                <h1>${c.name}</h1>
+                <span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span>
+                <span class="activity-score ${asClass}"></span><span style="font-size:13px; color:#6b7280;">${dsla !== null ? dsla + ' days since last activity' : 'No activity recorded'}</span>
+                <button class="btn-primary btn-small" style="margin-left:auto;" onclick="app.editContact('${c.id}')">Edit</button>
+            </div>
+            <div class="detail-container">
+                <div class="detail-sidebar">
+                    ${c.title ? `<div class="detail-field"><div class="detail-field-label">Title</div><div class="detail-field-value">${c.title}</div></div>` : ''}
+                    ${c.email ? `<div class="detail-field"><div class="detail-field-label">Email</div><div class="detail-field-value"><a href="mailto:${c.email}">${c.email}</a></div></div>` : ''}
+                    ${c.mobile ? `<div class="detail-field"><div class="detail-field-label">Mobile</div><div class="detail-field-value"><a href="tel:${c.mobile}">${c.mobile}</a></div></div>` : ''}
+                    ${c.phone ? `<div class="detail-field"><div class="detail-field-label">Phone</div><div class="detail-field-value"><a href="tel:${c.phone}">${c.phone}</a></div></div>` : ''}
+                    ${c.address ? `<div class="detail-field"><div class="detail-field-label">Address</div><div class="detail-field-value">${c.address}</div></div>` : ''}
+                    ${account ? `<div class="detail-field"><div class="detail-field-label">Company</div><div class="detail-field-value"><a onclick="app.viewAccount('${account.id}')" style="cursor:pointer;">${account.name}</a></div></div>` : ''}
+                    ${c.birthdate ? `<div class="detail-field"><div class="detail-field-label">Birthday</div><div class="detail-field-value">${new Date(c.birthdate).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'})}</div></div>` : ''}
+                    ${c.instagram ? `<div class="detail-field"><div class="detail-field-label">Instagram</div><div class="detail-field-value">${c.instagram}</div></div>` : ''}
+                    ${c.linkedin ? `<div class="detail-field"><div class="detail-field-label">LinkedIn</div><div class="detail-field-value"><a href="${c.linkedin}" target="_blank">Profile</a></div></div>` : ''}
+                    ${c.liSnP ? `<div class="detail-field"><div class="detail-field-label">LinkedIn/Social Notes</div><div class="detail-field-value">${c.liSnP}</div></div>` : ''}
+                    ${c.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${c.notes}</div></div>` : ''}
+                </div>
+                <div class="detail-main">
+                    <div class="detail-tabs" id="contactDetailTabs">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdActivities')">Activities (${activities.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdDeals')">Deals (${deals.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdEmails')">Emails (${emails.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdReferrals')">Referrals (${referralsFrom.length + referralsTo.length})</div>
+                    </div>
+                    <div id="cdActivities">
+                        <button class="btn-primary btn-small" style="margin-bottom:12px;" onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();">Log Activity</button>
+                        <div class="timeline">
+                            ${activities.length ? activities.sort((a,b) => (b.dueDate||b.createdAt||'').localeCompare(a.dueDate||a.createdAt||'')).map(a => `
+                                <div class="timeline-item ${a.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                                    <div class="timeline-date">${a.dueDate || new Date(a.createdAt).toLocaleDateString()}</div>
+                                    <div class="timeline-title">${a.subject}</div>
+                                    <div class="timeline-note">${a.type} - ${a.status}${a.notes ? ' | ' + a.notes.substring(0,80) : ''}</div>
+                                </div>
+                            `).join('') : '<p class="text-muted">No activities yet</p>'}
+                        </div>
+                    </div>
+                    <div id="cdDeals" style="display:none;">
+                        ${deals.length ? `<table><thead><tr><th>Deal</th><th>Stage</th><th>Value</th><th>Probability</th></tr></thead><tbody>
+                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td><td>$${d.value}M</td><td>${d.probability}%</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No linked deals</p>'}
+                    </div>
+                    <div id="cdEmails" style="display:none;">
+                        <button class="btn-primary btn-small" style="margin-bottom:12px;" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Log Email</button>
+                        ${emails.length ? `<table><thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
+                            ${emails.map(e => `<tr><td>${e.date || ''}</td><td>${e.subject || ''}</td><td>${e.from_addr || ''}</td><td>${e.to_addr || ''}</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No emails logged</p>'}
+                    </div>
+                    <div id="cdReferrals" style="display:none;">
+                        ${(referralsFrom.length + referralsTo.length) ? `
+                            ${referralsFrom.length ? '<h3 style="font-size:14px;">Referred Out</h3>' + referralsFrom.map(r => {
+                                const to = this.data.contacts.find(x => x.id === r.to_id);
+                                return `<div style="padding:8px 0; border-bottom:1px solid #f3f4f6;"><strong>${to ? to.name : 'Unknown'}</strong> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span><br><span style="font-size:12px; color:#6b7280;">${r.type||''} ${r.date ? '| ' + r.date : ''} ${r.notes ? '| ' + r.notes : ''}</span></div>`;
+                            }).join('') : ''}
+                            ${referralsTo.length ? '<h3 style="font-size:14px; margin-top:12px;">Referred By</h3>' + referralsTo.map(r => {
+                                const from = this.data.contacts.find(x => x.id === r.from_id);
+                                return `<div style="padding:8px 0; border-bottom:1px solid #f3f4f6;"><strong>${from ? from.name : 'Unknown'}</strong> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span><br><span style="font-size:12px; color:#6b7280;">${r.type||''} ${r.date ? '| ' + r.date : ''} ${r.notes ? '| ' + r.notes : ''}</span></div>`;
+                            }).join('') : ''}
+                        ` : '<p class="text-muted">No referrals</p>'}
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'contacts\'; app.render();">Contacts</a> / ' + c.name;
+    },
+
+    switchDetailTab(el, panelId) {
+        const tabContainer = el.parentElement;
+        tabContainer.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        const parent = tabContainer.parentElement;
+        const panels = ['cdActivities','cdDeals','cdEmails','cdReferrals','adContacts','adDeals','adActivities','adEmails'];
+        panels.forEach(id => { const p = parent.querySelector('#' + id); if (p) p.style.display = 'none'; });
+        const target = parent.querySelector('#' + panelId);
+        if (target) target.style.display = 'block';
     },
 
     openAccountForm() {
@@ -1005,7 +1610,76 @@ const app = {
     viewAccount(id) {
         this.currentRecord = this.data.accounts.find(a => a.id === id);
         if (!this.currentRecord) return;
-        this.editAccount(id);
+        this.currentView = 'accountDetail';
+        this.render();
+    },
+
+    renderAccountDetail() {
+        const a = this.currentRecord;
+        if (!a) { this.currentView = 'accounts'; this.render(); return; }
+        const contacts = this.data.contacts.filter(c => c.accountId === a.id);
+        const deals = this.data.deals.filter(d => d.accountId === a.id);
+        const activities = this.data.activities.filter(act => act.accountId === a.id || contacts.some(c => c.id === act.contactId));
+        const emails = this.data.emails.filter(e => contacts.some(c => c.id === e.contact_id));
+
+        const html = `
+            <div class="detail-back" onclick="app.currentView='accounts'; app.render();">&#8592; Back to Accounts</div>
+            <div class="detail-header">
+                <h1>${a.name}</h1>
+                <span class="badge" style="background:#e0e7ff; color:#3730a3;">${a.type || 'Other'}</span>
+                <button class="btn-primary btn-small" style="margin-left:auto;" onclick="app.editAccount('${a.id}')">Edit</button>
+            </div>
+            <div class="detail-container">
+                <div class="detail-sidebar">
+                    ${a.industry ? `<div class="detail-field"><div class="detail-field-label">Industry</div><div class="detail-field-value">${a.industry}</div></div>` : ''}
+                    ${a.website ? `<div class="detail-field"><div class="detail-field-label">Website</div><div class="detail-field-value"><a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank">${a.website}</a></div></div>` : ''}
+                    ${a.address ? `<div class="detail-field"><div class="detail-field-label">Address</div><div class="detail-field-value">${a.address}</div></div>` : ''}
+                    ${a.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${a.notes}</div></div>` : ''}
+                    <div class="detail-field" style="margin-top:16px;">
+                        <div class="detail-field-label">Summary</div>
+                        <div style="font-size:13px; color:#6b7280;">
+                            ${contacts.length} contacts &bull; ${deals.length} deals &bull; $${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M pipeline
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-main">
+                    <div class="detail-tabs" id="accountDetailTabs">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'adContacts')">Contacts (${contacts.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adDeals')">Deals (${deals.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adActivities')">Activities (${activities.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adEmails')">Emails (${emails.length})</div>
+                    </div>
+                    <div id="adContacts">
+                        ${contacts.length ? `<table><thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Tier</th></tr></thead><tbody>
+                            ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:#3b82f6; font-weight:500;">${c.name}</td><td>${c.email||''}</td><td>${c.mobile||''}</td><td><span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span></td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No contacts linked to this account</p>'}
+                    </div>
+                    <div id="adDeals" style="display:none;">
+                        ${deals.length ? `<table><thead><tr><th>Deal</th><th>Stage</th><th>Value</th><th>Close Date</th></tr></thead><tbody>
+                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No deals for this account</p>'}
+                    </div>
+                    <div id="adActivities" style="display:none;">
+                        <div class="timeline">
+                            ${activities.length ? activities.sort((x,y) => (y.dueDate||y.createdAt||'').localeCompare(x.dueDate||x.createdAt||'')).map(act => `
+                                <div class="timeline-item ${act.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${act.id}')">
+                                    <div class="timeline-date">${act.dueDate || new Date(act.createdAt).toLocaleDateString()}</div>
+                                    <div class="timeline-title">${act.subject}</div>
+                                    <div class="timeline-note">${act.type} - ${act.status}</div>
+                                </div>
+                            `).join('') : '<p class="text-muted">No activities</p>'}
+                        </div>
+                    </div>
+                    <div id="adEmails" style="display:none;">
+                        ${emails.length ? `<table><thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
+                            ${emails.map(e => `<tr><td>${e.date||''}</td><td>${e.subject||''}</td><td>${e.from_addr||''}</td><td>${e.to_addr||''}</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No emails</p>'}
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'accounts\'; app.render();">Accounts</a> / ' + a.name;
     },
 
     openDealForm() {
@@ -1084,6 +1758,129 @@ const app = {
 
     closeModal(id) {
         document.getElementById(id).classList.remove('show');
+    },
+
+    // CSV Export
+    exportCsv(type) {
+        const items = this.data[type];
+        if (!items || !items.length) { alert('No data to export'); return; }
+        const headers = Object.keys(items[0]);
+        const csv = [headers.join(','), ...items.map(item => headers.map(h => {
+            let val = item[h] || '';
+            val = String(val).replace(/"/g, '""');
+            return val.includes(',') || val.includes('"') || val.includes('\n') ? `"${val}"` : val;
+        }).join(','))].join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${type}-export-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+    },
+
+    // CSV Import
+    csvData: null,
+    handleCsvFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            const lines = text.split('\n').filter(l => l.trim());
+            if (lines.length < 2) { alert('CSV file is empty or has no data rows.'); return; }
+            const headers = this.parseCsvLine(lines[0]);
+            const rows = lines.slice(1).map(line => {
+                const vals = this.parseCsvLine(line);
+                const obj = {};
+                headers.forEach((h, i) => obj[h.trim()] = (vals[i] || '').trim());
+                return obj;
+            });
+            this.csvData = {headers, rows};
+            document.getElementById('csvImportBtn').style.display = '';
+            document.getElementById('csvPreview').innerHTML = `
+                <p style="margin:12px 0; font-size:13px;"><strong>${rows.length} rows</strong> found with columns: ${headers.join(', ')}</p>
+                <div class="csv-preview-table">
+                    <table>
+                        <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.slice(0, 5).map(r => `<tr>${headers.map(h => `<td>${r[h] || ''}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>
+                </div>
+                ${rows.length > 5 ? `<p class="text-muted" style="font-size:12px; margin-top:4px;">Showing first 5 of ${rows.length} rows</p>` : ''}
+            `;
+        };
+        reader.readAsText(file);
+    },
+
+    parseCsvLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQuotes) {
+                if (ch === '"' && line[i+1] === '"') { current += '"'; i++; }
+                else if (ch === '"') { inQuotes = false; }
+                else { current += ch; }
+            } else {
+                if (ch === '"') { inQuotes = true; }
+                else if (ch === ',') { result.push(current); current = ''; }
+                else { current += ch; }
+            }
+        }
+        result.push(current);
+        return result;
+    },
+
+    async executeCsvImport() {
+        if (!this.csvData || !this.csvData.rows.length) return;
+        const target = document.getElementById('csvTarget').value;
+        const rows = this.csvData.rows;
+        let imported = 0;
+
+        try {
+            for (const row of rows) {
+                const record = {id: target.slice(0, 3) + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4), created_at: new Date().toISOString()};
+                if (target === 'contacts') {
+                    record.name = row.Name || row.name || row['First Name'] ? (row['First Name'] || '') + ' ' + (row['Last Name'] || '') : 'Unknown';
+                    record.name = record.name.trim() || row.Name || row.name || 'Unknown';
+                    record.email = row.Email || row.email || '';
+                    record.mobile = row.Mobile || row.mobile || row['Mobile Phone'] || row.Phone || row.phone || '';
+                    record.phone = row.Phone || row.phone || row['Business Phone'] || '';
+                    record.address = row.Address || row.address || row['Mailing Address'] || '';
+                    record.tier = row.Tier || row.tier || '3';
+                    record.title = row.Title || row.title || '';
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                } else if (target === 'accounts') {
+                    record.name = row.Name || row.name || row['Account Name'] || row['Company'] || 'Unknown';
+                    record.industry = row.Industry || row.industry || '';
+                    record.website = row.Website || row.website || '';
+                    record.address = row.Address || row.address || row['Billing Address'] || '';
+                    record.type = row.Type || row.type || 'Prospect';
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                } else if (target === 'deals') {
+                    record.name = row.Name || row.name || row['Deal Name'] || row['Opportunity Name'] || 'Unknown';
+                    record.value = parseFloat(row.Value || row.value || row.Amount || 0);
+                    record.stage = row.Stage || row.stage || 'Prospect';
+                    record.sector = row.Sector || row.sector || '';
+                    record.probability = parseInt(row.Probability || row.probability || 0);
+                    record.close_date = row['Close Date'] || row.close_date || row.closeDate || null;
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                }
+
+                try {
+                    await sb.from(target).insert([record]);
+                    if (target === 'contacts') this.data.contacts.push(this.dbToApp('contact', record));
+                    else if (target === 'accounts') this.data.accounts.push(this.dbToApp('account', record));
+                    else if (target === 'deals') this.data.deals.push(this.dbToApp('deal', record));
+                    imported++;
+                } catch (e) { console.error('Row import error:', e); }
+            }
+            alert(`Successfully imported ${imported} of ${rows.length} ${target}.`);
+            this.csvData = null;
+            this.closeModal('modalCsvImport');
+            document.getElementById('csvPreview').innerHTML = '';
+            document.getElementById('csvImportBtn').style.display = 'none';
+            this.updateSelectOptions();
+            this.render();
+        } catch (err) { alert('Import error: ' + err.message); }
     }
 };
 
