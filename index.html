@@ -173,6 +173,9 @@
         .ref-status-active {background: #dcfce7; color: #166534;}
         .ref-status-pending {background: #fef3c7; color: #92400e;}
         .ref-status-closed {background: #f3f4f6; color: #374151;}
+        /* Tags */
+        .tag-pill {display: inline-block; padding: 2px 8px; border-radius: 12px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 500; margin: 1px 2px;}
+        .dup-banner {background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;}
         /* CSV import */
         .csv-drop-zone {border: 2px dashed #d1d5db; border-radius: 8px; padding: 40px; text-align: center; color: #6b7280; cursor: pointer; transition: all 0.2s;}
         .csv-drop-zone:hover {border-color: #3b82f6; color: #3b82f6;}
@@ -275,6 +278,7 @@
                 <div class="form-group"><label>Instagram</label><input type="text" id="contactInstagram"></div>
                 <div class="form-group"><label>LinkedIn</label><input type="url" id="contactLinkedin"></div>
                 <div class="form-group"><label>LinkedIn/Social Notes</label><textarea id="contactLiSnP"></textarea></div>
+                <div class="form-group"><label>Tags (comma-separated)</label><input type="text" id="contactTags" placeholder="e.g. client, warm-lead, tech"></div>
                 <div class="form-group"><label>Notes</label><textarea id="contactNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalContact')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
@@ -363,6 +367,24 @@
                 <div class="form-group"><label>Body</label><textarea id="emailBody" style="min-height: 120px;"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalEmail')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
+        </div>
+    </div>
+
+    <div class="modal" id="modalVcfImport">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">Import vCard (.vcf) from iPhone</div>
+            <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
+                Import contacts from a vCard file exported from iPhone, Mac Contacts, or iCloud.
+            </div>
+            <div class="csv-drop-zone" id="vcfDropZone" onclick="document.getElementById('vcfFile').click()">
+                Click to select a .vcf file or drag & drop here
+                <input type="file" id="vcfFile" accept=".vcf,.vcard" style="display:none;" onchange="app.handleVcfFile(this.files[0])">
+            </div>
+            <div id="vcfPreview"></div>
+            <div class="modal-footer">
+                <button type="button" onclick="app.closeModal('modalVcfImport')">Cancel</button>
+                <button type="button" class="btn-primary" id="vcfImportBtn" style="display:none;" onclick="app.executeVcfImport()">Import</button>
+            </div>
         </div>
     </div>
 
@@ -521,6 +543,7 @@ const app = {
             instagram: document.getElementById('contactInstagram').value || null,
             linkedin: document.getElementById('contactLinkedin').value || null,
             liSnP: document.getElementById('contactLiSnP').value || null,
+            tags: document.getElementById('contactTags').value || null,
             notes: document.getElementById('contactNotes').value || null
         };
 
@@ -695,6 +718,12 @@ const app = {
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
         dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) this.handleCsvFile(e.dataTransfer.files[0]); });
+        const vcfZone = document.getElementById('vcfDropZone');
+        if (vcfZone) {
+            vcfZone.addEventListener('dragover', (e) => { e.preventDefault(); vcfZone.classList.add('dragover'); });
+            vcfZone.addEventListener('dragleave', () => vcfZone.classList.remove('dragover'));
+            vcfZone.addEventListener('drop', (e) => { e.preventDefault(); vcfZone.classList.remove('dragover'); if (e.dataTransfer.files.length) this.handleVcfFile(e.dataTransfer.files[0]); });
+        }
     },
 
     calculateDSLA(laStr) {
@@ -892,22 +921,53 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
+    contactFilters: {tier: '', tag: '', company: '', text: ''},
     renderContacts() {
+        const f = this.contactFilters;
+        const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
+        let filtered = this.data.contacts;
+        if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
+        if (f.tag) filtered = filtered.filter(c => (c.tags || '').split(',').map(t => t.trim()).includes(f.tag));
+        if (f.company) filtered = filtered.filter(c => c.accountId === f.company);
+        if (f.text) {
+            const lt = f.text.toLowerCase();
+            filtered = filtered.filter(c => (c.name || '').toLowerCase().includes(lt) || (c.email || '').toLowerCase().includes(lt) || (c.mobile || '').includes(lt));
+        }
         const html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h2 style="margin: 0;">Contacts</h2>
                 <button class="btn-primary" onclick="app.openContactForm()">New Contact</button>
             </div>
+            <div class="card" style="margin-bottom:12px; padding:12px;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <input type="text" placeholder="Search name/email/mobile" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-width:180px;">
+                    <select onchange="app.updateContactFilter('tier', this.value)">
+                        <option value="">All tiers</option>
+                        ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <select onchange="app.updateContactFilter('company', this.value)">
+                        <option value="">All companies</option>
+                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===a.id?'selected':''}>${a.name}</option>`).join('')}
+                    </select>
+                    <select onchange="app.updateContactFilter('tag', this.value)">
+                        <option value="">All tags</option>
+                        ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <button onclick="app.clearContactFilters()">Clear</button>
+                    <span style="font-size:12px; color:#6b7280;">${filtered.length} of ${this.data.contacts.length}</span>
+                </div>
+            </div>
             <div class="card">
                 <div class="table-container">
                     <table>
                         <thead>
-                            <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th><th>Tier</th><th>LA</th><th>DSLA</th><th>Actions</th></tr>
+                            <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th><th>Tier</th><th>Tags</th><th>LA</th><th>DSLA</th><th>Actions</th></tr>
                         </thead>
                         <tbody>
-                            ${this.data.contacts.map(c => {
+                            ${filtered.map(c => {
                                 const dsla = this.calculateDSLA(c.la);
                                 const asClass = 'as-' + this.calculateAS(dsla);
+                                const tagPills = (c.tags || '').split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ');
                                 return `
                                     <tr>
                                         <td><a onclick="app.viewContact('${c.id}')" style="cursor: pointer; color: #3b82f6;">${c.name}</a></td>
@@ -915,6 +975,7 @@ const app = {
                                         <td>${c.mobile || ''}</td>
                                         <td>${this.data.accounts.find(a => a.id === c.accountId)?.name || ''}</td>
                                         <td><span class="badge tier-${c.tier.replace('-', '').toLowerCase()}">${c.tier}</span></td>
+                                        <td>${tagPills}</td>
                                         <td>${c.la ? c.la : ''}</td>
                                         <td><span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}</td>
                                         <td>
@@ -930,6 +991,15 @@ const app = {
             </div>
         `;
         document.getElementById('content').innerHTML = html;
+    },
+
+    updateContactFilter(key, val) {
+        this.contactFilters[key] = val;
+        this.renderContacts();
+    },
+    clearContactFilters() {
+        this.contactFilters = {tier: '', tag: '', company: '', text: ''};
+        this.renderContacts();
     },
 
     renderAccounts() {
@@ -1371,6 +1441,7 @@ const app = {
                 <h3>Data Management</h3>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
                     <button class="btn-primary" onclick="app.syncFromSupabase()">Sync from Supabase</button>
+                    <button onclick="app.showDuplicates()">Find Duplicate Contacts</button>
                 </div>
                 <h3 style="margin-top: 24px;">Export</h3>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
@@ -1378,10 +1449,27 @@ const app = {
                     <button onclick="app.exportCsv('contacts')">Export Contacts CSV</button>
                     <button onclick="app.exportCsv('accounts')">Export Accounts CSV</button>
                     <button onclick="app.exportCsv('deals')">Export Deals CSV</button>
+                    <button onclick="app.exportVcf()">Export Contacts as vCard (.vcf)</button>
                 </div>
                 <h3 style="margin-top: 24px;">Import</h3>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <button class="btn-primary" onclick="app.openModal('modalCsvImport')">Import CSV</button>
+                    <button class="btn-primary" onclick="app.openModal('modalVcfImport')">Import vCard (.vcf) from iPhone</button>
+                </div>
+                <h3 style="margin-top: 24px;">iPhone Contact Sync Guide</h3>
+                <div style="font-size:13px; line-height:1.6; background:#f9fafb; padding:12px; border-radius:6px;">
+                    <strong>To import iPhone contacts into this CRM:</strong>
+                    <ol style="margin:8px 0 12px 20px; padding:0;">
+                        <li>On your Mac: open Contacts app, select all (<code>Cmd+A</code>), drag them to your desktop — creates a .vcf file</li>
+                        <li>OR on iCloud.com: Contacts → settings gear → Select All → Export vCard</li>
+                        <li>Click <strong>Import vCard</strong> above and select the .vcf file</li>
+                    </ol>
+                    <strong>To push CRM contacts to iPhone:</strong>
+                    <ol style="margin:8px 0 0 20px; padding:0;">
+                        <li>Click <strong>Export Contacts as vCard</strong> above — downloads a .vcf file</li>
+                        <li>AirDrop the .vcf file to your iPhone, or email it to yourself and open on phone</li>
+                        <li>Tap the file → "Add All Contacts"</li>
+                    </ol>
                 </div>
             </div>
         `;
@@ -1457,6 +1545,7 @@ const app = {
         document.getElementById('contactInstagram').value = '';
         document.getElementById('contactLinkedin').value = '';
         document.getElementById('contactLiSnP').value = '';
+        document.getElementById('contactTags').value = '';
         document.getElementById('contactNotes').value = '';
         this.openModal('modalContact');
     },
@@ -1478,6 +1567,7 @@ const app = {
         document.getElementById('contactInstagram').value = contact.instagram || '';
         document.getElementById('contactLinkedin').value = contact.linkedin || '';
         document.getElementById('contactLiSnP').value = contact.liSnP || '';
+        document.getElementById('contactTags').value = contact.tags || '';
         document.getElementById('contactNotes').value = contact.notes || '';
         this.openModal('modalContact');
     },
@@ -1521,6 +1611,7 @@ const app = {
                     ${c.instagram ? `<div class="detail-field"><div class="detail-field-label">Instagram</div><div class="detail-field-value">${c.instagram}</div></div>` : ''}
                     ${c.linkedin ? `<div class="detail-field"><div class="detail-field-label">LinkedIn</div><div class="detail-field-value"><a href="${c.linkedin}" target="_blank">Profile</a></div></div>` : ''}
                     ${c.liSnP ? `<div class="detail-field"><div class="detail-field-label">LinkedIn/Social Notes</div><div class="detail-field-value">${c.liSnP}</div></div>` : ''}
+                    ${c.tags ? `<div class="detail-field"><div class="detail-field-label">Tags</div><div class="detail-field-value">${c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ')}</div></div>` : ''}
                     ${c.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${c.notes}</div></div>` : ''}
                 </div>
                 <div class="detail-main">
@@ -1531,7 +1622,13 @@ const app = {
                         <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdReferrals')">Referrals (${referralsFrom.length + referralsTo.length})</div>
                     </div>
                     <div id="cdActivities">
-                        <button class="btn-primary btn-small" style="margin-bottom:12px;" onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();">Log Activity</button>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;">
+                            <button class="btn-primary btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();">Log Activity</button>
+                            <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Call')">Quick: Call</button>
+                            <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Email')">Quick: Email</button>
+                            <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Meeting')">Quick: Meeting</button>
+                            <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Note')">Quick: Note</button>
+                        </div>
                         <div class="timeline">
                             ${activities.length ? activities.sort((a,b) => (b.dueDate||b.createdAt||'').localeCompare(a.dueDate||a.createdAt||'')).map(a => `
                                 <div class="timeline-item ${a.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
@@ -1881,6 +1978,257 @@ const app = {
             this.updateSelectOptions();
             this.render();
         } catch (err) { alert('Import error: ' + err.message); }
+    },
+
+    // vCard (.vcf) export — iPhone/Apple Contacts compatible
+    exportVcf() {
+        const contacts = this.data.contacts;
+        if (!contacts.length) { alert('No contacts to export'); return; }
+        const esc = v => String(v || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+        const cards = contacts.map(c => {
+            const parts = (c.name || '').trim().split(/\s+/);
+            const last = parts.length > 1 ? parts.pop() : '';
+            const first = parts.join(' ');
+            const acct = this.data.accounts.find(a => a.id === c.accountId);
+            const lines = [
+                'BEGIN:VCARD',
+                'VERSION:3.0',
+                `N:${esc(last)};${esc(first)};;;`,
+                `FN:${esc(c.name)}`,
+            ];
+            if (acct) lines.push(`ORG:${esc(acct.name)}`);
+            if (c.title) lines.push(`TITLE:${esc(c.title)}`);
+            if (c.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(c.email)}`);
+            if (c.mobile) lines.push(`TEL;TYPE=CELL:${esc(c.mobile)}`);
+            if (c.phone) lines.push(`TEL;TYPE=WORK,VOICE:${esc(c.phone)}`);
+            if (c.address) lines.push(`ADR;TYPE=HOME:;;${esc(c.address)};;;;`);
+            if (c.birthdate) lines.push(`BDAY:${c.birthdate.replace(/-/g, '')}`);
+            if (c.linkedin) lines.push(`URL:${esc(c.linkedin)}`);
+            if (c.instagram) lines.push(`X-SOCIALPROFILE;type=instagram:${esc(c.instagram)}`);
+            if (c.notes) lines.push(`NOTE:${esc(c.notes)}`);
+            if (c.tags) lines.push(`CATEGORIES:${esc(c.tags)}`);
+            lines.push('END:VCARD');
+            return lines.join('\r\n');
+        }).join('\r\n');
+        const blob = new Blob([cards], {type: 'text/vcard'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `matthews-crm-contacts-${new Date().toISOString().split('T')[0]}.vcf`;
+        a.click();
+    },
+
+    // vCard (.vcf) import — parses iPhone/Apple exported vCards
+    vcfData: null,
+    handleVcfFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            const parsed = this.parseVcf(text);
+            if (!parsed.length) { alert('No contacts found in file'); return; }
+            // dedupe against existing (by email or phone)
+            const existing = this.data.contacts;
+            const dupes = parsed.filter(p => existing.some(c =>
+                (p.email && c.email && p.email.toLowerCase() === c.email.toLowerCase()) ||
+                (p.mobile && c.mobile && p.mobile.replace(/\D/g,'') === c.mobile.replace(/\D/g,''))
+            ));
+            this.vcfData = parsed;
+            document.getElementById('vcfImportBtn').style.display = '';
+            document.getElementById('vcfPreview').innerHTML = `
+                <p style="margin:12px 0; font-size:13px;"><strong>${parsed.length} contacts</strong> found in file.</p>
+                ${dupes.length ? `<div class="dup-banner"><strong>${dupes.length}</strong> appear to be duplicates of existing contacts (matched by email/phone) and will be skipped.</div>` : ''}
+                <div class="csv-preview-table">
+                    <table>
+                        <thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th></tr></thead>
+                        <tbody>${parsed.slice(0, 10).map(p => `<tr><td>${p.name}</td><td>${p.email || ''}</td><td>${p.mobile || ''}</td><td>${p.company || ''}</td></tr>`).join('')}</tbody>
+                    </table>
+                </div>
+                ${parsed.length > 10 ? `<p class="text-muted" style="font-size:12px; margin-top:4px;">Showing first 10 of ${parsed.length}</p>` : ''}
+            `;
+        };
+        reader.readAsText(file);
+    },
+
+    parseVcf(text) {
+        // handle line-folded vCards (lines starting with space/tab continue previous)
+        const unfolded = text.replace(/\r?\n[ \t]/g, '');
+        const blocks = unfolded.split(/BEGIN:VCARD/i).slice(1);
+        const unesc = v => String(v || '').replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
+        const result = [];
+        for (const block of blocks) {
+            const body = block.split(/END:VCARD/i)[0];
+            const lines = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const c = {};
+            for (const line of lines) {
+                const colonIdx = line.indexOf(':');
+                if (colonIdx < 0) continue;
+                const keyPart = line.slice(0, colonIdx).toUpperCase();
+                const value = line.slice(colonIdx + 1);
+                const baseKey = keyPart.split(';')[0];
+                if (baseKey === 'FN') c.name = unesc(value);
+                else if (baseKey === 'N' && !c.name) {
+                    const parts = value.split(';').map(unesc);
+                    c.name = [parts[1], parts[0]].filter(Boolean).join(' ').trim();
+                }
+                else if (baseKey === 'EMAIL' && !c.email) c.email = unesc(value);
+                else if (baseKey === 'TEL') {
+                    if (/CELL|MOBILE|IPHONE/i.test(keyPart) && !c.mobile) c.mobile = unesc(value);
+                    else if (!c.phone) c.phone = unesc(value);
+                }
+                else if (baseKey === 'ORG') c.company = unesc(value.split(';')[0]);
+                else if (baseKey === 'TITLE') c.title = unesc(value);
+                else if (baseKey === 'ADR' && !c.address) {
+                    const parts = value.split(';').map(unesc);
+                    c.address = parts.slice(2).filter(Boolean).join(', ');
+                }
+                else if (baseKey === 'BDAY') {
+                    const v = unesc(value);
+                    if (/^\d{8}$/.test(v)) c.birthdate = `${v.slice(0,4)}-${v.slice(4,6)}-${v.slice(6,8)}`;
+                    else if (/^\d{4}-\d{2}-\d{2}/.test(v)) c.birthdate = v.slice(0, 10);
+                }
+                else if (baseKey === 'URL' && !c.linkedin) c.linkedin = unesc(value);
+                else if (baseKey === 'NOTE') c.notes = unesc(value);
+                else if (baseKey === 'CATEGORIES') c.tags = unesc(value);
+            }
+            if (c.name || c.email || c.mobile) result.push(c);
+        }
+        return result;
+    },
+
+    async executeVcfImport() {
+        if (!this.vcfData || !this.vcfData.length) return;
+        const parsed = this.vcfData;
+        const existing = this.data.contacts;
+        let imported = 0, skipped = 0;
+        try {
+            for (const p of parsed) {
+                // dedupe by email or phone
+                const isDup = existing.some(c =>
+                    (p.email && c.email && p.email.toLowerCase() === c.email.toLowerCase()) ||
+                    (p.mobile && c.mobile && p.mobile.replace(/\D/g,'') === c.mobile.replace(/\D/g,''))
+                );
+                if (isDup) { skipped++; continue; }
+                // match company to existing account (case-insensitive) if provided
+                let accountId = null;
+                if (p.company) {
+                    const acct = this.data.accounts.find(a => (a.name || '').toLowerCase() === p.company.toLowerCase());
+                    accountId = acct ? acct.id : null;
+                }
+                const record = {
+                    id: 'con-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                    name: p.name || 'Unknown',
+                    email: p.email || '',
+                    mobile: p.mobile || '',
+                    phone: p.phone || '',
+                    address: p.address || '',
+                    account_id: accountId,
+                    tier: '3',
+                    title: p.title || null,
+                    birthdate: p.birthdate || null,
+                    linkedin: p.linkedin || null,
+                    tags: p.tags || null,
+                    notes: p.notes || null,
+                    created_at: new Date().toISOString()
+                };
+                try {
+                    await sb.from('contacts').insert([record]);
+                    this.data.contacts.push(this.dbToApp('contact', record));
+                    imported++;
+                } catch (e) { console.error('vCard row import error:', e); }
+            }
+            alert(`Imported ${imported} new contacts. Skipped ${skipped} duplicates.`);
+            this.vcfData = null;
+            this.closeModal('modalVcfImport');
+            document.getElementById('vcfPreview').innerHTML = '';
+            document.getElementById('vcfImportBtn').style.display = 'none';
+            this.updateSelectOptions();
+            this.render();
+        } catch (err) { alert('vCard import error: ' + err.message); }
+    },
+
+    // Duplicate detection — groups by similar name/email/phone
+    findDuplicates() {
+        const groups = {};
+        for (const c of this.data.contacts) {
+            const keys = [];
+            if (c.email) keys.push('e:' + c.email.toLowerCase().trim());
+            if (c.mobile) keys.push('m:' + c.mobile.replace(/\D/g,''));
+            if (c.name) keys.push('n:' + c.name.toLowerCase().replace(/\s+/g,'').trim());
+            for (const k of keys) {
+                if (!groups[k]) groups[k] = [];
+                groups[k].push(c);
+            }
+        }
+        const dupes = [];
+        const seen = new Set();
+        for (const k in groups) {
+            if (groups[k].length > 1) {
+                const ids = groups[k].map(c => c.id).sort().join('|');
+                if (!seen.has(ids)) { seen.add(ids); dupes.push(groups[k]); }
+            }
+        }
+        return dupes;
+    },
+
+    showDuplicates() {
+        const dupes = this.findDuplicates();
+        if (!dupes.length) { alert('No duplicate contacts detected.'); return; }
+        const html = `
+            <h2>Duplicate Contacts (${dupes.length} groups)</h2>
+            <p class="text-muted" style="font-size:13px;">Contacts matched on email, mobile, or name. Review and delete the ones you don't need.</p>
+            ${dupes.map(group => `
+                <div class="card" style="margin-bottom:12px;">
+                    <table>
+                        <thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Tier</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${group.map(c => `
+                                <tr>
+                                    <td>${c.name}</td>
+                                    <td>${c.email || ''}</td>
+                                    <td>${c.mobile || ''}</td>
+                                    <td>${c.tier}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editContact('${c.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteContact('${c.id}'); app.showDuplicates();">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `).join('')}
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    // Quick add activity from contact detail view
+    quickLogActivity(contactId, type) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const subject = prompt(`${type} subject:`);
+        if (!subject) return;
+        const notes = prompt('Notes (optional):') || '';
+        const record = {
+            id: 'act-' + Date.now(),
+            type: type,
+            subject: subject,
+            contact_id: contactId,
+            account_id: contact.accountId || null,
+            deal_id: null,
+            due_date: new Date().toISOString().split('T')[0],
+            status: 'Closed',
+            notes: notes,
+            created_at: new Date().toISOString()
+        };
+        sb.from('activities').insert([record]).then(() => {
+            this.data.activities.push(this.dbToApp('activity', record));
+            // also update contact LA
+            const today = new Date().toISOString().split('T')[0];
+            sb.from('contacts').update({la: today}).eq('id', contactId).then(() => {
+                contact.la = today;
+                this.renderContactDetail();
+            });
+        }).catch(err => alert('Error: ' + err.message));
     }
 };
 
