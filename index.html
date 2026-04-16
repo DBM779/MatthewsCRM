@@ -6,46 +6,103 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
-    <meta name="theme-color" content="#1e1b4b">
+    <meta name="theme-color" content="#16325c">
     <title>Matthews CRM</title>
     <style>
+        /* === Salesforce Lightning Experience theme === */
+        :root {
+            --sf-brand: #0176d3;
+            --sf-brand-dark: #014486;
+            --sf-brand-darker: #032d60;
+            --sf-navy: #16325c;
+            --sf-text: #181818;
+            --sf-text-weak: #444444;
+            --sf-text-weakest: #747474;
+            --sf-bg: #f3f3f3;
+            --sf-bg-alt: #fafaf9;
+            --sf-border: #c9c9c9;
+            --sf-border-weak: #e5e5e5;
+            --sf-success: #2e844a;
+            --sf-warning: #fe9339;
+            --sf-error: #ba0517;
+            --sf-info: #0176d3;
+        }
         * {box-sizing: border-box;}
-        html, body {height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #1f2937; background: #fff;}
-        body {display: flex; overflow: hidden;}
-        .sidebar {width: 200px; background: #1e1b4b; color: #e5e7eb; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; border-right: 1px solid #312e81;}
-        .sidebar-header {padding: 16px; border-bottom: 1px solid #312e81; font-weight: 600; color: #f3f4f6;}
-        .sidebar-nav {flex: 1; padding: 8px 0;}
-        .nav-item {padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent; transition: all 0.2s; color: #d1d5db; font-size: 13px;}
-        .nav-item:hover {background: rgba(255,255,255,0.05); color: #f3f4f6;}
-        .nav-item.active {background: rgba(99,102,241,0.1); border-left-color: #6366f1; color: #f3f4f6; font-weight: 500;}
-        .sidebar-footer {padding: 12px 16px; border-top: 1px solid #312e81; font-size: 12px; color: #9ca3af; max-height: 60px; overflow-y: auto;}
+        html, body {height: 100%; margin: 0; padding: 0; font-family: 'Salesforce Sans', -apple-system, BlinkMacSystemFont, Arial, sans-serif; font-size: 13px; color: var(--sf-text); background: var(--sf-bg);}
+        body {display: flex; flex-direction: column; overflow: hidden;}
+        /* Salesforce global header */
+        .sf-global-header {height: 56px; background: var(--sf-navy); color: #fff; display: flex; align-items: center; padding: 0 20px; gap: 16px; flex-shrink: 0; position: relative; z-index: 50;}
+        .sf-app-launcher {width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); border-radius: 4px; cursor: pointer; margin-right: 4px;}
+        .sf-app-launcher:hover {background: rgba(255,255,255,0.15);}
+        .sf-app-launcher svg {width: 20px; height: 20px; fill: #fff;}
+        .sf-app-title {font-size: 17px; font-weight: 600; color: #fff; letter-spacing: 0.2px;}
+        .sf-app-title .sep {opacity: 0.6; margin: 0 8px;}
+        .sf-app-title .sub {font-weight: 400; font-size: 13px; opacity: 0.9;}
+        .sf-global-search {flex: 1; max-width: 480px; margin-left: 20px;}
+        .sf-global-search input {width: 100%; padding: 7px 12px 7px 32px; border: none; border-radius: 4px; background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M49.7 45.4L37.8 33.5a18.6 18.6 0 10-4.3 4.3l11.9 11.9a3 3 0 004.3 0 3 3 0 000-4.3zM22.7 36.9a12.7 12.7 0 1112.7-12.7 12.7 12.7 0 01-12.7 12.7z' fill='%23747474'/></svg>") no-repeat 10px center; background-size: 14px; font-size: 13px; color: #444; outline: none;}
+        .sf-global-right {display: flex; align-items: center; gap: 8px; margin-left: auto;}
+        .sf-global-right .sf-global-btn {width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; cursor: pointer; border-radius: 4px;}
+        .sf-global-right .sf-global-btn:hover {background: rgba(255,255,255,0.1);}
+        .sf-avatar {width: 32px; height: 32px; border-radius: 50%; background: #1589ee; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; cursor: pointer;}
+        /* App nav tabs — below global header */
+        .sf-app-nav {height: 44px; background: #fff; border-bottom: 1px solid var(--sf-border-weak); display: flex; align-items: stretch; padding: 0 20px; flex-shrink: 0; position: relative; z-index: 40; overflow-x: auto; overflow-y: hidden;}
+        .sf-app-nav::-webkit-scrollbar {height: 3px;}
+        .sf-app-tab {display: flex; align-items: center; padding: 0 16px; cursor: pointer; color: var(--sf-text-weak); font-size: 13px; font-weight: 400; border-bottom: 3px solid transparent; white-space: nowrap; gap: 6px; transition: color 0.1s;}
+        .sf-app-tab:hover {color: var(--sf-brand); background: #fafaf9;}
+        .sf-app-tab.active {color: var(--sf-text); font-weight: 600; border-bottom-color: var(--sf-brand);}
+        .sf-app-tab .obj-icon {width: 20px; height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700;}
+        .sf-app-tab.active .obj-icon {outline: 1px solid rgba(0,0,0,0.05);}
+        .obj-icon-home {background: #f88962;}
+        .obj-icon-account {background: #7f8de1;}
+        .obj-icon-contact {background: #a094ed;}
+        .obj-icon-deal {background: #fcb95b;}
+        .obj-icon-activity {background: #48c3cc;}
+        .obj-icon-map {background: #56aadc;}
+        .obj-icon-email {background: #95aec5;}
+        .obj-icon-referral {background: #e6d478;}
+        .obj-icon-report {background: #04844b;}
+        .obj-icon-setting {background: #969696;}
+        /* Hide the old sidebar (keep DOM for code that references it) */
+        .sidebar {display: none !important;}
+        /* Legacy sidebar styling kept as no-op */
+        .sidebar-header, .sidebar-nav, .nav-item, .sidebar-footer {display: none;}
         .sync-status {font-size: 11px; margin-bottom: 4px; padding: 4px 0;}
         .status-indicator {display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px;}
-        .status-online {background: #22c55e;}
-        .status-offline {background: #ef4444;}
-        .main {flex: 1; display: flex; flex-direction: column; overflow: hidden;}
-        .topbar {height: 56px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 20px; gap: 16px; flex-shrink: 0;}
-        .breadcrumb {font-size: 13px; color: #6b7280;}
-        .breadcrumb a {color: #3b82f6; text-decoration: none; cursor: pointer;}
+        .status-online {background: var(--sf-success);}
+        .status-offline {background: var(--sf-error);}
+        .main {flex: 1; display: flex; flex-direction: column; overflow: hidden; width: 100%;}
+        .topbar {display: none;} /* legacy */
+        .breadcrumb {font-size: 12px; color: var(--sf-text-weak);}
+        .breadcrumb a {color: var(--sf-brand); text-decoration: none; cursor: pointer;}
         .breadcrumb a:hover {text-decoration: underline;}
-        .search-box {margin-left: auto; display: flex; align-items: center; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 12px; gap: 6px;}
-        .search-box input {border: none; background: transparent; outline: none; width: 200px; font-size: 13px;}
-        .content {flex: 1; overflow-y: auto; padding: 20px;}
+        .search-box {display: none;}
+        .content {flex: 1; overflow-y: auto; padding: 16px 16px 32px 16px; background: var(--sf-bg);}
         .loading-state {display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #6b7280;}
         .loading-spinner {width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;}
         @keyframes spin {to {transform: rotate(360deg);}}
-        .card {background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px;}
-        .stat-cards {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;}
-        .stat-card {background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center;}
-        .stat-card .label {font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;}
-        .stat-card .value {font-size: 28px; font-weight: 700; color: #1f2937;}
+        /* SF Lightning card */
+        .card {background: #fff; border: 1px solid var(--sf-border-weak); border-radius: 4px; padding: 0; margin-bottom: 12px; box-shadow: 0 2px 2px 0 rgba(0,0,0,0.05);}
+        .card > * {padding: 12px 16px;}
+        .card > *:not(:last-child) {border-bottom: 1px solid var(--sf-border-weak);}
+        .card > .card-body-flush {padding: 0;}
+        .card-header {display: flex; align-items: center; gap: 8px; background: var(--sf-bg-alt); min-height: 44px; font-weight: 600; color: var(--sf-text);}
+        .card-header .obj-icon {width: 24px; height: 24px; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700;}
+        /* Page-content section headings behave like flat section titles */
+        h2 {font-size: 18px; font-weight: 600; margin: 0 0 12px 0; color: var(--sf-text);}
+        h3 {font-size: 14px; font-weight: 700; margin: 0 0 8px 0; color: var(--sf-text);}
+        .stat-cards {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;}
+        .stat-card {background: #fff; border: 1px solid var(--sf-border-weak); border-radius: 4px; padding: 14px 16px; text-align: left; box-shadow: 0 2px 2px 0 rgba(0,0,0,0.05);}
+        .stat-card .label {font-size: 10px; color: var(--sf-text-weakest); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 700;}
+        .stat-card .value {font-size: 24px; font-weight: 300; color: var(--sf-text); line-height: 1.1;}
         .table-container {overflow-x: auto;}
         table {width: 100%; border-collapse: collapse; font-size: 13px;}
-        th {background: #f9fafb; padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; cursor: pointer; user-select: none;}
-        th:hover {background: #f3f4f6;}
-        td {padding: 12px; border-bottom: 1px solid #e5e7eb;}
-        tr:hover {background: #f9fafb;}
-        .badge {display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;}
+        th {background: var(--sf-bg-alt); padding: 6px 12px; text-align: left; font-weight: 700; color: var(--sf-text); border-bottom: 1px solid var(--sf-border); cursor: pointer; user-select: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; height: 32px;}
+        th:hover {background: #efefef;}
+        td {padding: 8px 12px; border-bottom: 1px solid var(--sf-border-weak); vertical-align: middle;}
+        tr:hover {background: #f8f8f8;}
+        table a {color: var(--sf-brand); text-decoration: none; font-weight: 600;}
+        table a:hover {text-decoration: underline;}
+        .badge {display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px;}
         .tier-1-vip {background: #dcfce7; color: #166534;}
         .tier-2 {background: #dbeafe; color: #1e40af;}
         .tier-3 {background: #fef3c7; color: #92400e;}
@@ -66,15 +123,19 @@
         .as-yellow {background: #eab308;}
         .as-red {background: #ef4444;}
         .as-gray {background: #d1d5db;}
-        button {padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #374151; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s;}
-        button:hover {background: #f3f4f6; border-color: #9ca3af;}
-        .btn-primary {background: #3b82f6; color: #fff; border-color: #3b82f6;}
-        .btn-primary:hover {background: #2563eb; border-color: #2563eb;}
-        .btn-small {padding: 4px 8px; font-size: 12px;}
-        .form-group {margin-bottom: 16px;}
-        label {display: block; font-weight: 500; margin-bottom: 4px; color: #374151; font-size: 13px;}
-        input, textarea, select {width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: inherit;}
-        input:focus, textarea:focus, select:focus {outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);}
+        /* SF Lightning buttons */
+        button {padding: 6px 14px; border: 1px solid var(--sf-border); border-radius: 4px; background: #fff; color: var(--sf-brand); cursor: pointer; font-size: 13px; font-weight: 400; transition: all 0.1s; line-height: 1.875rem; height: 32px; display: inline-flex; align-items: center; gap: 4px;}
+        button:hover {background: var(--sf-bg-alt); border-color: var(--sf-brand); color: var(--sf-brand-dark);}
+        button:active {background: #eef4fc;}
+        .btn-primary {background: var(--sf-brand); color: #fff; border-color: var(--sf-brand);}
+        .btn-primary:hover {background: var(--sf-brand-dark); border-color: var(--sf-brand-dark); color: #fff;}
+        .btn-small {padding: 2px 10px; font-size: 12px; height: 26px; line-height: 1.5rem;}
+        .btn-neutral {color: var(--sf-text); border-color: var(--sf-border);}
+        .form-group {margin-bottom: 12px;}
+        label {display: block; font-weight: 400; margin-bottom: 2px; color: var(--sf-text); font-size: 12px;}
+        input, textarea, select {width: 100%; padding: 0 10px; border: 1px solid var(--sf-border); border-radius: 4px; font-size: 13px; font-family: inherit; background: #fff; color: var(--sf-text); min-height: 32px; line-height: 1.875rem;}
+        textarea {padding: 8px 10px; min-height: 80px;}
+        input:focus, textarea:focus, select:focus {outline: none; border-color: var(--sf-brand); box-shadow: 0 0 3px var(--sf-brand);}
         textarea {resize: vertical; min-height: 80px;}
         .modal {display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;}
         .modal.show {display: flex;}
@@ -98,22 +159,51 @@
         .timeline-date {font-size: 11px; color: #6b7280; margin-bottom: 2px;}
         .timeline-title {font-weight: 500; font-size: 13px; margin-bottom: 2px;}
         .timeline-note {font-size: 12px; color: #6b7280;}
+        /* Salesforce Lightning Highlighted Panel (record header) */
+        .sf-highlight {background: #fff; border: 1px solid var(--sf-border-weak); border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 2px 2px 0 rgba(0,0,0,0.05);}
+        .sf-hl-top {display: flex; align-items: center; gap: 12px;}
+        .sf-hl-icon {width: 40px; height: 40px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0;}
+        .sf-hl-meta {flex: 1; min-width: 0;}
+        .sf-hl-eyebrow {font-size: 11px; color: var(--sf-text-weak); text-transform: none; font-weight: 400;}
+        .sf-hl-title {font-size: 18px; font-weight: 700; color: var(--sf-text); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+        .sf-hl-actions {display: flex; gap: 4px; align-items: center;}
+        .sf-hl-fields {display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--sf-border-weak);}
+        .sf-hl-field-label {font-size: 11px; color: var(--sf-text-weak); margin-bottom: 2px;}
+        .sf-hl-field-value {font-size: 13px; color: var(--sf-text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+        /* Salesforce Path (stage chevrons) */
+        .sf-path {display: flex; background: #fff; border: 1px solid var(--sf-border-weak); border-radius: 4px; overflow: hidden; margin-bottom: 12px; box-shadow: 0 2px 2px 0 rgba(0,0,0,0.05);}
+        .sf-path-step {flex: 1; padding: 10px 24px 10px 32px; background: var(--sf-bg-alt); color: var(--sf-text); font-size: 12px; font-weight: 600; position: relative; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--sf-border-weak); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%, 14px 50%);}
+        .sf-path-step:first-child {clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%);}
+        .sf-path-step:last-child {clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 14px 50%); border-right: none;}
+        .sf-path-step:first-child:last-child {clip-path: none;}
+        .sf-path-step.completed {background: #0176d3; color: #fff;}
+        .sf-path-step.current {background: #032d60; color: #fff;}
+        .sf-path-step:hover:not(.current) {background: #e5e5e5;}
+        /* Legacy detail styles reused */
         .detail-header {display: flex; align-items: center; gap: 16px; margin-bottom: 20px;}
-        .detail-header h1 {margin: 0; font-size: 24px;}
-        .detail-sidebar {width: 280px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; position: sticky; top: 0; max-height: calc(100vh - 76px); overflow-y: auto;}
-        .detail-main {flex: 1;}
-        .detail-container {display: flex; gap: 16px;}
+        .detail-header h1 {margin: 0; font-size: 20px;}
+        .detail-sidebar {width: 320px; background: #fff; border: 1px solid var(--sf-border-weak); border-radius: 4px; padding: 0; position: sticky; top: 0; max-height: calc(100vh - 76px); overflow-y: auto; box-shadow: 0 2px 2px 0 rgba(0,0,0,0.05);}
+        .detail-sidebar .side-header {padding: 10px 16px; background: var(--sf-bg-alt); font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--sf-text); letter-spacing: 0.3px; border-bottom: 1px solid var(--sf-border-weak);}
+        .detail-sidebar .side-body {padding: 12px 16px;}
+        .detail-main {flex: 1; min-width: 0;}
+        .detail-container {display: flex; gap: 12px;}
         .info-row {margin-bottom: 12px; font-size: 13px;}
-        .info-label {color: #6b7280; font-weight: 500; margin-bottom: 2px;}
-        .info-value {color: #1f2937; word-break: break-all;}
-        .info-value a {color: #3b82f6; text-decoration: none; cursor: pointer;}
+        .info-label {color: var(--sf-text-weak); font-weight: 400; margin-bottom: 2px; font-size: 12px;}
+        .info-value {color: var(--sf-text); word-break: break-word;}
+        .info-value a {color: var(--sf-brand); text-decoration: none; cursor: pointer;}
         .info-value a:hover {text-decoration: underline;}
-        .tabs {display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;}
-        .tab {padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #6b7280; font-weight: 500; transition: all 0.2s;}
-        .tab:hover {color: #374151;}
-        .tab.active {border-bottom-color: #3b82f6; color: #3b82f6;}
+        .tabs {display: flex; gap: 0; border-bottom: 1px solid var(--sf-border-weak); margin-bottom: 16px; background: #fff;}
+        .tab {padding: 10px 16px; cursor: pointer; border-bottom: 3px solid transparent; color: var(--sf-text-weak); font-weight: 400; font-size: 13px; transition: color 0.1s;}
+        .tab:hover {color: var(--sf-brand);}
+        .tab.active {border-bottom-color: var(--sf-brand); color: var(--sf-text); font-weight: 600;}
         .tab-content {display: none;}
         .tab-content.active {display: block;}
+        /* Related List (SF Lightning style) */
+        .related-list {margin-bottom: 12px;}
+        .related-list .card-header {cursor: default;}
+        .related-count {color: var(--sf-text-weak); font-weight: 400; font-size: 12px;}
+        .related-list table {font-size: 13px;}
+        .related-list td {padding: 6px 12px; font-size: 13px;}
         input[type="checkbox"] {width: auto; margin-right: 8px; cursor: pointer;}
         .map-container {display: flex; gap: 16px; height: calc(100vh - 76px);}
         .map-sidebar {width: 300px; border-right: 1px solid #e5e7eb; overflow-y: auto;}
@@ -220,7 +310,36 @@
     </style>
 </head>
 <body>
-    <div class="mobile-header">
+    <!-- SF Lightning global header -->
+    <div class="sf-global-header">
+        <div class="sf-app-launcher" title="App Launcher" onclick="app.navigate('dashboard')">
+            <svg viewBox="0 0 52 52"><path d="M9 2a7 7 0 100 14A7 7 0 009 2zm0 18a7 7 0 100 14A7 7 0 009 20zm0 18a7 7 0 100 14A7 7 0 009 38zM26 2a7 7 0 100 14 7 7 0 000-14zm0 18a7 7 0 100 14 7 7 0 000-14zm0 18a7 7 0 100 14 7 7 0 000-14zM43 2a7 7 0 100 14 7 7 0 000-14zm0 18a7 7 0 100 14 7 7 0 000-14zm0 18a7 7 0 100 14 7 7 0 000-14z"/></svg>
+        </div>
+        <div class="sf-app-title">Matthews CRM<span class="sep">|</span><span class="sub" id="breadcrumb">Dashboard</span></div>
+        <div class="sf-global-search">
+            <input type="text" id="globalSearch" placeholder="Search..." onkeyup="app.globalSearch(this.value)">
+        </div>
+        <div class="sf-global-right">
+            <span class="status-indicator status-online" id="statusIndicator" title="Ready"></span>
+            <span id="statusText" style="font-size:12px; color:#fff; opacity:0.9;">Ready</span>
+            <div class="sf-avatar" title="Dave Matthews">DM</div>
+        </div>
+    </div>
+    <!-- SF app navigation tabs -->
+    <div class="sf-app-nav" id="sfAppNav">
+        <div class="sf-app-tab active" data-view="dashboard" onclick="app.navigate('dashboard')"><span class="obj-icon obj-icon-home">H</span>Home</div>
+        <div class="sf-app-tab" data-view="accounts" onclick="app.navigate('accounts')"><span class="obj-icon obj-icon-account">A</span>Accounts</div>
+        <div class="sf-app-tab" data-view="contacts" onclick="app.navigate('contacts')"><span class="obj-icon obj-icon-contact">C</span>Contacts</div>
+        <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">O</span>Opportunities</div>
+        <div class="sf-app-tab" data-view="activities" onclick="app.navigate('activities')"><span class="obj-icon obj-icon-activity">T</span>Tasks</div>
+        <div class="sf-app-tab" data-view="map" onclick="app.navigate('map')"><span class="obj-icon obj-icon-map">M</span>Map</div>
+        <div class="sf-app-tab" data-view="emails" onclick="app.navigate('emails')"><span class="obj-icon obj-icon-email">E</span>Emails</div>
+        <div class="sf-app-tab" data-view="referrals" onclick="app.navigate('referrals')"><span class="obj-icon obj-icon-referral">R</span>Referrals</div>
+        <div class="sf-app-tab" data-view="reports" onclick="app.navigate('reports')"><span class="obj-icon obj-icon-report">R</span>Reports</div>
+        <div class="sf-app-tab" data-view="settings" onclick="app.navigate('settings')"><span class="obj-icon obj-icon-setting">S</span>Setup</div>
+    </div>
+
+    <div class="mobile-header" style="display:none;">
         <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
         <h1>Matthews CRM</h1>
         <div style="width: 32px;"></div>
@@ -228,35 +347,11 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">Matthews CRM</div>
-        <div class="sidebar-nav">
-            <div class="nav-item active" onclick="app.navigate('dashboard')">Dashboard</div>
-            <div class="nav-item" onclick="app.navigate('contacts')">Contacts</div>
-            <div class="nav-item" onclick="app.navigate('accounts')">Accounts</div>
-            <div class="nav-item" onclick="app.navigate('deals')">Pipeline</div>
-            <div class="nav-item" onclick="app.navigate('activities')">Activities</div>
-            <div class="nav-item" onclick="app.navigate('map')">Map View</div>
-            <div class="nav-item" onclick="app.navigate('emails')">Emails</div>
-            <div class="nav-item" onclick="app.navigate('referrals')">Referrals</div>
-            <div class="nav-item" onclick="app.navigate('reports')">Reports</div>
-            <div class="nav-item" onclick="app.navigate('settings')">Settings</div>
-        </div>
-        <div class="sidebar-footer">
-            <div class="sync-status">
-                <span class="status-indicator status-online" id="statusIndicator"></span>
-                <span id="statusText">Ready</span>
-            </div>
-            <div>v1.0 - Dave Matthews</div>
-        </div>
+        <div class="sidebar-nav"></div>
+        <div class="sidebar-footer"></div>
     </div>
 
     <div class="main">
-        <div class="topbar">
-            <div class="breadcrumb" id="breadcrumb">Dashboard</div>
-            <div class="search-box">
-                <input type="text" id="globalSearch" placeholder="Search..." onkeyup="app.globalSearch(this.value)">
-            </div>
-        </div>
-
         <div class="content" id="content"></div>
     </div>
 
@@ -780,8 +875,12 @@ const app = {
 
     navigate(view) {
         this.currentView = view;
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        event.target.classList.add('active');
+        // update SF top nav tabs
+        const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
+        const activeTabId = tabMap[view] || view;
+        document.querySelectorAll('.sf-app-tab').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('data-view') === activeTabId);
+        });
         this.render();
     },
 
@@ -790,7 +889,14 @@ const app = {
             document.getElementById('content').innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading data...</p></div>';
             return;
         }
-        document.getElementById('breadcrumb').textContent = this.currentView.charAt(0).toUpperCase() + this.currentView.slice(1);
+        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Opportunities', activities:'Tasks', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
+        document.getElementById('breadcrumb').textContent = labels[this.currentView] || this.currentView;
+        // sync tab active state in case of programmatic nav
+        const tabMap = {dashboard:'dashboard', contacts:'contacts', contactDetail:'contacts', accounts:'accounts', accountDetail:'accounts', deals:'deals', activities:'activities', map:'map', emails:'emails', referrals:'referrals', reports:'reports', settings:'settings'};
+        const activeTabId = tabMap[this.currentView] || this.currentView;
+        document.querySelectorAll('.sf-app-tab').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('data-view') === activeTabId);
+        });
         switch (this.currentView) {
             case 'dashboard': this.renderDashboard(); break;
             case 'contacts': this.renderContacts(); break;
@@ -1039,19 +1145,27 @@ const app = {
 
     renderDeals() {
         const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation', 'Closed Won', 'Closed Lost'];
+        const totalByStage = {};
+        stages.forEach(s => totalByStage[s] = this.data.deals.filter(d => d.stage === s).reduce((sum, d) => sum + (d.value || 0), 0));
         const html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h2 style="margin: 0;">Pipeline</h2>
-                <button class="btn-primary" onclick="app.openDealForm()">New Deal</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div class="obj-icon obj-icon-deal" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">O</div>
+                    <div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">Opportunities</div>
+                        <h2 style="margin:0;">All Opportunities</h2>
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="app.openDealForm()">New</button>
             </div>
             <div class="kanban-board">
                 ${stages.map(stage => `
                     <div class="kanban-column">
-                        <div class="kanban-header">${stage}</div>
+                        <div class="kanban-header">${stage} <span style="float:right; color:var(--sf-text-weak); font-weight:400;">$${totalByStage[stage].toFixed(0)}M</span></div>
                         ${this.data.deals.filter(d => d.stage === stage).map(d => `
                             <div class="kanban-card" onclick="app.editDeal('${d.id}')">
                                 <div class="kanban-card-title">${d.name}</div>
-                                <div class="kanban-card-meta">$${d.value}M | ${d.probability}%</div>
+                                <div class="kanban-card-meta">$${d.value}M · ${d.probability}%</div>
                             </div>
                         `).join('')}
                     </div>
@@ -1591,16 +1705,35 @@ const app = {
         const dsla = this.calculateDSLA(c.la);
         const asClass = 'as-' + this.calculateAS(dsla);
 
+        const initials = (c.name || '').split(' ').map(s => s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
         const html = `
             <div class="detail-back" onclick="app.currentView='contacts'; app.render();">&#8592; Back to Contacts</div>
-            <div class="detail-header">
-                <h1>${c.name}</h1>
-                <span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span>
-                <span class="activity-score ${asClass}"></span><span style="font-size:13px; color:#6b7280;">${dsla !== null ? dsla + ' days since last activity' : 'No activity recorded'}</span>
-                <button class="btn-primary btn-small" style="margin-left:auto;" onclick="app.editContact('${c.id}')">Edit</button>
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div class="sf-hl-icon obj-icon-contact">${initials || 'C'}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">Contact</div>
+                        <div class="sf-hl-title">${c.name}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button class="btn-small" onclick="app.editContact('${c.id}')">Edit</button>
+                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();">New Task</button>
+                        <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Log Email</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Account Name</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Phone</div><div class="sf-hl-field-value">${c.mobile || c.phone || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Email</div><div class="sf-hl-field-value">${c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Tier</div><div class="sf-hl-field-value"><span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span></div></div>
+                    <div><div class="sf-hl-field-label">Activity</div><div class="sf-hl-field-value"><span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + ' days' : 'None'}</div></div>
+                </div>
             </div>
             <div class="detail-container">
                 <div class="detail-sidebar">
+                    <div class="side-header">Contact Details</div>
+                    <div class="side-body">
                     ${c.title ? `<div class="detail-field"><div class="detail-field-label">Title</div><div class="detail-field-value">${c.title}</div></div>` : ''}
                     ${c.email ? `<div class="detail-field"><div class="detail-field-label">Email</div><div class="detail-field-value"><a href="mailto:${c.email}">${c.email}</a></div></div>` : ''}
                     ${c.mobile ? `<div class="detail-field"><div class="detail-field-label">Mobile</div><div class="detail-field-value"><a href="tel:${c.mobile}">${c.mobile}</a></div></div>` : ''}
@@ -1613,6 +1746,7 @@ const app = {
                     ${c.liSnP ? `<div class="detail-field"><div class="detail-field-label">LinkedIn/Social Notes</div><div class="detail-field-value">${c.liSnP}</div></div>` : ''}
                     ${c.tags ? `<div class="detail-field"><div class="detail-field-label">Tags</div><div class="detail-field-value">${c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ')}</div></div>` : ''}
                     ${c.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${c.notes}</div></div>` : ''}
+                    </div>
                 </div>
                 <div class="detail-main">
                     <div class="detail-tabs" id="contactDetailTabs">
@@ -1719,24 +1853,39 @@ const app = {
         const activities = this.data.activities.filter(act => act.accountId === a.id || contacts.some(c => c.id === act.contactId));
         const emails = this.data.emails.filter(e => contacts.some(c => c.id === e.contact_id));
 
+        const acctInitial = (a.name || '').split(' ').filter(Boolean).slice(0,2).map(s => s[0]).join('').toUpperCase() || 'A';
         const html = `
             <div class="detail-back" onclick="app.currentView='accounts'; app.render();">&#8592; Back to Accounts</div>
-            <div class="detail-header">
-                <h1>${a.name}</h1>
-                <span class="badge" style="background:#e0e7ff; color:#3730a3;">${a.type || 'Other'}</span>
-                <button class="btn-primary btn-small" style="margin-left:auto;" onclick="app.editAccount('${a.id}')">Edit</button>
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div class="sf-hl-icon obj-icon-account">${acctInitial}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">Account</div>
+                        <div class="sf-hl-title">${a.name}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
+                        <button class="btn-small" onclick="app.openContactForm(); document.getElementById('contactCompany').value='${a.id}';">New Contact</button>
+                        <button class="btn-small" onclick="app.openDealForm(); document.getElementById('dealAccount').value='${a.id}';">New Opportunity</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">Type</div><div class="sf-hl-field-value">${a.type || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Industry</div><div class="sf-hl-field-value">${a.industry || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Website</div><div class="sf-hl-field-value">${a.website ? `<a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank" style="color:var(--sf-brand);">${a.website}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Contacts</div><div class="sf-hl-field-value">${contacts.length}</div></div>
+                    <div><div class="sf-hl-field-label">Opportunities</div><div class="sf-hl-field-value">${deals.length}</div></div>
+                    <div><div class="sf-hl-field-label">Pipeline</div><div class="sf-hl-field-value">$${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div></div>
+                </div>
             </div>
             <div class="detail-container">
                 <div class="detail-sidebar">
+                    <div class="side-header">Account Details</div>
+                    <div class="side-body">
                     ${a.industry ? `<div class="detail-field"><div class="detail-field-label">Industry</div><div class="detail-field-value">${a.industry}</div></div>` : ''}
                     ${a.website ? `<div class="detail-field"><div class="detail-field-label">Website</div><div class="detail-field-value"><a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank">${a.website}</a></div></div>` : ''}
                     ${a.address ? `<div class="detail-field"><div class="detail-field-label">Address</div><div class="detail-field-value">${a.address}</div></div>` : ''}
                     ${a.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${a.notes}</div></div>` : ''}
-                    <div class="detail-field" style="margin-top:16px;">
-                        <div class="detail-field-label">Summary</div>
-                        <div style="font-size:13px; color:#6b7280;">
-                            ${contacts.length} contacts &bull; ${deals.length} deals &bull; $${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M pipeline
-                        </div>
                     </div>
                 </div>
                 <div class="detail-main">
