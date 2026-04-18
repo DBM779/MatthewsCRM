@@ -11,16 +11,7 @@
 // and paste the contents of supabase-setup.sql, click Run. Then run this script.
 
 import { execSync } from 'node:child_process';
-
-const SUPABASE_URL = 'https://bnkuieueimlyjovjilqi.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_Xj5u9741yzSNpZ7HXcY_iw_5JVrQmUN';
-
-const HEADERS = {
-  'apikey': SUPABASE_KEY,
-  'Authorization': `Bearer ${SUPABASE_KEY}`,
-  'Content-Type': 'application/json',
-  'Prefer': 'resolution=merge-duplicates,return=minimal'
-};
+import { writeFileSync } from 'node:fs';
 
 const log = (...a) => console.log('[migrate]', ...a);
 const err = (...a) => console.error('[migrate][ERR]', ...a);
@@ -34,39 +25,8 @@ function sfQuery(soql) {
   return rows;
 }
 
-async function upsert(table, rows) {
-  if (!rows.length) return 0;
-  let ok = 0, fail = 0;
-  for (let i = 0; i < rows.length; i += 100) {
-    const batch = rows.slice(i, i + 100);
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: { ...HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(batch),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        err(`${table} batch ${i}/${rows.length}: HTTP ${res.status} ${body.slice(0, 200)}`);
-        // try one at a time so a single bad row doesn't kill the batch
-        for (const row of batch) {
-          const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-            method: 'POST', headers: HEADERS, body: JSON.stringify([row]),
-          });
-          if (r.ok) ok++; else { fail++; if (fail < 5) err(`  row ${row.id}: HTTP ${r.status} ${(await r.text()).slice(0,120)}`); }
-        }
-      } else {
-        ok += batch.length;
-      }
-    } catch (e) {
-      err(`${table} batch ${i}: ${e.message}`);
-      fail += batch.length;
-    }
-    process.stdout.write(`\r  ${table}: ${ok} ok, ${fail} fail (${i + batch.length}/${rows.length})`);
-  }
-  process.stdout.write('\n');
-  return ok;
-}
+// All data collected in memory, then written to a single JSON file at the end
+const output = { accounts: [], contacts: [], deals: [], activities: [] };
 
 const addr = (r, prefix) => {
   const parts = [r[`${prefix}Street`], [r[`${prefix}City`], r[`${prefix}State`], r[`${prefix}PostalCode`]].filter(Boolean).join(' ')]
@@ -94,8 +54,8 @@ async function main() {
     notes: a.Description || null,
     created_at: a.CreatedDate || new Date().toISOString(),
   }));
-  const accOk = await upsert('accounts', accountRows);
-  log(`Accounts: ${accOk}/${accountRows.length} inserted\n`);
+  output.accounts = accountRows;
+  log(`Accounts: ${accountRows.length} extracted\n`);
 
   // ---------- CONTACTS ----------
   log('── Contacts ──');
@@ -118,8 +78,8 @@ async function main() {
     notes: c.Description || null,
     created_at: c.CreatedDate || new Date().toISOString(),
   }));
-  const conOk = await upsert('contacts', contactRows);
-  log(`Contacts: ${conOk}/${contactRows.length} inserted\n`);
+  output.contacts = contactRows;
+  log(`Contacts: ${contactRows.length} extracted\n`);
 
   // ---------- OPPORTUNITIES → DEALS ----------
   log('── Opportunities → Deals ──');
@@ -138,8 +98,8 @@ async function main() {
     notes: d.Description || null,
     created_at: d.CreatedDate || new Date().toISOString(),
   }));
-  const dealOk = await upsert('deals', dealRows);
-  log(`Deals: ${dealOk}/${dealRows.length} inserted\n`);
+  output.deals = dealRows;
+  log(`Deals: ${dealRows.length} extracted\n`);
 
   // ---------- TASKS + EVENTS → ACTIVITIES ----------
   log('── Tasks + Events → Activities ──');
@@ -182,16 +142,24 @@ async function main() {
     created_at: e.CreatedDate || new Date().toISOString(),
   }));
 
-  const activityOk = await upsert('activities', [...taskRows, ...eventRows]);
-  log(`Activities: ${activityOk}/${taskRows.length + eventRows.length} inserted\n`);
+  output.activities = [...taskRows, ...eventRows];
+  log(`Activities: ${taskRows.length + eventRows.length} extracted\n`);
+
+  // Write JSON file
+  const outFile = 'salesforce-export.json';
+  writeFileSync(outFile, JSON.stringify(output, null, 2));
 
   log('══════════════════════════════════════════');
-  log(`Migration complete.`);
-  log(`  Accounts:   ${accOk}/${accountRows.length}`);
-  log(`  Contacts:   ${conOk}/${contactRows.length}`);
-  log(`  Deals:      ${dealOk}/${dealRows.length}`);
-  log(`  Activities: ${activityOk}/${taskRows.length + eventRows.length}`);
-  log(`\nOpen https://dbm779.github.io/MatthewsCRM/ and refresh to see your data.`);
+  log(`Export complete → ${outFile}`);
+  log(`  Accounts:   ${output.accounts.length}`);
+  log(`  Contacts:   ${output.contacts.length}`);
+  log(`  Deals:      ${output.deals.length}`);
+  log(`  Activities: ${output.activities.length}`);
+  log(`\nNext steps:`);
+  log(`  1. Open https://dbm779.github.io/MatthewsCRM/`);
+  log(`  2. Go to Setup → Import → Import Salesforce JSON`);
+  log(`  3. Select the file: ${outFile}`);
+  log(`  4. Done — your data is loaded.`);
 }
 
 main().catch(e => { err(e.stack || e.message); process.exit(1); });
