@@ -892,14 +892,14 @@ const app = {
         const maxCount = Math.max(...stageCounts, 1);
 
         const html = `
-            <h2>Dashboard</h2>
+            <h2>Home</h2>
             <div class="stat-cards">
-                <div class="stat-card"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
-                <div class="stat-card"><div class="label">Active Deals</div><div class="value">${activeDeals.length}</div></div>
-                <div class="stat-card"><div class="label">Pipeline Value</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
-                <div class="stat-card"><div class="label">Won Value</div><div class="value">$${wonVal.toFixed(0)}M</div></div>
-                <div class="stat-card"><div class="label">Overdue Tasks</div><div class="value" style="color:${overdue.length ? '#ef4444' : '#22c55e'}">${overdue.length}</div></div>
-                <div class="stat-card"><div class="label">Win Rate</div><div class="value">${(wonDeals.length + lostDeals.length) > 0 ? Math.round(wonDeals.length / (wonDeals.length + lostDeals.length) * 100) : 0}%</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('active')"><div class="label">Active Opportunities</div><div class="value">${activeDeals.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('active')"><div class="label">Pipeline Value</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('won')"><div class="label">Won Value</div><div class="value" style="color:var(--sf-success);">$${wonVal.toFixed(0)}M</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterActivities('overdue')"><div class="label">Overdue Tasks</div><div class="value" style="color:${overdue.length ? 'var(--sf-error)' : 'var(--sf-success)'}">${overdue.length}</div></div>
             </div>
             <div class="dash-grid">
                 <div class="dash-section">
@@ -918,26 +918,29 @@ const app = {
                 </div>
                 <div class="dash-section">
                     <h3 style="color:${overdue.length ? '#ef4444' : '#374151'}">Overdue Tasks (${overdue.length})</h3>
-                    ${overdue.length ? overdue.slice(0, 5).map(a => `
-                        <div class="dash-task-item">
-                            <div><strong>${a.subject}</strong><br><span style="font-size:11px; color:#ef4444;">Due ${a.dueDate}</span></div>
+                    ${overdue.length ? overdue.slice(0, 5).map(a => {
+                        const con = this.data.contacts.find(c => c.id === a.contactId);
+                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}<br><span style="font-size:11px; color:var(--sf-error);">Due ${a.dueDate}</span></div>
                             <span class="task-badge task-badge-overdue">${a.type}</span>
-                        </div>
-                    `).join('') : '<p class="text-muted" style="font-size:13px;">No overdue tasks</p>'}
+                        </div>`;
+                    }).join('') : '<p class="text-muted" style="font-size:13px;">No overdue tasks</p>'}
                     <h3 style="margin-top: 16px;">Due Today (${dueToday.length})</h3>
-                    ${dueToday.length ? dueToday.map(a => `
-                        <div class="dash-task-item">
-                            <div><strong>${a.subject}</strong></div>
+                    ${dueToday.length ? dueToday.map(a => {
+                        const con = this.data.contacts.find(c => c.id === a.contactId);
+                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
                             <span class="task-badge task-badge-today">${a.type}</span>
-                        </div>
-                    `).join('') : '<p class="text-muted" style="font-size:13px;">Nothing due today</p>'}
+                        </div>`;
+                    }).join('') : '<p class="text-muted" style="font-size:13px;">Nothing due today</p>'}
                     <h3 style="margin-top: 16px;">Upcoming This Week (${upcoming.length})</h3>
-                    ${upcoming.length ? upcoming.slice(0, 5).map(a => `
-                        <div class="dash-task-item">
-                            <div><strong>${a.subject}</strong><br><span style="font-size:11px; color:#6b7280;">Due ${a.dueDate}</span></div>
+                    ${upcoming.length ? upcoming.slice(0, 5).map(a => {
+                        const con = this.data.contacts.find(c => c.id === a.contactId);
+                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}<br><span style="font-size:11px; color:var(--sf-text-weak);">Due ${a.dueDate}</span></div>
                             <span class="task-badge task-badge-upcoming">${a.type}</span>
-                        </div>
-                    `).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming tasks</p>'}
+                        </div>`;
+                    }).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming tasks</p>'}
                 </div>
                 <div class="dash-section">
                     <h3>Upcoming Birthdays</h3>
@@ -949,15 +952,29 @@ const app = {
                     `).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming birthdays</p>'}
                 </div>
                 <div class="dash-section">
+                    <h3>Recently Viewed</h3>
+                    ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 8).map(r => `
+                        <div class="dash-task-item" style="cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="obj-icon obj-icon-${r.type}" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
+                                <span style="font-weight:500;">${r.name}</span>
+                            </div>
+                            <span style="font-size:11px; color:var(--sf-text-weakest);">${r.type}</span>
+                        </div>
+                    `).join('') : '<p class="text-muted" style="font-size:13px;">No recently viewed records</p>'}
+                </div>
+                <div class="dash-section">
                     <h3>Recent Activities</h3>
                     <div class="timeline">
-                        ${this.data.activities.slice(-6).reverse().map(a => `
-                            <div class="timeline-item ${a.type.toLowerCase()}">
-                                <div class="timeline-date">${a.dueDate || new Date(a.createdAt).toLocaleDateString()}</div>
+                        ${this.data.activities.slice(-10).reverse().map(a => {
+                            const con = this.data.contacts.find(c => c.id === a.contactId);
+                            const acct = this.data.accounts.find(ac => ac.id === a.accountId);
+                            return `<div class="timeline-item ${a.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                                <div class="timeline-date">${a.dueDate || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '')}</div>
                                 <div class="timeline-title">${a.subject}</div>
-                                <div class="timeline-note">${a.type} - ${a.status}</div>
-                            </div>
-                        `).join('')}
+                                <div class="timeline-note">${a.type} - ${a.status}${con ? ` · <a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}${acct ? ` · ${acct.name}` : ''}</div>
+                            </div>`;
+                        }).join('')}
                     </div>
                 </div>
             </div>
@@ -1046,6 +1063,38 @@ const app = {
         this.renderContacts();
     },
 
+    // Dashboard drill-down helpers
+    dashFilterDeals(filter) {
+        this.currentView = 'deals';
+        this.render();
+        // if filter === 'won', scroll to Closed Won column
+    },
+    dashFilterActivities(filter) {
+        this.currentView = 'activities';
+        this.render();
+    },
+
+    // Recently viewed tracking
+    recentlyViewed: [],
+    trackView(type, id, name) {
+        this.recentlyViewed = this.recentlyViewed.filter(r => !(r.type === type && r.id === id));
+        this.recentlyViewed.unshift({type, id, name, time: Date.now()});
+        if (this.recentlyViewed.length > 15) this.recentlyViewed.length = 15;
+    },
+
+    // Email auto-link: match incoming email to contact by email address
+    autoLinkEmail(emailRecord) {
+        if (!emailRecord.contact_id && emailRecord.from_addr) {
+            const match = this.data.contacts.find(c => c.email && c.email.toLowerCase() === emailRecord.from_addr.toLowerCase());
+            if (match) emailRecord.contact_id = match.id;
+        }
+        if (!emailRecord.contact_id && emailRecord.to_addr) {
+            const match = this.data.contacts.find(c => c.email && c.email.toLowerCase() === emailRecord.to_addr.toLowerCase());
+            if (match) emailRecord.contact_id = match.id;
+        }
+        return emailRecord;
+    },
+
     renderAccounts() {
         const html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -1059,20 +1108,23 @@ const app = {
                             <tr><th>Name</th><th>Industry</th><th>Type</th><th>Website</th><th>Address</th><th>Contacts</th><th>Actions</th></tr>
                         </thead>
                         <tbody>
-                            ${this.data.accounts.map(a => `
-                                <tr>
-                                    <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: #3b82f6;">${a.name}</a></td>
+                            ${this.data.accounts.map(a => {
+                                const conCount = this.data.contacts.filter(c => c.accountId === a.id).length;
+                                const dealCount = this.data.deals.filter(d => d.accountId === a.id).length;
+                                const dealVal = this.data.deals.filter(d => d.accountId === a.id).reduce((s,d) => s + (d.value||0), 0);
+                                return `<tr>
+                                    <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: var(--sf-brand);">${a.name}</a></td>
                                     <td>${a.industry || ''}</td>
                                     <td>${a.type || ''}</td>
                                     <td>${a.website || ''}</td>
                                     <td>${a.address || ''}</td>
-                                    <td>${this.data.contacts.filter(c => c.accountId === a.id).length}</td>
+                                    <td><a onclick="app.contactFilters.company='${a.id}'; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${conCount}</a></td>
                                     <td>
                                         <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
                                         <button class="btn-small" onclick="app.deleteAccount('${a.id}')">Delete</button>
                                     </td>
-                                </tr>
-                            `).join('')}
+                                </tr>`;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -1366,11 +1418,27 @@ const app = {
             date: document.getElementById('emailDate').value || null,
             body: document.getElementById('emailBody').value || null
         };
+        this.autoLinkEmail(email);
         if (id) {
             const idx = this.data.emails.findIndex(x => x.id === id);
             if (idx >= 0) this.data.emails[idx] = {...this.data.emails[idx], ...email};
         } else {
-            this.data.emails.push({...email, id: 'eml-' + Date.now(), created_at: new Date().toISOString()});
+            const newEmail = {...email, id: 'eml-' + Date.now(), created_at: new Date().toISOString()};
+            this.autoLinkEmail(newEmail);
+            this.data.emails.push(newEmail);
+            // auto-create activity for email tracking
+            this.data.activities.push({
+                id: 'act-' + Date.now() + '-e',
+                type: 'Email',
+                subject: 'Email: ' + (email.subject || '(no subject)'),
+                contactId: newEmail.contact_id || null,
+                accountId: null,
+                dealId: newEmail.deal_id || null,
+                dueDate: newEmail.date || new Date().toISOString().split('T')[0],
+                status: 'Closed',
+                notes: (email.from_addr ? 'From: ' + email.from_addr + ' ' : '') + (email.to_addr ? 'To: ' + email.to_addr : ''),
+                createdAt: new Date().toISOString()
+            });
         }
         this.persist();
         this.closeModal('modalEmail');
@@ -1614,6 +1682,7 @@ const app = {
     viewContact(id) {
         this.currentRecord = this.data.contacts.find(c => c.id === id);
         if (!this.currentRecord) return;
+        this.trackView('contact', id, this.currentRecord.name);
         this.currentView = 'contactDetail';
         this.render();
     },
@@ -1766,6 +1835,7 @@ const app = {
     viewAccount(id) {
         this.currentRecord = this.data.accounts.find(a => a.id === id);
         if (!this.currentRecord) return;
+        this.trackView('account', id, this.currentRecord.name);
         this.currentView = 'accountDetail';
         this.render();
     },
