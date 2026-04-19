@@ -2731,10 +2731,10 @@ const app = {
                         <!-- Composer buttons -->
                         <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; gap:4px; flex-wrap:wrap;">
                             <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();">New Task</button>
-                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">New Event</button>
-                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">Log a Call</button>
-                                <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Email</button>
+                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e0f7fa; color:#00838f; border-color:#b2ebf2;">☑️ Task</button>
+                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#fff3e0; color:#e65100; border-color:#ffe0b2;">📅 Event</button>
+                                <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e8f5e9; color:#2e7d32; border-color:#c8e6c9;">📞 Call</button>
+                                <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();" style="background:#e8eaf6; color:#3949ab; border-color:#c5cae9;">📧 Email</button>
                             </div>
                         </div>
                         <!-- Filters -->
