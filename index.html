@@ -1327,11 +1327,12 @@ const app = {
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         let filtered = this.data.contacts;
         if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
-        if (f.tag) filtered = filtered.filter(c => (c.tags || '').split(',').map(t => t.trim()).includes(f.tag));
-        if (f.company) filtered = filtered.filter(c => (c.accountId || c.account_id) === f.company);
         if (f.text) {
             const lt = f.text.toLowerCase();
-            filtered = filtered.filter(c => (c.name || '').toLowerCase().includes(lt) || (c.email || '').toLowerCase().includes(lt) || (c.mobile || '').includes(lt));
+            filtered = filtered.filter(c => {
+                const searchable = [c.name, c.email, c.mobile, c.phone, c.title, c.address, c.department, c.tags, c.notes, c.lead_source].filter(Boolean).join(' ').toLowerCase();
+                return searchable.includes(lt);
+            });
         }
 
         const sorted = this._applySortToList(filtered.map(c => {
@@ -1347,6 +1348,28 @@ const app = {
                     <button class="btn-primary" onclick="app.openContactForm()">New Contact</button>
                 </div>
             </div>
+            <div class="stat-cards" style="margin-bottom:8px;">
+                <div class="stat-card" style="cursor:pointer; ${!f.tier?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.updateContactFilter('tier','')">
+                    <div class="label">Total Contacts</div>
+                    <div class="value">${this.data.contacts.length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
+                    <div class="label">1-VIP</div>
+                    <div class="value" style="color:#166534;">${this.data.contacts.filter(c=>c.tier==='1-VIP').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
+                    <div class="label">Tier 2</div>
+                    <div class="value" style="color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${f.tier==='3'?'border-bottom:3px solid #92400e;':''}" onclick="app.updateContactFilter('tier','${f.tier==='3'?'':'3'}')">
+                    <div class="label">Tier 3</div>
+                    <div class="value" style="color:#92400e;">${this.data.contacts.filter(c=>c.tier==='3').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${f.tier==='4'||f.tier==='5'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app.updateContactFilter('tier','${f.tier==='4'?'':'4'}')">
+                    <div class="label">Tier 4-5</div>
+                    <div class="value" style="color:var(--sf-text-weakest);">${this.data.contacts.filter(c=>c.tier==='4'||c.tier==='5').length}</div>
+                </div>
+            </div>
             ${this._showColPicker ? `<div class="card" style="padding:10px 14px; margin-bottom:8px;">
                 <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Show/Hide Columns:</div>
                 <div style="display:flex; gap:4px; flex-wrap:wrap;">
@@ -1355,24 +1378,10 @@ const app = {
                     </label>`).join('')}
                 </div>
             </div>` : ''}
-            <div class="card" style="margin-bottom:8px; padding:8px 12px;">
-                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                    <input type="text" placeholder="Search name/email/mobile" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-width:160px; min-height:28px; padding:2px 8px; font-size:12px;">
-                    <select onchange="app.updateContactFilter('tier', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
-                        <option value="">All tiers</option>
-                        ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
-                    </select>
-                    <select onchange="app.updateContactFilter('company', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
-                        <option value="">All companies</option>
-                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===(a.id)?'selected':''}>${a.name}</option>`).join('')}
-                    </select>
-                    <select onchange="app.updateContactFilter('tag', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
-                        <option value="">All tags</option>
-                        ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
-                    </select>
-                    <button class="btn-small" onclick="app.clearContactFilters()">Clear</button>
-                    <span style="font-size:11px; color:var(--sf-text-weakest);">${sorted.length} of ${this.data.contacts.length}</span>
-                </div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <input type="text" placeholder="Search contacts…" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                ${f.text || f.tier ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${sorted.length} results</span>
             </div>
             <div class="card">
                 <div class="table-container">
