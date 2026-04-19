@@ -2558,7 +2558,35 @@ app.navigate = function(view) {
     }
 };
 
-document.addEventListener('DOMContentLoaded', () => app.init());
+document.addEventListener('DOMContentLoaded', async () => {
+    // Auto-sync: if #sync in URL, fetch data from local sync server
+    if (location.hash === '#sync') {
+        try {
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;font-family:sans-serif;background:#f3f3f3;"><div style="font-size:20px;font-weight:600;color:#032d60;margin-bottom:12px;">Syncing from Salesforce...</div><div style="font-size:14px;color:#444;">Loading your contacts, accounts, opportunities, and activities.</div></div>';
+            const res = await fetch('http://localhost:9876/');
+            const data = await res.json();
+            // Merge with existing or replace
+            const existing = JSON.parse(localStorage.getItem('matthewsCRM') || '{}');
+            const merged = {
+                contacts: data.contacts || existing.contacts || [],
+                accounts: data.accounts || existing.accounts || [],
+                deals: data.deals || existing.deals || [],
+                activities: data.activities || existing.activities || [],
+                emails: existing.emails || [],
+                referrals: existing.referrals || [],
+                dealContacts: existing.dealContacts || []
+            };
+            localStorage.setItem('matthewsCRM', JSON.stringify(merged));
+            location.hash = '';
+            location.reload();
+            return;
+        } catch (e) {
+            console.error('Sync failed:', e);
+            location.hash = '';
+        }
+    }
+    app.init();
+});
     </script>
 </body>
 </html>
