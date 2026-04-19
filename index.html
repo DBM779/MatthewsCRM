@@ -2778,11 +2778,12 @@ const app = {
                         <!-- Past Activity -->
                         <div style="padding:12px 16px; max-height:400px; overflow-y:auto;">
                             ${allTimeline.filter(a => !isOpen(a.status)).length ? allTimeline.filter(a => !isOpen(a.status)).map(a => {
-                                const iconColors = {Call:'#c8e6c9', Email:'#c5cae9', Meeting:'#ffe0b2', Task:'#b2ebf2', Note:'#c8e6c9', 'Follow-up':'#ffe0b2'};
-                                const color = iconColors[a.type] || '#94a3b8';
+                                const btnStyles = {Call:{bg:'#e8f5e9',color:'#2e7d32',border:'#c8e6c9'}, Email:{bg:'#e8eaf6',color:'#3949ab',border:'#c5cae9'}, Meeting:{bg:'#fff3e0',color:'#e65100',border:'#ffe0b2'}, Task:{bg:'#e0f7fa',color:'#00838f',border:'#b2ebf2'}, Note:{bg:'#e8f5e9',color:'#2e7d32',border:'#c8e6c9'}, 'Follow-up':{bg:'#fff3e0',color:'#e65100',border:'#ffe0b2'}};
+                                const iconEmojis = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+                                const st = btnStyles[a.type] || {bg:'#f3f3f3',color:'#444',border:'#ccc'};
                                 const dd = a.dueDate || a.due_date || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '');
                                 return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="${a._isEmail ? '' : `app.editActivity('${a.id}')`}">
-                                    <div style="width:24px; height:24px; border-radius:50%; background:${color}; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${{Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'}[a.type]||'📋'}</div>
+                                    <div style="display:inline-flex; align-items:center; padding:3px 8px; font-size:12px; border-radius:4px; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; flex-shrink:0; height:26px;">${iconEmojis[a.type]||'📋'} ${a.type}</div>
                                     <div style="flex:1; min-width:0;">
                                         <div style="font-size:12px; font-weight:600;">${a.subject || '(no subject)'}</div>
                                         <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.location ? ' · 📍' + a.location : ''}</div>
