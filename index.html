@@ -2782,10 +2782,10 @@ const app = {
                                 const iconEmojis = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
                                 const st = btnStyles[a.type] || {bg:'#f3f3f3',color:'#444',border:'#ccc'};
                                 const dd = a.dueDate || a.due_date || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '');
-                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="${a._isEmail ? '' : `app.editActivity('${a.id}')`}">
+                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); position:relative; overflow:visible;">
                                     <div style="display:inline-flex; align-items:center; padding:3px 8px; font-size:12px; border-radius:4px; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; flex-shrink:0; height:26px;">${iconEmojis[a.type]||'📋'} ${a.type}</div>
                                     <div style="flex:1; min-width:0;">
-                                        <div style="font-size:12px; font-weight:600;">${a.subject || '(no subject)'}</div>
+                                        <div style="font-size:12px; font-weight:600;"><a onclick="app.editActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand);">${a.subject || '(no subject)'}</a></div>
                                         <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.location ? ' · 📍' + a.location : ''}</div>
                                         ${a.notes ? `<div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; max-height:32px; overflow:hidden;">${(a.notes||'').substring(0,120)}</div>` : ''}
                                     </div>
