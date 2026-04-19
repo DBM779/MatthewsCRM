@@ -1686,9 +1686,9 @@ const app = {
                 <h2 style="margin: 0;">Accounts</h2>
                 <button class="btn-primary" onclick="app.openAccountForm()">New Account</button>
             </div>
-            <div class="card">
-                <div class="table-container">
-                    <table>
+            <div class="card" style="overflow:hidden;">
+                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
+                    <table class="compact-table">
                         <thead>
                             <tr>
                                 <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
@@ -1835,8 +1835,8 @@ const app = {
                 ${af.text||af.type||af.status ? `<button class="btn-small" onclick="app._actFilter={type:'',status:'',text:''}; app.renderActivities();">Clear</button>` : ''}
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
-            <div class="card">
-                <div class="table-container">
+            <div class="card" style="overflow:hidden;">
+                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
                     <table class="compact-table">
                         <thead>
                             <tr>
