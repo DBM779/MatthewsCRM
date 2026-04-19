@@ -1495,53 +1495,55 @@ const app = {
         this._markerLayerGroup = L.layerGroup().addTo(map);
 
         const loadingEl = document.getElementById('mapLoadingMsg');
+        const cache = this._loadGeocodeCache();
         const withAddr = items.filter(i => i.address);
+        const uncached = withAddr.filter(i => !cache[i.address.toLowerCase().trim()]);
 
-        // Phase 1: Geocode ALL addresses first (contacts AND accounts)
-        if (loadingEl) loadingEl.textContent = `Geocoding ${withAddr.length} addresses…`;
-        let geocoded = 0, failed = 0;
-
-        for (const item of withAddr) {
-            const alreadyCached = !!this._loadGeocodeCache()[item.address.toLowerCase().trim()];
-
-            if (loadingEl) {
-                const pct = Math.round(((geocoded + failed) / withAddr.length) * 100);
-                loadingEl.textContent = `Geocoding: ${geocoded + failed}/${withAddr.length} (${pct}%) — ${item._type}: ${item.name}`;
+        // Fast path: everything is cached — create markers instantly
+        if (uncached.length === 0) {
+            if (loadingEl) loadingEl.style.display = 'none';
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (!item.address) continue;
+                const coords = cache[item.address.toLowerCase().trim()];
+                if (!coords) continue;
+                this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
             }
-
-            const coords = await this.geocodeAddress(item.address);
-            if (coords) { geocoded++; } else { failed++; }
-            if (!alreadyCached) await new Promise(r => setTimeout(r, 1100));
+            this._updateSidebarStatus(items);
+            this.applyMapFilters();
+            return;
         }
 
-        // Phase 2: Create markers for ALL successfully geocoded items
-        if (loadingEl) loadingEl.textContent = `Creating ${geocoded} pins…`;
+        // Slow path: geocode uncached addresses, then build all markers
+        if (loadingEl) loadingEl.textContent = `Geocoding ${uncached.length} new addresses (${withAddr.length - uncached.length} cached)…`;
+        let done = 0, failed = 0;
 
+        for (const item of uncached) {
+            if (loadingEl) {
+                const pct = Math.round((done / uncached.length) * 100);
+                loadingEl.textContent = `Geocoding: ${done}/${uncached.length} (${pct}%) — ${item._type}: ${item.name}`;
+            }
+            const coords = await this.geocodeAddress(item.address);
+            if (coords) { done++; } else { failed++; }
+            await new Promise(r => setTimeout(r, 1100));
+        }
+
+        // Build markers for ALL items (cached + newly geocoded)
+        if (loadingEl) loadingEl.textContent = `Creating pins…`;
+        const freshCache = this._loadGeocodeCache();
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (!item.address) continue;
-            const coords = this._loadGeocodeCache()[item.address.toLowerCase().trim()];
+            const coords = freshCache[item.address.toLowerCase().trim()];
             if (!coords) continue;
-            const marker = this._createMapMarker(item, coords);
-            this.mapMarkers.push({marker, coords, item, idx: i});
+            this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
         }
 
-        // Phase 3: Update sidebar to show geocode status
-        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
-            const idx = parseInt(el.getAttribute('data-idx'));
-            const item = items[idx];
-            if (!item || !item.address) return;
-            const hasMarker = this.mapMarkers.some(m => m.idx === idx);
-            const statusDot = hasMarker ? '🟢' : '🔴';
-            const nameEl = el.querySelector('.map-item-name');
-            if (nameEl && !nameEl.textContent.startsWith('🟢') && !nameEl.textContent.startsWith('🔴')) {
-                nameEl.textContent = statusDot + ' ' + nameEl.textContent;
-            }
-        });
+        this._updateSidebarStatus(items);
 
         if (loadingEl) {
             if (failed > 0) {
-                loadingEl.textContent = `${geocoded} plotted, ${failed} couldn't be found`;
+                loadingEl.textContent = `${this.mapMarkers.length} plotted, ${failed} couldn't be found`;
                 loadingEl.style.color = 'var(--sf-warning)';
                 loadingEl.style.fontSize = '12px';
             } else {
@@ -1549,10 +1551,23 @@ const app = {
             }
         }
 
-        console.log(`[Map] Markers created: ${this.mapMarkers.length} (contacts: ${this.mapMarkers.filter(m=>m.item._type==='contact').length}, accounts: ${this.mapMarkers.filter(m=>m.item._type==='account').length})`);
-
-        // Apply current filters (shows all by default)
         this.applyMapFilters();
+    },
+
+    _updateSidebarStatus(items) {
+        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
+            const idx = parseInt(el.getAttribute('data-idx'));
+            const item = items[idx];
+            if (!item || !item.address) return;
+            const hasMarker = this.mapMarkers.some(m => m.idx === idx);
+            const dot = hasMarker
+                ? '<span style="color:#2e844a; font-size:8px; margin-right:4px;">●</span>'
+                : '<span style="color:#ba0517; font-size:8px; margin-right:4px;">●</span>';
+            const nameEl = el.querySelector('.map-item-name');
+            if (nameEl && !nameEl.innerHTML.includes('●')) {
+                nameEl.innerHTML = dot + nameEl.textContent;
+            }
+        });
     },
 
     _focusedIdx: null,
