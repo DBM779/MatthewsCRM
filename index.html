@@ -602,9 +602,19 @@ const app = {
         try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
         try { const ss = JSON.parse(localStorage.getItem('matthewsCRM_sortState')); if (ss) this._sortState = ss; } catch {}
         this.setupEventListeners();
-        const savedView = location.hash.replace('#','');
-        if (savedView && savedView !== 'sync' && ['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedView)) {
-            this.currentView = savedView;
+        const savedHash = location.hash.replace('#','');
+        if (savedHash && savedHash !== 'sync') {
+            if (savedHash.startsWith('contactDetail:')) {
+                const cid = savedHash.split(':')[1];
+                this.currentRecord = this.data.contacts.find(c => c.id === cid);
+                if (this.currentRecord) this.currentView = 'contactDetail';
+            } else if (savedHash.startsWith('accountDetail:')) {
+                const aid = savedHash.split(':')[1];
+                this.currentRecord = this.data.accounts.find(a => a.id === aid);
+                if (this.currentRecord) this.currentView = 'accountDetail';
+            } else if (['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedHash)) {
+                this.currentView = savedHash;
+            }
         }
         this.render();
         this.updateSelectOptions();
@@ -2558,6 +2568,7 @@ const app = {
         if (!this.currentRecord) return;
         this.trackView('contact', id, this.currentRecord.name);
         this.currentView = 'contactDetail';
+        location.hash = 'contactDetail:' + id;
         this.render();
     },
 
@@ -2614,12 +2625,12 @@ const app = {
                 <!-- LEFT COLUMN — Related / Details tabs -->
                 <div style="flex:1; min-width:0;">
                     <div class="detail-tabs" id="contactDetailTabs" style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px 4px 0 0; margin-bottom:0;">
-                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdRelated')">Related</div>
-                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdDetails')">Details</div>
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdDetails')">Details</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdRelated')">Related</div>
                     </div>
 
-                    <!-- RELATED (default, like SF) -->
-                    <div id="cdRelated" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
+                    <!-- RELATED -->
+                    <div id="cdRelated" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
                         <div class="related-list card" style="margin-bottom:12px;">
                             <div class="card-header">
                                 <span class="obj-icon obj-icon-deal" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">O</span>
@@ -2663,8 +2674,8 @@ const app = {
                         </div>
                     </div>
 
-                    <!-- DETAILS -->
-                    <div id="cdDetails" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
+                    <!-- DETAILS (default) -->
+                    <div id="cdDetails" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Contact Information</h3>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
                             ${sfField('Name', c.name)}
@@ -2699,10 +2710,10 @@ const app = {
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Activity</div>
                         <!-- Composer buttons -->
                         <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; gap:4px; flex-wrap:wrap;">
-                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#48c3cc; color:#fff; border-color:#48c3cc;" title="New Task">☑️</button>
-                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e6853d; color:#fff; border-color:#e6853d;" title="New Event">📅</button>
-                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#2e844a; color:#fff; border-color:#2e844a;" title="Log a Call">📞</button>
-                            <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();" style="background:#7f8de1; color:#fff; border-color:#7f8de1;" title="Email">📧</button>
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e0f7fa; color:#00838f; border-color:#b2ebf2;" title="New Task">☑️ Task</button>
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#fff3e0; color:#e65100; border-color:#ffe0b2;" title="New Event">📅 Event</button>
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e8f5e9; color:#2e7d32; border-color:#c8e6c9;" title="Log a Call">📞 Call</button>
+                            <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();" style="background:#e8eaf6; color:#3949ab; border-color:#c5cae9;" title="Email">📧 Email</button>
                         </div>
                         <!-- Filters -->
                         <div style="padding:8px 16px; border-bottom:1px solid var(--sf-border-weak); font-size:11px; color:var(--sf-text-weak);">
@@ -2812,6 +2823,7 @@ const app = {
         if (!this.currentRecord) return;
         this.trackView('account', id, this.currentRecord.name);
         this.currentView = 'accountDetail';
+        location.hash = 'accountDetail:' + id;
         this.render();
     },
 
