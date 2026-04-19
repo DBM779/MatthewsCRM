@@ -2114,7 +2114,13 @@ const app = {
         const con = this.data.contacts.find(c => c.id === e.contactId);
         const acct = this.data.accounts.find(a => a.id === e.accountId);
         const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
-        const sfField = (label, value) => `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
+        const sfField = (label, value, fieldKey, type) => {
+            if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
+            return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineEventEdit('${e.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
+        };
+
+        // Related contacts for this event
+        const relatedContacts = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
 
         const html = `
             <div class="detail-back" onclick="history.back();">&#8592; Back</div>
@@ -2127,35 +2133,150 @@ const app = {
                     </div>
                     <div class="sf-hl-actions">
                         <button onclick="app.editEvent('${e.id}')">Edit</button>
+                        ${e.status === 'Scheduled' ? `<button onclick="app.data.events.find(x=>x.id==='${e.id}').status='Completed'; app.persist(); app.renderEventDetail();">Mark Complete</button>` : ''}
                         <button onclick="if(confirm('Delete this event?')){app.deleteEvent('${e.id}')}" style="color:var(--sf-error);">Delete</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
-                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${e.status||'—'}</div></div>
                     <div><div class="sf-hl-field-label">Start</div><div class="sf-hl-field-value">${e.start ? new Date(e.start).toLocaleString() : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">End</div><div class="sf-hl-field-value">${e.end ? new Date(e.end).toLocaleString() : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Location</div><div class="sf-hl-field-value">${e.location||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${e.status||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Contact</div><div class="sf-hl-field-value">${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : '—'}</div></div>
                 </div>
             </div>
-            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:20px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Event Details</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Event Name', e.name)}
-                    ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''))}
-                    ${sfField('Status', e.status)}
-                    ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null)}
-                    ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null)}
-                    ${sfField('Location', e.location)}
-                    ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
-                    ${sfField('Primary Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
-                    ${sfField('Additional Contacts', e.attendees)}
+
+            <!-- Two-column layout like contacts -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN — Details / Related -->
+                <div style="flex:1; min-width:0;">
+                    <div class="detail-tabs" id="eventDetailTabs" style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px 4px 0 0; margin-bottom:0;">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'edDetails')">Details</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'edRelated')">Related</div>
+                    </div>
+
+                    <!-- DETAILS -->
+                    <div id="edDetails" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Event Information</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Event Name', e.name, 'name')}
+                            ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''))}
+                            ${sfField('Status', e.status)}
+                            ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null)}
+                            ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null)}
+                            ${sfField('Location', e.location, 'location')}
+                        </div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Relationships</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
+                            ${sfField('Primary Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
+                            ${sfField('Additional Contacts', e.attendees, 'attendees')}
+                        </div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
+                        <div class="sf-detail-field"><div class="sf-detail-field-value" style="cursor:pointer; white-space:pre-wrap;" onclick="app.inlineEventEdit('${e.id}','description','textarea',this)" title="Click to edit">${e.description || '—'}</div></div>
+                    </div>
+
+                    <!-- RELATED -->
+                    <div id="edRelated" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-contact" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">C</span>
+                                Contacts <span class="related-count">(${relatedContacts.length})</span>
+                            </div>
+                            <div class="card-body-flush">
+                            ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>Title</th><th>PC#</th><th>PE@</th></tr></thead><tbody>
+                                ${relatedContacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')">
+                                    <td style="color:var(--sf-brand); font-weight:600;">${c.name}</td>
+                                    <td>${c.title||''}</td>
+                                    <td>${c.pc_number||c.mobile||''}</td>
+                                    <td>${c.pe_email||c.email||''}</td>
+                                </tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
+                            </div>
+                        </div>
+                        <div class="related-list card">
+                            <div class="card-header">
+                                <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
+                                Files <span class="related-count">(${(e.files||[]).length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.addEventFile('${e.id}')">Add File</button>
+                            </div>
+                            <div style="padding:8px 16px;">
+                            ${(e.files||[]).length ? (e.files||[]).map((f,i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a href="${f.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">📄 ${f.name}</a>
+                                <button class="btn-small" onclick="app.removeEventFile('${e.id}',${i})" style="padding:1px 6px; font-size:11px; color:var(--sf-error);">✕</button>
+                            </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files. Click Add File to link a OneDrive document.</div>'}
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
-                <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${e.description || '—'}</div>
+
+                <!-- RIGHT COLUMN — Notes -->
+                <div style="width:380px; flex-shrink:0; position:sticky; top:0;">
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">*Notes</div>
+                        <div style="padding:12px 16px;">
+                            <textarea onblur="app.saveEventNotes('${e.id}', this.value)" style="width:100%; min-height:120px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(e.notes || '').replace(/</g,'&lt;')}</textarea>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
         document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (e.name || '(no name)');
+    },
+
+    inlineEventEdit(eventId, field, type, el) {
+        if (el.querySelector('select') || el.querySelector('input') || el.querySelector('textarea')) return;
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        const currentVal = evt[field] || '';
+        if (type === 'textarea') {
+            el.innerHTML = `<textarea onblur="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
+            el.querySelector('textarea').focus();
+        } else {
+            el.innerHTML = `<input type="${type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveEventField('${eventId}','${field}',this.value)" onkeydown="if(event.key==='Enter')this.blur();" style="width:100%; padding:2px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px;">`;
+            const input = el.querySelector('input');
+            input.focus(); input.select();
+        }
+    },
+
+    saveEventField(eventId, field, value) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt[field] = value || null;
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    saveEventNotes(eventId, value) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt.notes = value || null;
+        this.persist();
+    },
+
+    addEventFile(eventId) {
+        const name = prompt('File name:');
+        if (!name) return;
+        const url = prompt('OneDrive URL:');
+        if (!url) return;
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.files) evt.files = [];
+        evt.files.push({name, url});
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    removeEventFile(eventId, idx) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt || !evt.files) return;
+        evt.files.splice(idx, 1);
+        this.persist();
+        this.renderEventDetail();
     },
 
     _geocodeCache: null,
