@@ -573,8 +573,6 @@ const app = {
 
     async init() {
         this.loadData();
-        this.deduplicateData();
-        this.normalizeAddresses();
         this.setupEventListeners();
         this.renderDashboard();
         this.updateSelectOptions();
@@ -1393,8 +1391,9 @@ const app = {
     _mapAllItems: [],
 
     renderMap() {
-        const contactsWithAddr = this.data.contacts.filter(c => c.address);
-        const accountsWithAddr = this.data.accounts.filter(a => a.address);
+        const contactsWithAddr = this.data.contacts.filter(c => c.address && c.address.trim());
+        const accountsWithAddr = this.data.accounts.filter(a => a.address && a.address.trim());
+        const cacheSize = Object.keys(this._loadGeocodeCache()).length;
         const allItems = [
             ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
             ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
@@ -1410,6 +1409,7 @@ const app = {
                     <div>
                         <div style="font-size:11px; color:var(--sf-text-weak);">Map</div>
                         <h2 style="margin:0;">Contact Locations</h2>
+                        <div style="font-size:11px; color:var(--sf-text-weakest);">${this.data.contacts.length} contacts total, ${contactsWithAddr.length} with addresses · ${this.data.accounts.length} accounts total, ${accountsWithAddr.length} with addresses · ${cacheSize} geocoded</div>
                     </div>
                 </div>
             </div>
@@ -1467,7 +1467,7 @@ const app = {
                 </div>
                 <div class="map-main-panel">
                     <div id="crmMap"></div>
-                    <div class="map-loading" id="mapLoadingMsg">Loading map and geocoding addresses…</div>
+                    <div class="map-loading" id="mapLoadingMsg" style="background:rgba(255,255,255,0.9); padding:20px; border-radius:8px; text-align:center; z-index:500;">Loading map…</div>
                 </div>
             </div>
         `;
