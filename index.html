@@ -1319,9 +1319,14 @@ const app = {
     renderMap() {
         const contactsWithAddr = this.data.contacts.filter(c => c.address);
         const accountsWithAddr = this.data.accounts.filter(a => a.address);
+        const accountsNoAddr = this.data.accounts.filter(a => !a.address);
+        const contactsNoAddr = this.data.contacts.filter(a => !a.address);
+        console.log('[Map] Accounts total:', this.data.accounts.length, 'with address:', accountsWithAddr.length, 'without:', accountsNoAddr.length);
+        console.log('[Map] Accounts with addresses:', accountsWithAddr.map(a => a.name + ': "' + a.address + '"'));
+        console.log('[Map] Contacts total:', this.data.contacts.length, 'with address:', contactsWithAddr.length);
         const allItems = [
-            ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
-            ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
+            ...this.data.contacts.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
+            ...this.data.accounts.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
         ];
         this._mapAllItems = allItems;
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
@@ -1352,8 +1357,12 @@ const app = {
                     <div class="value">${accountsWithAddr.length}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="label">Missing Address</div>
-                    <div class="value" style="color:var(--sf-text-weakest);">${this.data.contacts.filter(c => !c.address).length + this.data.accounts.filter(a => !a.address).length}</div>
+                    <div class="label">Contacts Missing Address</div>
+                    <div class="value" style="color:var(--sf-text-weakest);">${contactsNoAddr.length}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Accounts Missing Address</div>
+                    <div class="value" style="color:var(--sf-text-weakest);">${accountsNoAddr.length}</div>
                 </div>
             </div>
             <!-- Filter bar -->
@@ -1388,11 +1397,11 @@ const app = {
                     </div>
                     <div class="map-sidebar-list" id="mapSidebarList">
                         ${allItems.map((item, i) => `
-                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
+                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" data-hasaddr="${item.address?'yes':'no'}" onclick="${item.address ? `app.focusMapItem(${i})` : `app.${item._type==='contact'?'editContact':'editAccount'}('${item.id}')`}" style="${!item.address?'opacity:0.5;':''}">
                                 <div class="map-item-icon ${item._type}">${item._initials}</div>
                                 <div class="map-item-info">
                                     <div class="map-item-name">${item.name}</div>
-                                    <div class="map-item-address">${item.address || ''}</div>
+                                    <div class="map-item-address">${item.address || '<span style="color:var(--sf-error); font-style:italic;">No address — click to add</span>'}</div>
                                 </div>
                             </div>
                         `).join('')}
@@ -1522,9 +1531,10 @@ const app = {
                 const item = items[i];
                 if (!item.address) continue;
                 const coords = cache[item.address.toLowerCase().trim()];
-                if (!coords) continue;
+                if (!coords) { console.log(`[Map] No geocode for ${item._type} "${item.name}": "${item.address}"`); continue; }
                 this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
             }
+            console.log(`[Map] Fast path: ${this.mapMarkers.length} markers (${this.mapMarkers.filter(m=>m.item._type==='contact').length} contacts, ${this.mapMarkers.filter(m=>m.item._type==='account').length} accounts)`);
             this._updateSidebarStatus(items);
             this.applyMapFilters();
             return;
