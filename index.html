@@ -2609,189 +2609,136 @@ const app = {
                 </div>
             </div>
 
-            <!-- SF Tabs: Details | Activity | Related -->
-            <div class="detail-tabs" id="contactDetailTabs" style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px 4px 0 0; margin-bottom:0;">
-                <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdDetails')">Details</div>
-                <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdActivity')">Activity</div>
-                <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdRelated')">Related</div>
-            </div>
-
-            <!-- DETAILS TAB — SF two-column field layout -->
-            <div id="cdDetails" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Contact Information</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Name', c.name)}
-                    ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
-                    ${sfField('Title', c.title)}
-                    ${sfField('Department', c.department)}
-                    ${sfField('Email', c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : null)}
-                    ${sfField('Lead Source', c.lead_source)}
-                    ${sfField('Mobile', c.mobile ? `<a href="tel:${c.mobile}" style="color:var(--sf-brand);">${c.mobile}</a>` : null)}
-                    ${sfField('Phone', c.phone ? `<a href="tel:${c.phone}" style="color:var(--sf-brand);">${c.phone}</a>` : null)}
-                    ${sfField('Home Phone', c.home_phone ? `<a href="tel:${c.home_phone}" style="color:var(--sf-brand);">${c.home_phone}</a>` : null)}
-                    ${sfField('Other Phone', c.other_phone ? `<a href="tel:${c.other_phone}" style="color:var(--sf-brand);">${c.other_phone}</a>` : null)}
-                    ${sfField('Fax', c.fax)}
-                    ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null)}
-                    ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null)}
-                    ${sfField('VIP', c.vip ? '<span style="color:var(--sf-success); font-weight:600;">Yes</span>' : null)}
-                </div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address Information</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Mailing Address', c.address)}
-                    ${sfField('Mailing Country', c.mailing_country)}
-                </div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Assistant Information</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Assistant Name', c.assistant_name)}
-                    ${sfField('Assistant Phone', c.assistant_phone ? `<a href="tel:${c.assistant_phone}" style="color:var(--sf-brand);">${c.assistant_phone}</a>` : null)}
-                </div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social & Online</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Instagram', c.instagram)}
-                    ${sfField('LinkedIn URL', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">${c.linkedin}</a>` : null)}
-                    ${sfField('LinkedIn Profile', c.linkedin_profile)}
-                    ${sfField('LISN Profile', c.lisn_profile)}
-                    ${sfField('LinkedIn/Social Notes', c.liSnP)}
-                    ${sfField('Tags', c.tags ? c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ') : null)}
-                </div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
-                <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${c.notes || '—'}</div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Activity Status</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Last Activity', c.la || c.last_activity_display || '—')}
-                    ${sfField('Days Since Last Activity', `<span class="activity-score ${asClass}"></span>${c.days_since_last_activity != null ? c.days_since_last_activity + ' days' : (dsla !== null ? dsla + ' days' : 'None')}`)}
-                    ${sfField('Activity Status', c.activity_status)}
-                </div>
-
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">System Information</h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Created', c.createdAt || c.created_at ? new Date(c.createdAt || c.created_at).toLocaleDateString() : '—')}
-                    ${sfField('Contact ID', `<span style="font-family:monospace; font-size:11px; color:var(--sf-text-weakest);">${c.id}</span>`)}
-                </div>
-            </div>
-
-            <!-- ACTIVITY TAB — SF-style timeline with filters and composer -->
-            <div id="cdActivity" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
-                <!-- Activity Composer -->
-                <div style="background:var(--sf-bg); border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; margin-bottom:16px;">
-                    <div style="font-weight:600; font-size:13px; margin-bottom:8px;">Log Activity</div>
-                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">📞 Log a Call</button>
-                        <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">📧 Email</button>
-                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">📅 New Event</button>
-                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();">☑️ New Task</button>
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Note')">📝 Quick Note</button>
+            <!-- SF two-column layout: Left (Related/Details) + Right (Activity sidebar) -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN — Related / Details tabs -->
+                <div style="flex:1; min-width:0;">
+                    <div class="detail-tabs" id="contactDetailTabs" style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px 4px 0 0; margin-bottom:0;">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdRelated')">Related</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdDetails')">Details</div>
                     </div>
-                </div>
-                <!-- Filter buttons -->
-                <div style="display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap;">
-                    <button class="btn-small" style="font-weight:600;" onclick="app.filterContactTimeline('${c.id}', 'all')">All (${allTimeline.length})</button>
-                    <button class="btn-small" onclick="app.filterContactTimeline('${c.id}', 'Call')">Calls</button>
-                    <button class="btn-small" onclick="app.filterContactTimeline('${c.id}', 'Email')">Emails</button>
-                    <button class="btn-small" onclick="app.filterContactTimeline('${c.id}', 'Meeting')">Meetings</button>
-                    <button class="btn-small" onclick="app.filterContactTimeline('${c.id}', 'Task')">Tasks</button>
-                </div>
-                <!-- Open Tasks section -->
-                ${openTasks.length ? `
-                    <div style="margin-bottom:16px;">
-                        <div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin-bottom:8px;">Open Tasks (${openTasks.length})</div>
-                        ${openTasks.map(a => {
-                            const isOverdue = a.dueDate && a.dueDate < todayStr;
-                            return `<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="app.editActivity('${a.id}')">
-                                <input type="checkbox" onclick="event.stopPropagation(); app.completeActivity('${a.id}');" style="width:16px; height:16px;">
-                                <div style="flex:1;">
-                                    <div style="font-weight:500; font-size:13px;">${a.subject}</div>
-                                    <div style="font-size:11px; color:${isOverdue ? 'var(--sf-error)' : 'var(--sf-text-weak)'};">${a.type} · ${isOverdue ? 'OVERDUE' : ''} Due ${a.dueDate || 'No date'}</div>
-                                </div>
-                            </div>`;
-                        }).join('')}
-                    </div>
-                ` : ''}
-                <!-- Timeline -->
-                <div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin-bottom:8px;">Activity Timeline</div>
-                <div id="cdTimelineList">
-                ${allTimeline.length ? allTimeline.map(a => {
-                    const iconColors = {Call:'#6366f1', Email:'#0176d3', Meeting:'#8b5cf6', Task:'#f59e0b', Note:'#22c55e', 'Follow-up':'#f97316'};
-                    const color = iconColors[a.type] || '#94a3b8';
-                    const dateStr = a.dueDate || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '');
-                    return `<div style="display:flex; gap:12px; padding:10px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="${a._isEmail ? '' : `app.editActivity('${a.id}')`}">
-                        <div style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${a.type ? a.type[0] : '?'}</div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                                <div style="font-weight:600; font-size:13px;">${a.subject || '(no subject)'}</div>
-                                <div style="font-size:11px; color:var(--sf-text-weakest); white-space:nowrap; margin-left:8px;">${dateStr}</div>
+
+                    <!-- RELATED (default, like SF) -->
+                    <div id="cdRelated" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-deal" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">O</span>
+                                Opportunities <span class="related-count">(${deals.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.openDealForm();">New</button>
                             </div>
-                            <div style="font-size:12px; color:var(--sf-text-weak); margin-top:2px;">
-                                ${a.type}${a.status ? ' · ' + a.status : ''}${a.priority && a.priority !== 'Normal' ? ' · <span style="color:' + (a.priority==='High'?'var(--sf-error)':'var(--sf-text-weakest)') + ';">' + a.priority + ' Priority</span>' : ''}
-                                ${a.callDirection ? ' · ' + a.callDirection : ''}${a.callDuration ? ' · ' + a.callDuration + ' min' : ''}${a.callResult ? ' · ' + a.callResult : ''}
-                                ${a.location ? ' · 📍 ' + a.location : ''}
+                            <div class="card-body-flush">
+                            ${deals.length ? `<table><thead><tr><th>Opportunity Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
+                                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')">
+                                    <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
+                                    <td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td>
+                                    <td>$${(d.value||0).toFixed(1)}M</td>
+                                    <td>${d.closeDate || d.close_date || '—'}</td>
+                                </tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No opportunities.</div>'}
                             </div>
-                            ${a.notes ? `<div style="font-size:12px; color:var(--sf-text-weakest); margin-top:4px; white-space:pre-wrap; max-height:60px; overflow:hidden;">${(a.notes||'').substring(0,200)}</div>` : ''}
-                            ${a._isEmail && a.body ? `<div style="font-size:12px; color:var(--sf-text-weakest); margin-top:4px; white-space:pre-wrap; max-height:60px; overflow:hidden;">${(a.body||'').substring(0,200)}</div>` : ''}
                         </div>
-                    </div>`;
-                }).join('') : '<p class="text-muted" style="font-size:13px;">No activity recorded for this contact</p>'}
-                </div>
-            </div>
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-email" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">E</span>
+                                Emails <span class="related-count">(${emails.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">New</button>
+                            </div>
+                            <div class="card-body-flush">
+                            ${emails.length ? `<table><thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
+                                ${emails.map(e => `<tr><td>${e.date || ''}</td><td>${e.subject || ''}</td><td>${e.from_addr || ''}</td><td>${e.to_addr || ''}</td></tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No emails logged.</div>'}
+                            </div>
+                        </div>
+                        <div class="related-list card">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-referral" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">R</span>
+                                Referrals <span class="related-count">(${referralsFrom.length + referralsTo.length})</span>
+                            </div>
+                            <div style="padding:12px 16px;">
+                            ${(referralsFrom.length + referralsTo.length) ? `
+                                ${referralsFrom.length ? '<div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin-bottom:6px;">Referred Out</div>' + referralsFrom.map(r => { const to = this.data.contacts.find(x => x.id === r.to_id); return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;"><a onclick="app.viewContact('${r.to_id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${to ? to.name : 'Unknown'}</a> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span></div>`; }).join('') : ''}
+                                ${referralsTo.length ? '<div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin:12px 0 6px 0;">Referred By</div>' + referralsTo.map(r => { const from = this.data.contacts.find(x => x.id === r.from_id); return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;"><a onclick="app.viewContact('${r.from_id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${from ? from.name : 'Unknown'}</a> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span></div>`; }).join('') : ''}
+                            ` : '<div style="font-size:13px; color:var(--sf-text-weak);">No referrals.</div>'}
+                            </div>
+                        </div>
+                    </div>
 
-            <!-- RELATED TAB — SF-style related lists -->
-            <div id="cdRelated" style="display:none;">
-                <!-- Opportunities Related List -->
-                <div class="related-list card" style="margin-top:12px;">
-                    <div class="card-header">
-                        <span class="obj-icon obj-icon-deal" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">O</span>
-                        Opportunities <span class="related-count">(${deals.length})</span>
-                        <button class="btn-small" style="margin-left:auto;" onclick="app.openDealForm();">New</button>
-                    </div>
-                    <div class="card-body-flush">
-                    ${deals.length ? `<table><thead><tr><th>Opportunity Name</th><th>Stage</th><th>Amount</th><th>Close Date</th><th>Probability</th></tr></thead><tbody>
-                        ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')">
-                            <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
-                            <td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td>
-                            <td>$${(d.value||0).toFixed(1)}M</td>
-                            <td>${d.closeDate || '—'}</td>
-                            <td>${d.probability || 0}%</td>
-                        </tr>`).join('')}
-                    </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No opportunities.</div>'}
-                    </div>
-                </div>
-
-                <!-- Emails Related List -->
-                <div class="related-list card">
-                    <div class="card-header">
-                        <span class="obj-icon obj-icon-email" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">E</span>
-                        Emails <span class="related-count">(${emails.length})</span>
-                        <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">New</button>
-                    </div>
-                    <div class="card-body-flush">
-                    ${emails.length ? `<table><thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
-                        ${emails.map(e => `<tr><td>${e.date || ''}</td><td>${e.subject || ''}</td><td>${e.from_addr || ''}</td><td>${e.to_addr || ''}</td></tr>`).join('')}
-                    </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No emails logged.</div>'}
+                    <!-- DETAILS -->
+                    <div id="cdDetails" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Contact Information</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Name', c.name)}
+                            ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
+                            ${sfField('Title', c.title)}
+                            ${sfField('Department', c.department)}
+                            ${sfField('Email', c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : null)}
+                            ${sfField('Lead Source', c.lead_source)}
+                            ${sfField('Mobile', c.mobile ? `<a href="tel:${c.mobile}" style="color:var(--sf-brand);">${c.mobile}</a>` : null)}
+                            ${sfField('Phone', c.phone ? `<a href="tel:${c.phone}" style="color:var(--sf-brand);">${c.phone}</a>` : null)}
+                            ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null)}
+                            ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null)}
+                        </div>
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Mailing Address', c.address)}
+                            ${sfField('Country', c.mailing_country)}
+                        </div>
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Instagram', c.instagram)}
+                            ${sfField('LinkedIn', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">Profile</a>` : null)}
+                            ${sfField('Tags', c.tags ? c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ') : null)}
+                        </div>
+                        ${c.notes ? `<h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3><div style="font-size:13px; white-space:pre-wrap;">${c.notes}</div>` : ''}
                     </div>
                 </div>
 
-                <!-- Referrals Related List -->
-                <div class="related-list card">
-                    <div class="card-header">
-                        <span class="obj-icon obj-icon-referral" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">R</span>
-                        Referrals <span class="related-count">(${referralsFrom.length + referralsTo.length})</span>
-                    </div>
-                    <div style="padding:12px 16px;">
-                    ${(referralsFrom.length + referralsTo.length) ? `
-                        ${referralsFrom.length ? '<div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin-bottom:6px;">Referred Out</div>' + referralsFrom.map(r => {
-                            const to = this.data.contacts.find(x => x.id === r.to_id);
-                            return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;"><a onclick="app.viewContact('${r.to_id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${to ? to.name : 'Unknown'}</a> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span> <span style="color:var(--sf-text-weakest); font-size:11px;">${r.type||''} ${r.date ? '· ' + r.date : ''}</span></div>`;
-                        }).join('') : ''}
-                        ${referralsTo.length ? '<div style="font-weight:600; font-size:12px; text-transform:uppercase; color:var(--sf-text-weak); margin:12px 0 6px 0;">Referred By</div>' + referralsTo.map(r => {
-                            const from = this.data.contacts.find(x => x.id === r.from_id);
-                            return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;"><a onclick="app.viewContact('${r.from_id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${from ? from.name : 'Unknown'}</a> <span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status||'Pending'}</span> <span style="color:var(--sf-text-weakest); font-size:11px;">${r.type||''} ${r.date ? '· ' + r.date : ''}</span></div>`;
-                        }).join('') : ''}
-                    ` : '<div style="font-size:13px; color:var(--sf-text-weak);">No referrals.</div>'}
+                <!-- RIGHT COLUMN — Activity sidebar (always visible, like SF) -->
+                <div style="width:380px; flex-shrink:0; position:sticky; top:0;">
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Activity</div>
+                        <!-- Composer buttons -->
+                        <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; gap:4px; flex-wrap:wrap;">
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#48c3cc; color:#fff; border-color:#48c3cc;" title="New Task">☑️</button>
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#e6853d; color:#fff; border-color:#e6853d;" title="New Event">📅</button>
+                            <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();" style="background:#2e844a; color:#fff; border-color:#2e844a;" title="Log a Call">📞</button>
+                            <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();" style="background:#7f8de1; color:#fff; border-color:#7f8de1;" title="Email">📧</button>
+                        </div>
+                        <!-- Filters -->
+                        <div style="padding:8px 16px; border-bottom:1px solid var(--sf-border-weak); font-size:11px; color:var(--sf-text-weak);">
+                            Filters: All time · All activities · All types
+                        </div>
+                        <!-- Upcoming & Overdue -->
+                        <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak);">
+                            <div style="font-weight:700; font-size:13px; margin-bottom:8px;">▾ Upcoming & Overdue</div>
+                            ${openTasks.length ? openTasks.map(a => {
+                                const dd = a.dueDate || a.due_date || '';
+                                const isOverdue = dd && dd < todayStr;
+                                return `<div style="display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px; height:14px; margin-top:2px; cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:12px; font-weight:600;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:${isOverdue ? 'var(--sf-error)' : 'var(--sf-text-weak)'};">${a.type} · ${isOverdue ? 'OVERDUE · ' : ''}${dd || 'No date'}</div>
+                                    </div>
+                                </div>`;
+                            }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px 0;">No upcoming activities.<br>Get started by scheduling a task.</div>'}
+                        </div>
+                        <!-- Past Activity -->
+                        <div style="padding:12px 16px; max-height:400px; overflow-y:auto;">
+                            ${allTimeline.filter(a => !isOpen(a.status)).length ? allTimeline.filter(a => !isOpen(a.status)).map(a => {
+                                const iconColors = {Call:'#6366f1', Email:'#0176d3', Meeting:'#8b5cf6', Task:'#f59e0b', Note:'#22c55e', 'Follow-up':'#f97316'};
+                                const color = iconColors[a.type] || '#94a3b8';
+                                const dd = a.dueDate || a.due_date || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '');
+                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="${a._isEmail ? '' : `app.editActivity('${a.id}')`}">
+                                    <div style="width:24px; height:24px; border-radius:50%; background:${color}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0;">${(a.type||'?')[0]}</div>
+                                    <div style="flex:1; min-width:0;">
+                                        <div style="font-size:12px; font-weight:600;">${a.subject || '(no subject)'}</div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.location ? ' · 📍' + a.location : ''}</div>
+                                        ${a.notes ? `<div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; max-height:32px; overflow:hidden;">${(a.notes||'').substring(0,120)}</div>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
+                        </div>
                     </div>
                 </div>
             </div>
