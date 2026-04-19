@@ -1194,16 +1194,54 @@ const app = {
         }
         return this._contactCols;
     },
+    _saveContactCols() {
+        localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(this._contactCols));
+    },
     toggleContactCol(key) {
         const cols = this._getContactCols();
         const idx = cols.indexOf(key);
         if (idx >= 0) { if (cols.length > 2) cols.splice(idx, 1); }
         else cols.push(key);
         this._contactCols = cols;
-        localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cols));
+        this._saveContactCols();
         this.renderContacts();
     },
     _showColPicker: false,
+    _dragCol: null,
+
+    initColumnDrag() {
+        const ths = document.querySelectorAll('#contactsTable thead th[data-colkey]');
+        ths.forEach(th => {
+            th.setAttribute('draggable', 'true');
+            th.addEventListener('dragstart', (e) => {
+                this._dragCol = th.dataset.colkey;
+                th.style.opacity = '0.4';
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            th.addEventListener('dragend', () => { th.style.opacity = ''; });
+            th.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.style.borderLeft = '3px solid var(--sf-brand)'; });
+            th.addEventListener('dragleave', () => { th.style.borderLeft = ''; });
+            th.addEventListener('drop', (e) => {
+                e.preventDefault();
+                th.style.borderLeft = '';
+                const from = this._dragCol;
+                const to = th.dataset.colkey;
+                if (from && to && from !== to) {
+                    const cols = this._getContactCols();
+                    const fi = cols.indexOf(from);
+                    const ti = cols.indexOf(to);
+                    if (fi >= 0 && ti >= 0) {
+                        cols.splice(fi, 1);
+                        cols.splice(ti, 0, from);
+                        this._contactCols = cols;
+                        this._saveContactCols();
+                        this.renderContacts();
+                    }
+                }
+                this._dragCol = null;
+            });
+        });
+    },
 
     _getColWidths() {
         try { return JSON.parse(localStorage.getItem('matthewsCRM_colWidths') || '{}'); } catch { return {}; }
@@ -1272,7 +1310,7 @@ const app = {
     renderContacts() {
         const f = this.contactFilters;
         const visibleCols = this._getContactCols();
-        const cols = this._allContactCols.filter(c => visibleCols.includes(c.key));
+        const cols = visibleCols.map(k => this._allContactCols.find(c => c.key === k)).filter(Boolean);
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         let filtered = this.data.contacts;
         if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
@@ -1346,6 +1384,7 @@ const app = {
                                     else if (col.key === '_dsla') val = `<span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}`;
                                     else if (col.key === 'tags') val = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="tag-pill">${t}</span>`).join(' ');
                                     else if (col.key === 'email' && c.email) val = `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>`;
+                                    else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
                                     else val = c[col.key] || '';
                                     return `<td ${editable} style="${cursor}" title="${col.editable ? 'Double-click to edit' : ''}">${val}</td>`;
                                 }).join('')}<td><button class="btn-small" onclick="app.deleteContact('${c.id}')" style="padding:1px 6px; font-size:11px;">✕</button></td></tr>`;
@@ -1357,6 +1396,7 @@ const app = {
         `;
         document.getElementById('content').innerHTML = html;
         this.initColumnResize();
+        this.initColumnDrag();
     },
 
     updateContactFilter(key, val) {
@@ -2470,7 +2510,7 @@ const app = {
                     ${sfField('Home Phone', c.home_phone ? `<a href="tel:${c.home_phone}" style="color:var(--sf-brand);">${c.home_phone}</a>` : null)}
                     ${sfField('Other Phone', c.other_phone ? `<a href="tel:${c.other_phone}" style="color:var(--sf-brand);">${c.other_phone}</a>` : null)}
                     ${sfField('Fax', c.fax)}
-                    ${sfField('Birthdate', c.birthdate ? new Date(c.birthdate+'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : null)}
+                    ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null)}
                     ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null)}
                     ${sfField('VIP', c.vip ? '<span style="color:var(--sf-success); font-weight:600;">Yes</span>' : null)}
                 </div>
