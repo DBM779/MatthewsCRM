@@ -576,6 +576,7 @@ const app = {
         this.setupEventListeners();
         this.renderDashboard();
         this.updateSelectOptions();
+        setTimeout(() => this.bgGeocodeAll(), 3000);
     },
 
     loadData() {
@@ -620,7 +621,20 @@ const app = {
         this.persist();
         this.updateSelectOptions();
         this.render();
+        this.bgGeocodeAll();
         return {accounts: (d.accounts||[]).length, contacts: (d.contacts||[]).length, deals: (d.deals||[]).length, activities: (d.activities||[]).length};
+    },
+
+    async bgGeocodeAll() {
+        const cache = this._loadGeocodeCache();
+        const items = [...this.data.contacts, ...this.data.accounts].filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
+        if (!items.length) return;
+        console.log(`[bgGeocode] Geocoding ${items.length} new addresses in background…`);
+        for (const item of items) {
+            await this.geocodeAddress(item.address);
+            await new Promise(r => setTimeout(r, 1100));
+        }
+        console.log(`[bgGeocode] Done. Cache now has ${Object.keys(this._loadGeocodeCache()).length} entries.`);
     },
 
     handleJsonImportFile(file) {
@@ -683,6 +697,7 @@ const app = {
             this.data.contacts.push({...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()});
         }
         this.persist();
+        if (contact.address) this.geocodeAddress(contact.address);
         this.closeModal('modalContact');
         this.render();
     },
@@ -706,6 +721,7 @@ const app = {
             this.data.accounts.push({...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()});
         }
         this.persist();
+        if (account.address) this.geocodeAddress(account.address);
         this.closeModal('modalAccount');
         this.render();
     },
