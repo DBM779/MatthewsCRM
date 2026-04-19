@@ -278,7 +278,7 @@
         .ref-status-closed {background: #f3f4f6; color: #374151;}
         /* Compact table for contacts/accounts list views */
         .compact-table {table-layout: fixed;}
-        .compact-table th {padding: 4px 8px; font-size: 11px; height: 28px; position: relative; overflow: hidden; text-overflow: ellipsis;}
+        .compact-table th {padding: 4px 8px; font-size: 11px; height: 28px; position: sticky; top: 0; z-index: 2; overflow: hidden; text-overflow: ellipsis;}
         .compact-table td {padding: 3px 8px; font-size: 12px; height: 28px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis;}
         .compact-table td:last-child {overflow: visible;}
         .compact-table tr:hover {background: #f0f7ff;}
@@ -1600,8 +1600,8 @@ const app = {
                 ${f.text || f.tier ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
-            <div class="card">
-                <div class="table-container">
+            <div class="card" style="overflow:hidden;">
+                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
                     <table class="compact-table" id="contactsTable">
                         <thead>
                             <tr>
