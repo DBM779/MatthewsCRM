@@ -1167,7 +1167,7 @@ const app = {
             <h2>Home</h2>
             ${backupBanner}
             <!-- KPI Cards -->
-            <div class="stat-cards" style="grid-template-columns:repeat(4, 1fr);">
+            <div class="stat-cards" style="grid-template-columns:repeat(5, 1fr);">
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
@@ -1223,6 +1223,20 @@ const app = {
                         </div>
                     </div>
 
+                    <!-- Contacts Needing Attention -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days since last activity)</span></div>
+                        <div style="padding:0 16px;">
+                            ${stale.length ? stale.map(c => {
+                                const dsla = this.calculateDSLA(c.la || c.last_activity_display);
+                                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                    <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.tier||''}</span></div>
+                                    <span style="font-size:12px; color:var(--sf-error);">${dsla != null ? dsla+'D' : 'Never'}</span>
+                                </div>`;
+                            }).join('') : '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">All contacts are up to date!</div>'}
+                        </div>
+                    </div>
+
                     <!-- Pipeline by Stage -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Pipeline by Stage</div>
@@ -1241,20 +1255,6 @@ const app = {
                                     </div>
                                 </div>`;
                             }).join('')}
-                        </div>
-                    </div>
-
-                    <!-- Contacts Needing Attention -->
-                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days since last activity)</span></div>
-                        <div style="padding:0 16px;">
-                            ${stale.length ? stale.map(c => {
-                                const dsla = this.calculateDSLA(c.la || c.last_activity_display);
-                                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
-                                    <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.tier||''}</span></div>
-                                    <span style="font-size:12px; color:var(--sf-error);">${dsla != null ? dsla+'D' : 'Never'}</span>
-                                </div>`;
-                            }).join('') : '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">All contacts are up to date!</div>'}
                         </div>
                     </div>
                 </div>
