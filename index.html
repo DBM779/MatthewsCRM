@@ -1403,7 +1403,7 @@ const app = {
                                     if (col.key === 'name') val = `<a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a>`;
                                     else if (col.key === '_company') val = c._company;
                                     else if (col.key === 'tier') val = `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>`;
-                                    else if (col.key === '_dsla') val = `<span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}`;
+                                    else if (col.key === '_dsla') val = `<span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + ' D' : ''}`;
                                     else if (col.key === 'tags') val = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="tag-pill">${t}</span>`).join(' ');
                                     else if (col.key === 'email' && c.email) val = `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>`;
                                     else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
