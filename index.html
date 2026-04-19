@@ -1408,14 +1408,17 @@ const app = {
     },
 
     inlineDetailEdit(contactId, field, type, el) {
+        if (el.querySelector('select') || el.querySelector('input') || el.querySelector('textarea')) return;
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
         const currentVal = contact[field] || '';
         if (type === 'select-tier') {
-            el.innerHTML = `<select onchange="app.saveDetailField('${contactId}','${field}',this.value)" onblur="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:2px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px;">
+            el.innerHTML = `<select onchange="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">
                 ${['1-VIP','2','3','4','5'].map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}
             </select>`;
-            el.querySelector('select').focus();
+            const sel = el.querySelector('select');
+            sel.focus();
+            sel.click();
         } else if (type === 'textarea') {
             el.innerHTML = `<textarea onblur="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
             el.querySelector('textarea').focus();
