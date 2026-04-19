@@ -1297,6 +1297,9 @@ const app = {
     mapInstance: null,
     mapMarkers: [],
 
+    mapFilters: {type: 'all', tier: '', company: '', tag: '', text: ''},
+    _mapAllItems: [],
+
     renderMap() {
         const contactsWithAddr = this.data.contacts.filter(c => c.address);
         const accountsWithAddr = this.data.accounts.filter(a => a.address);
@@ -1304,6 +1307,9 @@ const app = {
             ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
             ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
         ];
+        this._mapAllItems = allItems;
+        const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
+        const f = this.mapFilters;
 
         const html = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -1311,18 +1317,42 @@ const app = {
                     <div class="obj-icon obj-icon-map" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">M</div>
                     <div>
                         <div style="font-size:11px; color:var(--sf-text-weak);">Map</div>
-                        <h2 style="margin:0;">Contact Locations (${allItems.length})</h2>
+                        <h2 style="margin:0;">Contact Locations</h2>
                     </div>
+                </div>
+            </div>
+            <!-- Filter bar -->
+            <div class="card" style="padding:10px 14px; margin-bottom:8px;">
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <select onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
+                        <option value="all" ${f.type==='all'?'selected':''}>All Types</option>
+                        <option value="contact" ${f.type==='contact'?'selected':''}>Contacts Only</option>
+                        <option value="account" ${f.type==='account'?'selected':''}>Accounts Only</option>
+                    </select>
+                    <select onchange="app.updateMapFilter('tier', this.value)" style="min-width:90px;">
+                        <option value="">All Tiers</option>
+                        ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <select onchange="app.updateMapFilter('company', this.value)" style="min-width:120px;">
+                        <option value="">All Companies</option>
+                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===a.id?'selected':''}>${a.name}</option>`).join('')}
+                    </select>
+                    <select onchange="app.updateMapFilter('tag', this.value)" style="min-width:90px;">
+                        <option value="">All Tags</option>
+                        ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',company:'',tag:'',text:''}; app.applyMapFilters();">Clear</button>
+                    <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
                 </div>
             </div>
             <div class="map-page">
                 <div class="map-sidebar-panel">
                     <div class="map-sidebar-header">
-                        <input type="text" placeholder="Filter by name…" oninput="app.filterMapSidebar(this.value)">
+                        <input type="text" placeholder="Search name…" value="${f.text}" oninput="app.updateMapFilter('text', this.value)">
                     </div>
                     <div class="map-sidebar-list" id="mapSidebarList">
                         ${allItems.map((item, i) => `
-                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
+                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
                                 <div class="map-item-icon ${item._type}">${item._initials}</div>
                                 <div class="map-item-info">
                                     <div class="map-item-name">${item.name}</div>
@@ -1339,9 +1369,49 @@ const app = {
             </div>
         `;
         document.getElementById('content').innerHTML = html;
-
-        // Init Leaflet map
         setTimeout(() => this.initMapWithMarkers(allItems), 100);
+    },
+
+    updateMapFilter(key, val) {
+        this.mapFilters[key] = val;
+        this.applyMapFilters();
+    },
+
+    applyMapFilters() {
+        const f = this.mapFilters;
+        let visibleCount = 0;
+        // filter sidebar
+        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
+            let show = true;
+            if (f.type !== 'all' && el.getAttribute('data-type') !== f.type) show = false;
+            if (f.tier && el.getAttribute('data-tier') !== f.tier) show = false;
+            if (f.company && el.getAttribute('data-company') !== f.company) show = false;
+            if (f.tag && !(el.getAttribute('data-tags')||'').includes(f.tag.toLowerCase())) show = false;
+            if (f.text && !(el.getAttribute('data-name')||'').includes(f.text.toLowerCase())) show = false;
+            el.style.display = show ? '' : 'none';
+        });
+        // filter map markers
+        const visibleBounds = [];
+        this.mapMarkers.forEach(m => {
+            const item = m.item;
+            let show = true;
+            if (f.type !== 'all' && item._type !== f.type) show = false;
+            if (f.tier && (item.tier || '') !== f.tier) show = false;
+            if (f.company && (item.accountId || item.account_id || '') !== f.company) show = false;
+            if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) show = false;
+            if (f.text && !(item.name || '').toLowerCase().includes(f.text.toLowerCase())) show = false;
+            if (show) {
+                m.marker.addTo(this.mapInstance);
+                visibleBounds.push([m.coords.lat, m.coords.lng]);
+                visibleCount++;
+            } else {
+                this.mapInstance.removeLayer(m.marker);
+            }
+        });
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `${visibleCount} of ${this.mapMarkers.length} shown`;
+        if (visibleBounds.length > 1) this.mapInstance.fitBounds(visibleBounds, {padding: [40, 40]});
+        else if (visibleBounds.length === 1) this.mapInstance.setView(visibleBounds[0], 14);
     },
 
     async initMapWithMarkers(items) {
