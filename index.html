@@ -2789,6 +2789,13 @@ const app = {
                                         <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.location ? ' · 📍' + a.location : ''}</div>
                                         ${a.notes ? `<div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; max-height:32px; overflow:hidden;">${(a.notes||'').substring(0,120)}</div>` : ''}
                                     </div>
+                                    <div style="flex-shrink:0; position:relative;">
+                                        <button class="btn-small" onclick="event.stopPropagation(); app.toggleRowMenu('cdact_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button>
+                                        <div id="rowMenu_cdact_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;">
+                                            <div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div>
+                                            <div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div>
+                                        </div>
+                                    </div>
                                 </div>`;
                             }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
                         </div>
