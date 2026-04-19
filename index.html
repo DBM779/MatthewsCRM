@@ -2214,13 +2214,14 @@ const app = {
                             </div>
                         </div>
                         <div class="card-body-flush">
-                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>Title</th><th>PC#</th><th>PE@</th></tr></thead><tbody>
-                            ${relatedContacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')">
+                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Instagram</th><th>Account</th></tr></thead><tbody>
+                            ${relatedContacts.map(c => { const cAcct = this.data.accounts.find(a => a.id === (c.accountId||c.account_id)); return `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')">
                                 <td style="color:var(--sf-brand); font-weight:600;">${c.name}</td>
-                                <td>${c.title||''}</td>
                                 <td>${c.pc_number||c.mobile||''}</td>
                                 <td>${c.pe_email||c.email||''}</td>
-                            </tr>`).join('')}
+                                <td>${c.instagram||''}</td>
+                                <td>${cAcct ? cAcct.name : ''}</td>
+                            </tr>`; }).join('')}
                         </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
                         </div>
                     </div>
