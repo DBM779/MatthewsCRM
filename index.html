@@ -1367,21 +1367,50 @@ const app = {
         localStorage.setItem('matthewsCRM_geocache', JSON.stringify(this._geocodeCache || {}));
     },
 
+    async _nominatim(q) {
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=us`, {headers: {'User-Agent': 'MatthewsCRM/1.0'}});
+            const data = await res.json();
+            if (data && data.length > 0) return {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
+        } catch (e) {}
+        return null;
+    },
+
     async geocodeAddress(address) {
         const cache = this._loadGeocodeCache();
         const key = address.toLowerCase().trim();
         if (cache[key]) return cache[key];
-        try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`, {headers: {'User-Agent': 'MatthewsCRM/1.0'}});
-            const data = await res.json();
-            if (data && data.length > 0) {
-                const result = {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
-                cache[key] = result;
-                this._saveGeocodeCache();
-                return result;
+
+        // Try full address first
+        let result = await this._nominatim(address);
+
+        // If that fails, try without apartment/suite numbers
+        if (!result) {
+            const cleaned = address.replace(/\b(apt|suite|ste|unit|#|floor|fl)\b\.?\s*\w*/gi, '').replace(/\s+/g, ' ').trim();
+            if (cleaned !== address) result = await this._nominatim(cleaned);
+        }
+
+        // If that fails, try just city + state (drop street)
+        if (!result) {
+            const parts = address.split(',').map(p => p.trim());
+            if (parts.length >= 2) {
+                result = await this._nominatim(parts.slice(1).join(', '));
             }
-        } catch (e) { console.error('Geocode error:', e); }
-        return null;
+        }
+
+        // If that fails, try last two parts (state + zip or city + state)
+        if (!result) {
+            const parts = address.split(',').map(p => p.trim());
+            if (parts.length >= 3) {
+                result = await this._nominatim(parts.slice(-2).join(', '));
+            }
+        }
+
+        if (result) {
+            cache[key] = result;
+            this._saveGeocodeCache();
+        }
+        return result;
     },
 
     mapInstance: null,
