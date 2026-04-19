@@ -360,7 +360,7 @@
         <div class="sf-app-tab" data-view="accounts" onclick="app.navigate('accounts')"><span class="obj-icon obj-icon-account">A</span>Accounts</div>
         <div class="sf-app-tab" data-view="activities" onclick="app.navigate('activities')"><span class="obj-icon obj-icon-activity">E</span>Events</div>
         <div class="sf-app-tab" data-view="map" onclick="app.navigate('map')"><span class="obj-icon obj-icon-map">M</span>Map</div>
-        <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">O</span>Opportunities</div>
+        <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">O</span>Processes</div>
         <div class="sf-app-tab" data-view="emails" onclick="app.navigate('emails')"><span class="obj-icon obj-icon-email">E</span>Emails</div>
         <div class="sf-app-tab" data-view="referrals" onclick="app.navigate('referrals')"><span class="obj-icon obj-icon-referral">R</span>Referrals</div>
         <div class="sf-app-tab" data-view="reports" onclick="app.navigate('reports')"><span class="obj-icon obj-icon-report">R</span>Reports</div>
@@ -1072,7 +1072,7 @@ const app = {
             document.getElementById('content').innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading data...</p></div>';
             return;
         }
-        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Opportunities', activities:'Tasks', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
+        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Tasks', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
         document.getElementById('breadcrumb').textContent = labels[this.currentView] || this.currentView;
         // sync tab active state in case of programmatic nav
         const tabMap = {dashboard:'dashboard', contacts:'contacts', contactDetail:'contacts', accounts:'accounts', accountDetail:'accounts', deals:'deals', activities:'activities', map:'map', emails:'emails', referrals:'referrals', reports:'reports', settings:'settings'};
@@ -1306,7 +1306,7 @@ const app = {
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Quick Stats</div>
                         <div style="padding:12px 16px; font-size:13px;">
                             <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>VIP Contacts</span><strong style="color:#166534;">${this.fmt(vipContacts.length)}</strong></div>
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Opportunities</span><strong>${this.fmt(activeDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Processes</span><strong>${this.fmt(activeDeals.length)}</strong></div>
                             <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Won This Year</span><strong style="color:var(--sf-success);">${this.fmt(wonDeals.length)}</strong></div>
                             <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Lost This Year</span><strong style="color:var(--sf-error);">${this.fmt(lostDeals.length)}</strong></div>
                             <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Win Rate</span><strong>${winRate}%</strong></div>
@@ -1735,8 +1735,8 @@ const app = {
                 <div style="display:flex; align-items:center; gap:10px;">
                     <div class="obj-icon obj-icon-deal" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">O</div>
                     <div>
-                        <div style="font-size:11px; color:var(--sf-text-weak);">Opportunities</div>
-                        <h2 style="margin:0;">All Opportunities</h2>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">Processes</div>
+                        <h2 style="margin:0;">All Processes</h2>
                     </div>
                 </div>
                 <button class="btn-primary" onclick="app.openDealForm()">New</button>
@@ -1932,7 +1932,7 @@ const app = {
                     ${sfField('Date/Time', a.dateTime ? new Date(a.dateTime).toLocaleString() : null)}
                     ${sfField('Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
                     ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
-                    ${sfField('Opportunity', deal ? deal.name : null)}
+                    ${sfField('Process', deal ? deal.name : null)}
                 </div>
                 ${a.type === 'Call' ? `
                     <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Call Details</h3>
@@ -2680,7 +2680,7 @@ const app = {
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:16px;">
                     <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
                     <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
-                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Opportunities</div><div class="value">${this.fmt(this.data.deals.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Processes</div><div class="value">${this.fmt(this.data.deals.length)}</div></div>
                     <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Activities</div><div class="value">${this.fmt(this.data.activities.length)}</div></div>
                     <div class="stat-card"><div class="label">Emails</div><div class="value">${this.data.emails.length}</div></div>
                     <div class="stat-card"><div class="label">Referrals</div><div class="value">${this.data.referrals.length}</div></div>
@@ -2696,7 +2696,7 @@ const app = {
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
                     <button onclick="app.exportCsv('contacts')">Contacts CSV</button>
                     <button onclick="app.exportCsv('accounts')">Accounts CSV</button>
-                    <button onclick="app.exportCsv('deals')">Opportunities CSV</button>
+                    <button onclick="app.exportCsv('deals')">Processes CSV</button>
                     <button onclick="app.exportVcf()">Contacts vCard (.vcf)</button>
                     <button onclick="app.backupJSON()">Full Backup (JSON)</button>
                 </div>
@@ -2905,11 +2905,11 @@ const app = {
                         <div class="related-list card" style="margin-bottom:12px;">
                             <div class="card-header">
                                 <span class="obj-icon obj-icon-deal" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">O</span>
-                                Opportunities <span class="related-count">(${deals.length})</span>
+                                Processes <span class="related-count">(${deals.length})</span>
                                 <button class="btn-small" style="margin-left:auto;" onclick="app.openDealForm();">New</button>
                             </div>
                             <div class="card-body-flush">
-                            ${deals.length ? `<table><thead><tr><th>Opportunity Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
+                            ${deals.length ? `<table><thead><tr><th>Process Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
                                 ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')">
                                     <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
                                     <td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td>
@@ -3139,7 +3139,7 @@ const app = {
                     <div class="sf-hl-actions">
                         <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
                         <button class="btn-small" onclick="app.openContactForm(); document.getElementById('contactCompany').value='${a.id}';">New Contact</button>
-                        <button class="btn-small" onclick="app.openDealForm(); document.getElementById('dealAccount').value='${a.id}';">New Opportunity</button>
+                        <button class="btn-small" onclick="app.openDealForm(); document.getElementById('dealAccount').value='${a.id}';">New Process</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
@@ -3147,7 +3147,7 @@ const app = {
                     <div><div class="sf-hl-field-label">Industry</div><div class="sf-hl-field-value">${a.industry || '—'}</div></div>
                     <div><div class="sf-hl-field-label">Website</div><div class="sf-hl-field-value">${a.website ? `<a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank" style="color:var(--sf-brand);">${a.website}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Contacts</div><div class="sf-hl-field-value">${contacts.length}</div></div>
-                    <div><div class="sf-hl-field-label">Opportunities</div><div class="sf-hl-field-value">${deals.length}</div></div>
+                    <div><div class="sf-hl-field-label">Processes</div><div class="sf-hl-field-value">${deals.length}</div></div>
                     <div><div class="sf-hl-field-label">Pipeline</div><div class="sf-hl-field-value">$${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div></div>
                 </div>
             </div>
@@ -3389,7 +3389,7 @@ const app = {
                     record.type = row.Type || row.type || 'Prospect';
                     record.notes = row.Notes || row.notes || row.Description || '';
                 } else if (target === 'deals') {
-                    record.name = row.Name || row.name || row['Deal Name'] || row['Opportunity Name'] || 'Unknown';
+                    record.name = row.Name || row.name || row['Deal Name'] || row['Process Name'] || 'Unknown';
                     record.value = parseFloat(row.Value || row.value || row.Amount || 0);
                     record.stage = row.Stage || row.stage || 'Prospect';
                     record.sector = row.Sector || row.sector || '';
