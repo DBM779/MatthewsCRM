@@ -366,21 +366,33 @@
             <div class="modal-header">Contact</div>
             <form id="formContact">
                 <input type="hidden" id="contactId">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
                 <div class="form-group"><label>Name *</label><input type="text" id="contactName" required></div>
+                <div class="form-group"><label>Account</label><select id="contactCompany"></select></div>
+                <div class="form-group"><label>Title</label><input type="text" id="contactTitle"></div>
+                <div class="form-group"><label>Department</label><input type="text" id="contactDepartment"></div>
                 <div class="form-group"><label>Email</label><input type="email" id="contactEmail"></div>
+                <div class="form-group"><label>Lead Source</label><select id="contactLeadSource"><option value="">--None--</option><option value="Web">Web</option><option value="Phone">Phone Inquiry</option><option value="Referral">Referral</option><option value="Partner">Partner</option><option value="Event">Event</option><option value="Cold Call">Cold Call</option><option value="Other">Other</option></select></div>
                 <div class="form-group"><label>Mobile</label><input type="tel" id="contactMobile"></div>
                 <div class="form-group"><label>Phone</label><input type="tel" id="contactPhone"></div>
-                <div class="form-group"><label>Address</label><input type="text" id="contactAddress"></div>
-                <div class="form-group"><label>Company</label><select id="contactCompany"></select></div>
-                <div class="form-group"><label>Tier</label><select id="contactTier"><option value="1-VIP">1-VIP</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
-                <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
+                <div class="form-group"><label>Home Phone</label><input type="tel" id="contactHomePhone"></div>
+                <div class="form-group"><label>Other Phone</label><input type="tel" id="contactOtherPhone"></div>
+                <div class="form-group"><label>Fax</label><input type="tel" id="contactFax"></div>
                 <div class="form-group"><label>Birthdate</label><input type="date" id="contactBirthdate"></div>
-                <div class="form-group"><label>Title</label><input type="text" id="contactTitle"></div>
+                <div class="form-group"><label>Assistant Name</label><input type="text" id="contactAssistantName"></div>
+                <div class="form-group"><label>Assistant Phone</label><input type="tel" id="contactAssistantPhone"></div>
+                <div class="form-group"><label>Tier</label><select id="contactTier"><option value="1-VIP">1-VIP</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+                <div class="form-group"><label>VIP</label><select id="contactVip"><option value="">No</option><option value="true">Yes</option></select></div>
+                </div>
+                <div class="form-group"><label>Mailing Address</label><input type="text" id="contactAddress"></div>
+                <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
                 <div class="form-group"><label>Instagram</label><input type="text" id="contactInstagram"></div>
-                <div class="form-group"><label>LinkedIn</label><input type="url" id="contactLinkedin"></div>
+                <div class="form-group"><label>LinkedIn URL</label><input type="url" id="contactLinkedin"></div>
+                <div class="form-group"><label>LinkedIn Profile</label><input type="text" id="contactLinkedinProfile"></div>
+                <div class="form-group"><label>LISN Profile</label><input type="text" id="contactLisnProfile"></div>
                 <div class="form-group"><label>LinkedIn/Social Notes</label><textarea id="contactLiSnP"></textarea></div>
                 <div class="form-group"><label>Tags (comma-separated)</label><input type="text" id="contactTags" placeholder="e.g. client, warm-lead, tech"></div>
-                <div class="form-group"><label>Notes</label><textarea id="contactNotes"></textarea></div>
+                <div class="form-group"><label>Description</label><textarea id="contactNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalContact')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
         </div>
@@ -628,14 +640,24 @@ const app = {
             email: document.getElementById('contactEmail').value,
             mobile: document.getElementById('contactMobile').value,
             phone: document.getElementById('contactPhone').value,
+            home_phone: document.getElementById('contactHomePhone').value || null,
+            other_phone: document.getElementById('contactOtherPhone').value || null,
+            fax: document.getElementById('contactFax').value || null,
             address: document.getElementById('contactAddress').value,
             accountId: document.getElementById('contactCompany').value || null,
             tier: document.getElementById('contactTier').value,
+            vip: document.getElementById('contactVip').value === 'true' || false,
             la: document.getElementById('contactLA').value || null,
             birthdate: document.getElementById('contactBirthdate').value || null,
             title: document.getElementById('contactTitle').value || null,
+            department: document.getElementById('contactDepartment').value || null,
+            lead_source: document.getElementById('contactLeadSource').value || null,
+            assistant_name: document.getElementById('contactAssistantName').value || null,
+            assistant_phone: document.getElementById('contactAssistantPhone').value || null,
             instagram: document.getElementById('contactInstagram').value || null,
             linkedin: document.getElementById('contactLinkedin').value || null,
+            linkedin_profile: document.getElementById('contactLinkedinProfile').value || null,
+            lisn_profile: document.getElementById('contactLisnProfile').value || null,
             liSnP: document.getElementById('contactLiSnP').value || null,
             tags: document.getElementById('contactTags').value || null,
             notes: document.getElementById('contactNotes').value || null
@@ -1643,45 +1665,50 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
-    openContactForm() {
-        document.getElementById('contactId').value = '';
-        document.getElementById('contactName').value = '';
-        document.getElementById('contactEmail').value = '';
-        document.getElementById('contactMobile').value = '';
-        document.getElementById('contactPhone').value = '';
-        document.getElementById('contactAddress').value = '';
-        document.getElementById('contactCompany').value = '';
+    _clearContactForm() {
+        ['contactId','contactName','contactEmail','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactDepartment','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
         document.getElementById('contactTier').value = '3';
-        document.getElementById('contactLA').value = '';
-        document.getElementById('contactBirthdate').value = '';
-        document.getElementById('contactTitle').value = '';
-        document.getElementById('contactInstagram').value = '';
-        document.getElementById('contactLinkedin').value = '';
-        document.getElementById('contactLiSnP').value = '';
-        document.getElementById('contactTags').value = '';
-        document.getElementById('contactNotes').value = '';
+        document.getElementById('contactVip').value = '';
+        document.getElementById('contactLeadSource').value = '';
+    },
+    openContactForm() {
+        this._clearContactForm();
         this.openModal('modalContact');
     },
 
     editContact(id) {
-        const contact = this.data.contacts.find(c => c.id === id);
-        if (!contact) return;
-        document.getElementById('contactId').value = contact.id;
-        document.getElementById('contactName').value = contact.name;
-        document.getElementById('contactEmail').value = contact.email || '';
-        document.getElementById('contactMobile').value = contact.mobile || '';
-        document.getElementById('contactPhone').value = contact.phone || '';
-        document.getElementById('contactAddress').value = contact.address || '';
-        document.getElementById('contactCompany').value = contact.accountId || '';
-        document.getElementById('contactTier').value = contact.tier || '3';
-        document.getElementById('contactLA').value = contact.la || '';
-        document.getElementById('contactBirthdate').value = contact.birthdate || '';
-        document.getElementById('contactTitle').value = contact.title || '';
-        document.getElementById('contactInstagram').value = contact.instagram || '';
-        document.getElementById('contactLinkedin').value = contact.linkedin || '';
-        document.getElementById('contactLiSnP').value = contact.liSnP || '';
-        document.getElementById('contactTags').value = contact.tags || '';
-        document.getElementById('contactNotes').value = contact.notes || '';
+        const c = this.data.contacts.find(x => x.id === id);
+        if (!c) return;
+        this._clearContactForm();
+        document.getElementById('contactId').value = c.id;
+        document.getElementById('contactName').value = c.name || '';
+        document.getElementById('contactEmail').value = c.email || '';
+        document.getElementById('contactMobile').value = c.mobile || '';
+        document.getElementById('contactPhone').value = c.phone || '';
+        document.getElementById('contactHomePhone').value = c.home_phone || '';
+        document.getElementById('contactOtherPhone').value = c.other_phone || '';
+        document.getElementById('contactFax').value = c.fax || '';
+        document.getElementById('contactAddress').value = c.address || '';
+        document.getElementById('contactCompany').value = c.accountId || c.account_id || '';
+        document.getElementById('contactTier').value = c.tier || '3';
+        document.getElementById('contactVip').value = c.vip ? 'true' : '';
+        document.getElementById('contactLA').value = c.la || c.last_activity_display || '';
+        document.getElementById('contactBirthdate').value = c.birthdate || '';
+        document.getElementById('contactTitle').value = c.title || '';
+        document.getElementById('contactDepartment').value = c.department || '';
+        document.getElementById('contactLeadSource').value = c.lead_source || '';
+        document.getElementById('contactAssistantName').value = c.assistant_name || '';
+        document.getElementById('contactAssistantPhone').value = c.assistant_phone || '';
+        document.getElementById('contactInstagram').value = c.instagram || '';
+        document.getElementById('contactLinkedin').value = c.linkedin || '';
+        document.getElementById('contactLinkedinProfile').value = c.linkedin_profile || '';
+        document.getElementById('contactLisnProfile').value = c.lisn_profile || '';
+        document.getElementById('contactLiSnP').value = c.liSnP || '';
+        document.getElementById('contactTags').value = c.tags || '';
+        document.getElementById('contactNotes').value = c.notes || '';
         this.openModal('modalContact');
     },
 
@@ -1752,22 +1779,37 @@ const app = {
                     ${sfField('Name', c.name)}
                     ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
                     ${sfField('Title', c.title)}
-                    ${sfField('Tier', `<span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span>`)}
+                    ${sfField('Department', c.department)}
                     ${sfField('Email', c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : null)}
+                    ${sfField('Lead Source', c.lead_source)}
                     ${sfField('Mobile', c.mobile ? `<a href="tel:${c.mobile}" style="color:var(--sf-brand);">${c.mobile}</a>` : null)}
                     ${sfField('Phone', c.phone ? `<a href="tel:${c.phone}" style="color:var(--sf-brand);">${c.phone}</a>` : null)}
-                    ${sfField('Birthday', c.birthdate ? new Date(c.birthdate+'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : null)}
+                    ${sfField('Home Phone', c.home_phone ? `<a href="tel:${c.home_phone}" style="color:var(--sf-brand);">${c.home_phone}</a>` : null)}
+                    ${sfField('Other Phone', c.other_phone ? `<a href="tel:${c.other_phone}" style="color:var(--sf-brand);">${c.other_phone}</a>` : null)}
+                    ${sfField('Fax', c.fax)}
+                    ${sfField('Birthdate', c.birthdate ? new Date(c.birthdate+'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : null)}
+                    ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null)}
+                    ${sfField('VIP', c.vip ? '<span style="color:var(--sf-success); font-weight:600;">Yes</span>' : null)}
                 </div>
 
                 <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address Information</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
                     ${sfField('Mailing Address', c.address)}
+                    ${sfField('Mailing Country', c.mailing_country)}
                 </div>
 
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social & Other</h3>
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Assistant Information</h3>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                    ${sfField('Assistant Name', c.assistant_name)}
+                    ${sfField('Assistant Phone', c.assistant_phone ? `<a href="tel:${c.assistant_phone}" style="color:var(--sf-brand);">${c.assistant_phone}</a>` : null)}
+                </div>
+
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social & Online</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
                     ${sfField('Instagram', c.instagram)}
-                    ${sfField('LinkedIn', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">Profile</a>` : null)}
+                    ${sfField('LinkedIn URL', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">${c.linkedin}</a>` : null)}
+                    ${sfField('LinkedIn Profile', c.linkedin_profile)}
+                    ${sfField('LISN Profile', c.lisn_profile)}
                     ${sfField('LinkedIn/Social Notes', c.liSnP)}
                     ${sfField('Tags', c.tags ? c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ') : null)}
                 </div>
@@ -1775,11 +1817,16 @@ const app = {
                 <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
                 <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${c.notes || '—'}</div>
 
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Activity Status</h3>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                    ${sfField('Last Activity', c.la || c.last_activity_display || '—')}
+                    ${sfField('Days Since Last Activity', `<span class="activity-score ${asClass}"></span>${c.days_since_last_activity != null ? c.days_since_last_activity + ' days' : (dsla !== null ? dsla + ' days' : 'None')}`)}
+                    ${sfField('Activity Status', c.activity_status)}
+                </div>
+
                 <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">System Information</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Last Activity', c.la || '—')}
-                    ${sfField('DSLA', `<span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + ' days' : 'None'}`)}
-                    ${sfField('Created', c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—')}
+                    ${sfField('Created', c.createdAt || c.created_at ? new Date(c.createdAt || c.created_at).toLocaleDateString() : '—')}
                     ${sfField('Contact ID', `<span style="font-family:monospace; font-size:11px; color:var(--sf-text-weakest);">${c.id}</span>`)}
                 </div>
             </div>
