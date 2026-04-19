@@ -1396,41 +1396,37 @@ const app = {
         this.applyMapFilters();
     },
 
-    applyMapFilters() {
+    _itemPassesFilter(item) {
         const f = this.mapFilters;
+        if (f.type !== 'all' && item._type !== f.type) return false;
+        if (f.tier && (item.tier || '') !== f.tier) return false;
+        if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) return false;
+        if (f.company) {
+            if (item._type === 'contact' && (item.accountId || item.account_id || '') !== f.company) return false;
+            if (item._type === 'account' && item.id !== f.company) return false;
+        }
+        if (f.text && !(item.name || '').toLowerCase().includes(f.text.toLowerCase())) return false;
+        return true;
+    },
+
+    applyMapFilters() {
         let visibleCount = 0;
-        // filter sidebar
-        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
-            const elType = el.getAttribute('data-type');
-            const isAcct = elType === 'account';
-            let show = true;
-            if (f.type !== 'all' && elType !== f.type) show = false;
-            if (f.tier && !isAcct && el.getAttribute('data-tier') !== f.tier) show = false;
-            if (f.tag && !isAcct && !(el.getAttribute('data-tags')||'').includes(f.tag.toLowerCase())) show = false;
-            if (f.company && !isAcct && el.getAttribute('data-company') !== f.company) show = false;
-            if (f.company && isAcct) {
-                const idx = parseInt(el.getAttribute('data-idx'));
-                const item = this._mapAllItems[idx];
-                if (item && item.id !== f.company) show = false;
-            }
-            if (f.text && !(el.getAttribute('data-name')||'').includes(f.text.toLowerCase())) show = false;
-            el.style.display = show ? '' : 'none';
+        // Build set of visible indices
+        const visibleIdxs = new Set();
+        this._mapAllItems.forEach((item, i) => {
+            if (this._itemPassesFilter(item)) visibleIdxs.add(i);
         });
-        // filter map markers
+
+        // Sync sidebar
+        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
+            const idx = parseInt(el.getAttribute('data-idx'));
+            el.style.display = visibleIdxs.has(idx) ? '' : 'none';
+        });
+
+        // Sync map pins — show only what sidebar shows
         const visibleBounds = [];
         this.mapMarkers.forEach(m => {
-            const item = m.item;
-            const isAccount = item._type === 'account';
-            let show = true;
-            if (f.type !== 'all' && item._type !== f.type) show = false;
-            // tier/tag/company filters only apply to contacts — accounts always pass these
-            if (f.tier && !isAccount && (item.tier || '') !== f.tier) show = false;
-            if (f.tag && !isAccount && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) show = false;
-            if (f.company && !isAccount && (item.accountId || item.account_id || '') !== f.company) show = false;
-            // for company filter, also show the matching account itself
-            if (f.company && isAccount && item.id !== f.company) show = false;
-            if (f.text && !(item.name || '').toLowerCase().includes(f.text.toLowerCase())) show = false;
-            if (show) {
+            if (visibleIdxs.has(m.idx)) {
                 m.marker.addTo(this.mapInstance);
                 visibleBounds.push([m.coords.lat, m.coords.lng]);
                 visibleCount++;
@@ -1438,6 +1434,7 @@ const app = {
                 this.mapInstance.removeLayer(m.marker);
             }
         });
+
         const countEl = document.getElementById('mapPinCount');
         if (countEl) countEl.textContent = `${visibleCount} of ${this.mapMarkers.length} shown`;
         if (visibleBounds.length > 1) this.mapInstance.fitBounds(visibleBounds, {padding: [40, 40]});
