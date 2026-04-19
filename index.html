@@ -573,6 +573,28 @@
         </div>
     </div>
 
+    <div class="modal" id="modalEvent">
+        <div class="modal-content">
+            <div class="modal-header">Event</div>
+            <form id="formEvent">
+                <input type="hidden" id="eventId">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+                <div class="form-group" style="grid-column:span 2;"><label>Event Name *</label><input type="text" id="eventName" required></div>
+                <div class="form-group"><label>Type</label><select id="eventType"><option value="Meeting">Meeting</option><option value="Conference">Conference</option><option value="Lunch">Lunch</option><option value="Dinner">Dinner</option><option value="Call">Call</option><option value="Presentation">Presentation</option><option value="Networking">Networking</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Status</label><select id="eventStatus"><option value="Scheduled">Scheduled</option><option value="Completed">Completed</option><option value="Cancelled">Cancelled</option></select></div>
+                <div class="form-group"><label>Start Date/Time *</label><input type="datetime-local" id="eventStart" required></div>
+                <div class="form-group"><label>End Date/Time</label><input type="datetime-local" id="eventEnd"></div>
+                <div class="form-group"><label>Location</label><input type="text" id="eventLocation"></div>
+                <div class="form-group"><label>Account</label><select id="eventAccount"></select></div>
+                <div class="form-group"><label>Primary Contact</label><select id="eventContact"></select></div>
+                <div class="form-group"><label>Additional Contacts</label><input type="text" id="eventAttendees" placeholder="Names, comma-separated"></div>
+                </div>
+                <div class="form-group"><label>Description</label><textarea id="eventDescription"></textarea></div>
+                <div class="modal-footer"><button type="button" onclick="app.closeModal('modalEvent')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+
     <div class="modal" id="modalBulkUpdate">
         <div class="modal-content" style="max-width:500px;">
             <div class="modal-header" id="bulkUpdateHeader">Bulk Update</div>
@@ -604,7 +626,7 @@ const app = {
     currentView: 'dashboard',
     currentRecord: null,
     isLoading: true,
-    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: []},
+    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: [], events: []},
 
     fmt(n) { return Number(n).toLocaleString(); },
 
@@ -621,7 +643,7 @@ const app = {
                 if (this.currentRecord) this.currentView = 'contactDetail';
             } else if (savedHash.startsWith('activityDetail:')) {
                 const actId = savedHash.split(':')[1];
-                this.currentRecord = this.data.activities.find(a => a.id === actId);
+                this.currentRecord = this.data.events.find(a => a.id === actId);
                 if (this.currentRecord) this.currentView = 'activityDetail';
             } else if (savedHash.startsWith('accountDetail:')) {
                 const aid = savedHash.split(':')[1];
@@ -722,7 +744,8 @@ const app = {
                     activities: saved.activities || [],
                     emails: saved.emails || [],
                     referrals: saved.referrals || [],
-                    dealContacts: saved.dealContacts || []
+                    dealContacts: saved.dealContacts || [],
+                    events: saved.events || []
                 };
             } else {
                 this.data = this.getSeedData();
@@ -749,6 +772,7 @@ const app = {
         if (d.activities) { this.data.activities = [...this.data.activities, ...d.activities]; }
         if (d.emails) { this.data.emails = [...this.data.emails, ...d.emails]; }
         if (d.referrals) { this.data.referrals = [...this.data.referrals, ...d.referrals]; }
+        if (d.events) { this.data.events = [...this.data.events, ...d.events]; }
         this.persist();
         this.updateSelectOptions();
         this.render();
@@ -1001,6 +1025,7 @@ const app = {
         document.getElementById('formActivity').addEventListener('submit', (e) => this.saveActivity(e));
         document.getElementById('formReferral').addEventListener('submit', (e) => this.saveReferral(e));
         document.getElementById('formEmail').addEventListener('submit', (e) => this.saveEmail(e));
+        document.getElementById('formEvent').addEventListener('submit', (e) => this.saveEvent(e));
         const dropZone = document.getElementById('csvDropZone');
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
@@ -1097,8 +1122,8 @@ const app = {
             case 'accounts': this.renderAccounts(); break;
             case 'accountDetail': this.renderAccountDetail(); break;
             case 'deals': this.renderDeals(); break;
-            case 'activities': this.renderActivities(); break;
-            case 'activityDetail': this.renderActivityDetail(); break;
+            case 'activities': this.renderEvents(); break;
+            case 'activityDetail': this.renderEventDetail(); break;
             case 'map': this.renderMap(); break;
             case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
@@ -1506,6 +1531,9 @@ const app = {
         ] : type === 'accounts' ? [
             {key:'type', label:'Type', type:'select', options:['Client','Prospect','Partner','Own Company','Vendor','Other']},
             {key:'industry', label:'Industry', type:'text'},
+        ] : type === 'events' ? [
+            {key:'status', label:'Status', type:'select', options:['Scheduled','Completed','Cancelled']},
+            {key:'type', label:'Type', type:'select', options:['Meeting','Conference','Lunch','Dinner','Call','Presentation','Networking','Other']},
         ] : [
             {key:'status', label:'Status', type:'select', options:['Not Started','In Progress','Completed','Waiting','Deferred']},
             {key:'priority', label:'Priority', type:'select', options:['High','Normal','Low']},
@@ -1865,7 +1893,75 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
-    _actFilter: {type: '', status: '', text: ''},
+    // === EVENTS (separate from Activities) ===
+
+    saveEvent(e) {
+        e.preventDefault();
+        const id = document.getElementById('eventId').value;
+        const evt = {
+            name: document.getElementById('eventName').value,
+            type: document.getElementById('eventType').value,
+            status: document.getElementById('eventStatus').value,
+            start: document.getElementById('eventStart').value || null,
+            end: document.getElementById('eventEnd').value || null,
+            location: document.getElementById('eventLocation').value || null,
+            accountId: document.getElementById('eventAccount').value || null,
+            contactId: document.getElementById('eventContact').value || null,
+            attendees: document.getElementById('eventAttendees').value || null,
+            description: document.getElementById('eventDescription').value || null,
+        };
+        if (id) {
+            const idx = this.data.events.findIndex(x => x.id === id);
+            if (idx >= 0) this.data.events[idx] = {...this.data.events[idx], ...evt};
+        } else {
+            this.data.events.push({...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()});
+        }
+        this.persist();
+        this.closeModal('modalEvent');
+        this.render();
+    },
+
+    openEventForm() {
+        ['eventId','eventName','eventStart','eventEnd','eventLocation','eventAccount','eventContact','eventAttendees','eventDescription'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        document.getElementById('eventType').value = 'Meeting';
+        document.getElementById('eventStatus').value = 'Scheduled';
+        this.openModal('modalEvent');
+    },
+
+    editEvent(id) {
+        const evt = this.data.events.find(x => x.id === id);
+        if (!evt) return;
+        document.getElementById('eventId').value = evt.id;
+        document.getElementById('eventName').value = evt.name || '';
+        document.getElementById('eventType').value = evt.type || 'Meeting';
+        document.getElementById('eventStatus').value = evt.status || 'Scheduled';
+        document.getElementById('eventStart').value = evt.start || '';
+        document.getElementById('eventEnd').value = evt.end || '';
+        document.getElementById('eventLocation').value = evt.location || '';
+        document.getElementById('eventAccount').value = evt.accountId || '';
+        document.getElementById('eventContact').value = evt.contactId || '';
+        document.getElementById('eventAttendees').value = evt.attendees || '';
+        document.getElementById('eventDescription').value = evt.description || '';
+        this.openModal('modalEvent');
+    },
+
+    deleteEvent(id) {
+        if (!confirm('Delete this event?')) return;
+        this.data.events = this.data.events.filter(x => x.id !== id);
+        this.persist();
+        if (this.currentView === 'activityDetail') { this.currentView = 'activities'; }
+        this.render();
+    },
+
+    viewEvent(id) {
+        this.currentRecord = this.data.events.find(x => x.id === id);
+        if (!this.currentRecord) return;
+        this.currentView = 'activityDetail';
+        location.hash = 'activityDetail:' + id;
+        this.render();
+    },
+
+    _evtFilter: {type: '', status: '', text: ''},
 
     _fmtDate(dd) {
         if (!dd) return '';
@@ -1874,79 +1970,68 @@ const app = {
         return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2);
     },
 
-    renderActivities() {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const af = this._actFilter;
-        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
-        const openCount = this.data.activities.filter(a => isOpen(a.status)).length;
-        const overdueCount = this.data.activities.filter(a => isOpen(a.status) && (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr).length;
-        const completedCount = this.data.activities.filter(a => a.status === 'Completed' || a.status === 'Closed').length;
-        const typeIcons = {Call:'📞', Email:'📧', Meeting:'📅', Task:'☑️', 'Follow-up':'🔄', Note:'📝'};
+    renderEvents() {
+        const ef = this._evtFilter;
+        const scheduled = this.data.events.filter(e => e.status === 'Scheduled').length;
+        const completed = this.data.events.filter(e => e.status === 'Completed').length;
+        const cancelled = this.data.events.filter(e => e.status === 'Cancelled').length;
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
 
-        let filtered = [...this.data.activities];
-        if (af.type) filtered = filtered.filter(a => a.type === af.type);
-        if (af.status === 'open') filtered = filtered.filter(a => isOpen(a.status));
-        else if (af.status === 'overdue') filtered = filtered.filter(a => isOpen(a.status) && (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr);
-        else if (af.status === 'completed') filtered = filtered.filter(a => a.status === 'Completed' || a.status === 'Closed');
-        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => {
-            const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
-            return (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt));
+        let filtered = [...this.data.events];
+        if (ef.type) filtered = filtered.filter(e => e.type === ef.type);
+        if (ef.status === 'scheduled') filtered = filtered.filter(e => e.status === 'Scheduled');
+        else if (ef.status === 'completed') filtered = filtered.filter(e => e.status === 'Completed');
+        else if (ef.status === 'cancelled') filtered = filtered.filter(e => e.status === 'Cancelled');
+        if (ef.text) { const lt = ef.text.toLowerCase(); filtered = filtered.filter(e => {
+            const con = this.data.contacts.find(c => c.id === e.contactId);
+            const acct = this.data.accounts.find(a => a.id === e.accountId);
+            return (e.name||'').toLowerCase().includes(lt) || (e.location||'').toLowerCase().includes(lt) || (e.description||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt)) || (acct && acct.name.toLowerCase().includes(lt));
         }); }
 
-        const sorted = this._applySortToList(filtered.map(a => {
-            const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
-            const dd = a.dueDate || a.due_date || '';
-            return {...a, _contact: con ? con.name : '', _date: dd};
-        }), 'activities');
-
-        // Default sort: open first, then by date
-        if (!this._sortState.view || this._sortState.view !== 'activities' || !this._sortState.col) {
-            sorted.sort((a, b) => {
-                if (isOpen(a.status) && !isOpen(b.status)) return -1;
-                if (!isOpen(a.status) && isOpen(b.status)) return 1;
-                return (a._date || 'z').localeCompare(b._date || 'z');
-            });
+        const sorted = this._applySortToList(filtered.map(e => {
+            const con = this.data.contacts.find(c => c.id === e.contactId);
+            const acct = this.data.accounts.find(a => a.id === e.accountId);
+            return {...e, _contact: con ? con.name : '', _account: acct ? acct.name : '', _start: e.start || ''};
+        }), 'events');
+        if (!this._sortState.col || this._sortState.view !== 'events') {
+            sorted.sort((a,b) => (b._start||'').localeCompare(a._start||''));
         }
 
         const html = `
             <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
                 <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
-                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('activities')">Bulk Update</button>
-                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderActivities();">Deselect All</button>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('events')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderEvents();">Deselect All</button>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h2 style="margin: 0;">Events</h2>
-                <div style="display:flex; gap:6px;">
-                    <button onclick="app.quickActivityForm(null,'Call')" style="padding:2px 10px; font-size:12px; height:26px;">Log a Call</button>
-                    <button onclick="app.quickActivityForm(null,'Meeting')" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
-                    <button class="btn-primary" onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Activity</button>
-                </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h2 style="margin:0;">Events</h2>
+                <button class="btn-primary" onclick="app.openEventForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
             </div>
             <div class="stat-cards" style="margin-bottom:8px;">
-                <div class="stat-card" style="cursor:pointer; ${!af.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status=''; app.renderActivities();">
+                <div class="stat-card" style="cursor:pointer; ${!ef.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status=''; app.renderEvents();">
                     <div class="label">Total</div>
-                    <div class="value">${this.fmt(this.data.activities.length)}</div>
+                    <div class="value">${this.fmt(this.data.events.length)}</div>
                 </div>
-                <div class="stat-card" style="cursor:pointer; ${af.status==='open'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status='${af.status==='open'?'':'open'}'; app.renderActivities();">
-                    <div class="label">Open</div>
-                    <div class="value" style="color:var(--sf-brand);">${this.fmt(openCount)}</div>
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='scheduled'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status='${ef.status==='scheduled'?'':'scheduled'}'; app.renderEvents();">
+                    <div class="label">Scheduled</div>
+                    <div class="value" style="color:var(--sf-brand);">${this.fmt(scheduled)}</div>
                 </div>
-                <div class="stat-card" style="cursor:pointer; ${af.status==='overdue'?'border-bottom:3px solid var(--sf-error);':''}" onclick="app._actFilter.status='${af.status==='overdue'?'':'overdue'}'; app.renderActivities();">
-                    <div class="label">Overdue</div>
-                    <div class="value" style="color:var(--sf-error);">${this.fmt(overdueCount)}</div>
-                </div>
-                <div class="stat-card" style="cursor:pointer; ${af.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._actFilter.status='${af.status==='completed'?'':'completed'}'; app.renderActivities();">
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._evtFilter.status='${ef.status==='completed'?'':'completed'}'; app.renderEvents();">
                     <div class="label">Completed</div>
-                    <div class="value" style="color:var(--sf-success);">${this.fmt(completedCount)}</div>
+                    <div class="value" style="color:var(--sf-success);">${this.fmt(completed)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='cancelled'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app._evtFilter.status='${ef.status==='cancelled'?'':'cancelled'}'; app.renderEvents();">
+                    <div class="label">Cancelled</div>
+                    <div class="value" style="color:var(--sf-text-weakest);">${this.fmt(cancelled)}</div>
                 </div>
             </div>
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
-                <input type="text" placeholder="Search events…" value="${af.text}" oninput="app._actFilter.text=this.value; app.renderActivities();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
-                <select onchange="app._actFilter.type=this.value; app.renderActivities();" style="min-height:32px; padding:4px; font-size:12px;">
-                    <option value="" ${!af.type?'selected':''}>All Types</option>
-                    ${['Call','Email','Meeting','Task','Follow-up','Note'].map(t => `<option value="${t}" ${af.type===t?'selected':''}>${typeIcons[t]||''} ${t}</option>`).join('')}
+                <input type="text" placeholder="Search events…" value="${ef.text}" oninput="app._evtFilter.text=this.value; app.renderEvents();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                <select onchange="app._evtFilter.type=this.value; app.renderEvents();" style="min-height:32px; padding:4px; font-size:12px;">
+                    <option value="" ${!ef.type?'selected':''}>All Types</option>
+                    ${Object.keys(typeIcons).map(t => `<option value="${t}" ${ef.type===t?'selected':''}>${typeIcons[t]} ${t}</option>`).join('')}
                 </select>
-                ${af.text||af.type||af.status ? `<button class="btn-small" onclick="app._actFilter={type:'',status:'',text:''}; app.renderActivities();">Clear</button>` : ''}
+                ${ef.text||ef.type||ef.status ? `<button class="btn-small" onclick="app._evtFilter={type:'',status:'',text:''}; app.renderEvents();">Clear</button>` : ''}
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card" style="overflow:hidden;">
@@ -1954,35 +2039,32 @@ const app = {
                     <table class="compact-table">
                         <thead>
                             <tr>
-                                <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('activities')" style="width:10px;height:10px;cursor:pointer;"></th>
-                                <th style="width:24px;"></th>
-                                <th onclick="app.sortBy('activities','subject')" style="cursor:pointer;">Subject${this._sortIndicator('activities','subject')}</th>
-                                <th onclick="app.sortBy('activities','type')" style="cursor:pointer;">Type${this._sortIndicator('activities','type')}</th>
-                                <th onclick="app.sortBy('activities','_contact')" style="cursor:pointer;">Contact${this._sortIndicator('activities','_contact')}</th>
-                                <th onclick="app.sortBy('activities','_date')" style="cursor:pointer;">Date${this._sortIndicator('activities','_date')}</th>
-                                <th onclick="app.sortBy('activities','priority')" style="cursor:pointer;">Priority${this._sortIndicator('activities','priority')}</th>
-                                <th onclick="app.sortBy('activities','status')" style="cursor:pointer;">Status${this._sortIndicator('activities','status')}</th>
+                                <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('events')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></th>
+                                <th onclick="app.sortBy('events','name')" style="cursor:pointer;">Event Name${this._sortIndicator('events','name')}</th>
+                                <th onclick="app.sortBy('events','type')" style="cursor:pointer;">Type${this._sortIndicator('events','type')}</th>
+                                <th onclick="app.sortBy('events','_start')" style="cursor:pointer;">Date${this._sortIndicator('events','_start')}</th>
+                                <th>Location</th>
+                                <th onclick="app.sortBy('events','_contact')" style="cursor:pointer;">Contact${this._sortIndicator('events','_contact')}</th>
+                                <th onclick="app.sortBy('events','_account')" style="cursor:pointer;">Account${this._sortIndicator('events','_account')}</th>
+                                <th onclick="app.sortBy('events','status')" style="cursor:pointer;">Status${this._sortIndicator('events','status')}</th>
                                 <th style="width:30px;"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${sorted.map(a => {
-                                const open = isOpen(a.status);
-                                const isOverdue = open && a._date && a._date < todayStr;
-                                const isToday = open && a._date === todayStr;
-                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
-                                const pri = a.priority || 'Normal';
-                                const priColor = pri === 'High' ? 'var(--sf-error)' : pri === 'Low' ? 'var(--sf-text-weakest)' : '';
-                                return `<tr style="${isOverdue?'background:#fef2f2;':isToday?'background:#fffbeb;':''}">
-                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:10px;height:10px;cursor:pointer;"></td>
-                                    <td style="text-align:center;">${open ? `<input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:10px;height:10px;cursor:pointer;" title="Mark complete">` : `<span style="color:var(--sf-success);">✓</span>`}</td>
-                                    <td><a onclick="app.viewActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
-                                    <td>${typeIcons[a.type]||''} ${a.type}</td>
+                            ${sorted.map(e => {
+                                const con = this.data.contacts.find(c => c.id === e.contactId);
+                                const acct = this.data.accounts.find(a => a.id === e.accountId);
+                                const startDisplay = e.start ? new Date(e.start).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+                                return `<tr>
+                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(e.id)?'checked':''} onclick="app.toggleBulkSelect('${e.id}')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></td>
+                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${e.name||'(no name)'}</a></td>
+                                    <td>${typeIcons[e.type]||''} ${e.type||''}</td>
+                                    <td>${startDisplay}</td>
+                                    <td>${e.location||''}</td>
                                     <td>${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : ''}</td>
-                                    <td>${this._fmtDate(a._date)}</td>
-                                    <td style="${priColor?'color:'+priColor+';font-weight:600;':''}">${pri}</td>
-                                    <td>${a.status||''}</td>
-                                    <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('act_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_act_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
+                                    <td>${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : ''}</td>
+                                    <td>${e.status||''}</td>
+                                    <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('evt_${e.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_evt_${e.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
                                 </tr>`;
                             }).join('')}
                         </tbody>
@@ -1993,82 +2075,54 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
-    viewActivity(id) {
-        const a = this.data.activities.find(x => x.id === id);
-        if (!a) return;
-        this.currentRecord = a;
-        this.currentView = 'activityDetail';
-        location.hash = 'activityDetail:' + id;
-        this.render();
-    },
-
-    renderActivityDetail() {
-        const a = this.currentRecord;
-        if (!a) { this.currentView = 'activities'; this.render(); return; }
-        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
-        const acct = this.data.accounts.find(ac => ac.id === (a.accountId||a.account_id));
-        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
-        const dd = a.dueDate || a.due_date || '';
-        const typeIcons = {Call:'📞', Email:'📧', Meeting:'📅', Task:'☑️', 'Follow-up':'🔄', Note:'📝'};
-        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+    renderEventDetail() {
+        const e = this.currentRecord;
+        if (!e) { this.currentView = 'activities'; this.render(); return; }
+        const con = this.data.contacts.find(c => c.id === e.contactId);
+        const acct = this.data.accounts.find(a => a.id === e.accountId);
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
         const sfField = (label, value) => `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
 
         const html = `
             <div class="detail-back" onclick="history.back();">&#8592; Back</div>
             <div class="sf-highlight">
                 <div class="sf-hl-top">
-                    <div style="width:40px; height:40px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; background:var(--sf-bg);">${typeIcons[a.type]||'📋'}</div>
+                    <div style="width:40px; height:40px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; background:var(--sf-bg);">${typeIcons[e.type]||'📋'}</div>
                     <div class="sf-hl-meta">
-                        <div class="sf-hl-eyebrow">${a.type || 'Activity'}</div>
-                        <div class="sf-hl-title">${a.subject || '(no subject)'}</div>
+                        <div class="sf-hl-eyebrow">${e.type || 'Event'}</div>
+                        <div class="sf-hl-title">${e.name || '(no name)'}</div>
                     </div>
                     <div class="sf-hl-actions">
-                        <button onclick="app.editActivity('${a.id}')">Edit</button>
-                        ${isOpen(a.status) ? `<button onclick="app.completeActivity('${a.id}')">Mark Complete</button>` : ''}
-                        <button onclick="if(confirm('Delete this activity?')){app.deleteActivity('${a.id}')}" style="color:var(--sf-error);">Delete</button>
+                        <button onclick="app.editEvent('${e.id}')">Edit</button>
+                        <button onclick="if(confirm('Delete this event?')){app.deleteEvent('${e.id}')}" style="color:var(--sf-error);">Delete</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
-                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${a.status || '—'}</div></div>
-                    <div><div class="sf-hl-field-label">Due Date</div><div class="sf-hl-field-value">${this._fmtDate(dd)}</div></div>
-                    <div><div class="sf-hl-field-label">Priority</div><div class="sf-hl-field-value" style="${a.priority==='High'?'color:var(--sf-error);font-weight:600;':''}">${a.priority || 'Normal'}</div></div>
+                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${e.status||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Start</div><div class="sf-hl-field-value">${e.start ? new Date(e.start).toLocaleString() : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Location</div><div class="sf-hl-field-value">${e.location||'—'}</div></div>
                     <div><div class="sf-hl-field-label">Contact</div><div class="sf-hl-field-value">${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : '—'}</div></div>
                 </div>
             </div>
             <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:20px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
-                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Activity Details</h3>
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Event Details</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                    ${sfField('Subject', a.subject)}
-                    ${sfField('Type', (typeIcons[a.type]||'') + ' ' + (a.type||''))}
-                    ${sfField('Status', a.status)}
-                    ${sfField('Priority', a.priority || 'Normal')}
-                    ${sfField('Due Date', this._fmtDate(dd))}
-                    ${sfField('Date/Time', a.dateTime ? new Date(a.dateTime).toLocaleString() : null)}
-                    ${sfField('Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
+                    ${sfField('Event Name', e.name)}
+                    ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''))}
+                    ${sfField('Status', e.status)}
+                    ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null)}
+                    ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null)}
+                    ${sfField('Location', e.location)}
                     ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
-                    ${sfField('Process', deal ? deal.name : null)}
+                    ${sfField('Primary Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
+                    ${sfField('Additional Contacts', e.attendees)}
                 </div>
-                ${a.type === 'Call' ? `
-                    <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Call Details</h3>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                        ${sfField('Direction', a.callDirection)}
-                        ${sfField('Duration', a.callDuration ? a.callDuration + ' min' : null)}
-                        ${sfField('Result', a.callResult)}
-                    </div>
-                ` : ''}
-                ${a.type === 'Meeting' ? `
-                    <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Meeting Details</h3>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                        ${sfField('Location', a.location)}
-                        ${sfField('End Date/Time', a.endDateTime ? new Date(a.endDateTime).toLocaleString() : null)}
-                    </div>
-                ` : ''}
                 <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
-                <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${a.notes || '—'}</div>
+                <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${e.description || '—'}</div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
-        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (a.subject || '(no subject)');
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (e.name || '(no name)');
     },
 
     _geocodeCache: null,
@@ -3397,6 +3451,10 @@ const app = {
         activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
         activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
         activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        const eventAccountSelect = document.getElementById('eventAccount');
+        const eventContactSelect = document.getElementById('eventContact');
+        if (eventAccountSelect) eventAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        if (eventContactSelect) eventContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
     },
 
     openModal(id) {
@@ -3820,7 +3878,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const h = location.hash.replace('#','');
         if (h.startsWith('contactDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.contacts.find(c=>c.id===id); if(app.currentRecord) { app.currentView='contactDetail'; app.render(); } }
         else if (h.startsWith('accountDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.accounts.find(a=>a.id===id); if(app.currentRecord) { app.currentView='accountDetail'; app.render(); } }
-        else if (h.startsWith('activityDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.activities.find(a=>a.id===id); if(app.currentRecord) { app.currentView='activityDetail'; app.render(); } }
+        else if (h.startsWith('activityDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.events.find(a=>a.id===id); if(app.currentRecord) { app.currentView='activityDetail'; app.render(); } }
         else if (h && h !== 'sync') { app.currentView = h; app.render(); }
     });
 });
