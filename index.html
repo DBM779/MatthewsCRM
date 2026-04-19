@@ -1127,6 +1127,35 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
+    // Sorting
+    _sortState: {view: '', col: '', dir: 'asc'},
+    sortBy(view, col) {
+        if (this._sortState.view === view && this._sortState.col === col) {
+            this._sortState.dir = this._sortState.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this._sortState = {view, col, dir: 'asc'};
+        }
+        this.render();
+    },
+    _sortIndicator(view, col) {
+        if (this._sortState.view === view && this._sortState.col === col) {
+            return this._sortState.dir === 'asc' ? ' ▲' : ' ▼';
+        }
+        return '';
+    },
+    _applySortToList(list, view) {
+        const s = this._sortState;
+        if (s.view !== view || !s.col) return list;
+        const sorted = [...list].sort((a, b) => {
+            let va = a[s.col], vb = b[s.col];
+            if (va == null) va = '';
+            if (vb == null) vb = '';
+            if (typeof va === 'number' && typeof vb === 'number') return va - vb;
+            return String(va).localeCompare(String(vb), undefined, {numeric: true, sensitivity: 'base'});
+        });
+        return s.dir === 'desc' ? sorted.reverse() : sorted;
+    },
+
     contactFilters: {tier: '', tag: '', company: '', text: ''},
     renderContacts() {
         const f = this.contactFilters;
@@ -1167,10 +1196,23 @@ const app = {
                 <div class="table-container">
                     <table>
                         <thead>
-                            <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th><th>Tier</th><th>Tags</th><th>LA</th><th>DSLA</th><th>Actions</th></tr>
+                            <tr>
+                                <th onclick="app.sortBy('contacts','name')" style="cursor:pointer;">Name${this._sortIndicator('contacts','name')}</th>
+                                <th onclick="app.sortBy('contacts','email')" style="cursor:pointer;">Email${this._sortIndicator('contacts','email')}</th>
+                                <th onclick="app.sortBy('contacts','mobile')" style="cursor:pointer;">Mobile${this._sortIndicator('contacts','mobile')}</th>
+                                <th onclick="app.sortBy('contacts','_company')" style="cursor:pointer;">Company${this._sortIndicator('contacts','_company')}</th>
+                                <th onclick="app.sortBy('contacts','tier')" style="cursor:pointer;">Tier${this._sortIndicator('contacts','tier')}</th>
+                                <th>Tags</th>
+                                <th onclick="app.sortBy('contacts','la')" style="cursor:pointer;">LA${this._sortIndicator('contacts','la')}</th>
+                                <th onclick="app.sortBy('contacts','_dsla')" style="cursor:pointer;">DSLA${this._sortIndicator('contacts','_dsla')}</th>
+                                <th>Actions</th>
+                            </tr>
                         </thead>
                         <tbody>
-                            ${filtered.map(c => {
+                            ${this._applySortToList(filtered.map(c => {
+                                const cpy = this.data.accounts.find(a => a.id === c.accountId);
+                                return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la) ?? 9999};
+                            }), 'contacts').map(c => {
                                 const dsla = this.calculateDSLA(c.la);
                                 const asClass = 'as-' + this.calculateAS(dsla);
                                 const tagPills = (c.tags || '').split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ');
@@ -1250,26 +1292,32 @@ const app = {
                 <div class="table-container">
                     <table>
                         <thead>
-                            <tr><th>Name</th><th>Industry</th><th>Type</th><th>Website</th><th>Address</th><th>Contacts</th><th>Actions</th></tr>
+                            <tr>
+                                <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
+                                <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
+                                <th onclick="app.sortBy('accounts','type')" style="cursor:pointer;">Type${this._sortIndicator('accounts','type')}</th>
+                                <th>Website</th>
+                                <th>Address</th>
+                                <th onclick="app.sortBy('accounts','_conCount')" style="cursor:pointer;">Contacts${this._sortIndicator('accounts','_conCount')}</th>
+                                <th>Actions</th>
+                            </tr>
                         </thead>
                         <tbody>
-                            ${this.data.accounts.map(a => {
-                                const conCount = this.data.contacts.filter(c => c.accountId === a.id).length;
-                                const dealCount = this.data.deals.filter(d => d.accountId === a.id).length;
-                                const dealVal = this.data.deals.filter(d => d.accountId === a.id).reduce((s,d) => s + (d.value||0), 0);
-                                return `<tr>
+                            ${this._applySortToList(this.data.accounts.map(a => {
+                                const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
+                                return {...a, _conCount: conCount};
+                            }), 'accounts').map(a => `<tr>
                                     <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: var(--sf-brand);">${a.name}</a></td>
                                     <td>${a.industry || ''}</td>
                                     <td>${a.type || ''}</td>
                                     <td>${a.website || ''}</td>
                                     <td>${a.address || ''}</td>
-                                    <td><a onclick="app.contactFilters.company='${a.id}'; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${conCount}</a></td>
+                                    <td><a onclick="app.contactFilters.company='${a.id}'; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${a._conCount}</a></td>
                                     <td>
                                         <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
                                         <button class="btn-small" onclick="app.deleteAccount('${a.id}')">Delete</button>
                                     </td>
-                                </tr>`;
-                            }).join('')}
+                                </tr>`).join('')}
                         </tbody>
                     </table>
                 </div>
