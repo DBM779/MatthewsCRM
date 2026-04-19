@@ -1531,8 +1531,9 @@ const app = {
 
         const countEl = document.getElementById('mapPinCount');
         if (countEl) countEl.textContent = `${visibleCount} of ${this.mapMarkers.length} pins shown`;
-        if (visibleBounds.length > 1) this.mapInstance.fitBounds(visibleBounds, {padding: [40, 40]});
-        else if (visibleBounds.length === 1) this.mapInstance.setView(visibleBounds[0], 14);
+        const hasActiveFilter = this.mapFilters.text || this.mapFilters.tier || this.mapFilters.tag || this.mapFilters.type !== 'all';
+        if (hasActiveFilter && visibleBounds.length > 1) this.mapInstance.fitBounds(visibleBounds, {padding: [40, 40]});
+        else if (hasActiveFilter && visibleBounds.length === 1) this.mapInstance.setView(visibleBounds[0], 14);
     },
 
     _createMapMarker(item, coords) {
@@ -1594,10 +1595,11 @@ const app = {
             this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
         }
 
-        // Show all cached pins right away
+        // Show all cached pins right away, zoomed to US
         if (this.mapMarkers.length > 0) {
             if (loadingEl) loadingEl.style.display = 'none';
             this.applyMapFilters();
+            map.setView([39.8283, -98.5795], 4);
         }
 
         // Step 2: Geocode any uncached addresses in background
