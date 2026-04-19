@@ -2829,11 +2829,11 @@ const app = {
         const tabContainer = el.parentElement;
         tabContainer.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
         el.classList.add('active');
-        const parent = tabContainer.parentElement;
-        const panels = ['cdActivities','cdDeals','cdEmails','cdReferrals','adContacts','adDeals','adActivities','adEmails'];
-        panels.forEach(id => { const p = parent.querySelector('#' + id); if (p) p.style.display = 'none'; });
-        const target = parent.querySelector('#' + panelId);
-        if (target) target.style.display = 'block';
+        // Hide all detail panels on the page, then show the target
+        const allPanelIds = ['cdDetails','cdActivity','cdRelated','cdActivities','cdDeals','cdEmails','cdReferrals','adContacts','adDeals','adActivities','adEmails'];
+        allPanelIds.forEach(id => { const p = document.getElementById(id); if (p) p.style.display = 'none'; });
+        const target = document.getElementById(panelId);
+        if (target) target.style.display = '';
     },
 
     openAccountForm() {
