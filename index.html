@@ -1141,13 +1141,14 @@ const app = {
     },
 
     // Sorting
-    _sortState: {view: '', col: '', dir: 'asc'},
+    _sortState: JSON.parse(localStorage.getItem('matthewsCRM_sortState') || '{"view":"","col":"","dir":"asc"}'),
     sortBy(view, col) {
         if (this._sortState.view === view && this._sortState.col === col) {
             this._sortState.dir = this._sortState.dir === 'asc' ? 'desc' : 'asc';
         } else {
             this._sortState = {view, col, dir: 'asc'};
         }
+        localStorage.setItem('matthewsCRM_sortState', JSON.stringify(this._sortState));
         this.render();
     },
     _sortIndicator(view, col) {
@@ -1169,7 +1170,7 @@ const app = {
         return s.dir === 'desc' ? sorted.reverse() : sorted;
     },
 
-    contactFilters: {tier: '', tag: '', company: '', text: ''},
+    contactFilters: JSON.parse(localStorage.getItem('matthewsCRM_contactFilters') || '{"tier":"","text":""}'),
     _contactCols: null,
     _allContactCols: [
         {key:'name', label:'Name', editable:true, type:'text'},
@@ -1424,10 +1425,12 @@ const app = {
 
     updateContactFilter(key, val) {
         this.contactFilters[key] = val;
+        localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
         this.renderContacts();
     },
     clearContactFilters() {
-        this.contactFilters = {tier: '', tag: '', company: '', text: ''};
+        this.contactFilters = {tier: '', text: ''};
+        localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
         this.renderContacts();
     },
 
