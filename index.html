@@ -597,6 +597,8 @@ const app = {
     isLoading: true,
     data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: []},
 
+    fmt(n) { return Number(n).toLocaleString(); },
+
     async init() {
         this.loadData();
         try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
@@ -1161,11 +1163,11 @@ const app = {
             ${backupBanner}
             <!-- KPI Cards -->
             <div class="stat-cards" style="grid-template-columns:repeat(4, 1fr);">
-                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
                 <div class="stat-card"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${overdue.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
             </div>
 
             <!-- Main layout: left + right like SF home -->
@@ -1179,7 +1181,7 @@ const app = {
                             <button class="btn-small" onclick="app.openActivityForm();">New Task</button>
                         </div>
                         <div style="padding:0 16px;">
-                            ${overdue.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-error); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Overdue (${overdue.length})</div>` : ''}
+                            ${overdue.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-error); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Overdue (${this.fmt(overdue.length)})</div>` : ''}
                             ${overdue.slice(0,5).map(a => {
                                 const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
                                 return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
@@ -1298,12 +1300,12 @@ const app = {
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Quick Stats</div>
                         <div style="padding:12px 16px; font-size:13px;">
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>VIP Contacts</span><strong style="color:#166534;">${vipContacts.length}</strong></div>
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Opportunities</span><strong>${activeDeals.length}</strong></div>
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Won This Year</span><strong style="color:var(--sf-success);">${wonDeals.length}</strong></div>
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Lost This Year</span><strong style="color:var(--sf-error);">${lostDeals.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>VIP Contacts</span><strong style="color:#166534;">${this.fmt(vipContacts.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Opportunities</span><strong>${this.fmt(activeDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Won This Year</span><strong style="color:var(--sf-success);">${this.fmt(wonDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Lost This Year</span><strong style="color:var(--sf-error);">${this.fmt(lostDeals.length)}</strong></div>
                             <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Win Rate</span><strong>${winRate}%</strong></div>
-                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Total Activities</span><strong>${this.data.activities.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Total Activities</span><strong>${this.fmt(this.data.activities.length)}</strong></div>
                         </div>
                     </div>
                 </div>
@@ -1565,7 +1567,7 @@ const app = {
             <div class="stat-cards" style="margin-bottom:8px;">
                 <div class="stat-card" style="cursor:pointer; ${!f.tier?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.updateContactFilter('tier','')">
                     <div class="label">Total Contacts</div>
-                    <div class="value">${this.data.contacts.length}</div>
+                    <div class="value">${this.fmt(this.data.contacts.length)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
                     <div class="label">1-VIP</div>
@@ -1591,7 +1593,7 @@ const app = {
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
                 <input type="text" placeholder="Search contacts…" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
                 ${f.text || f.tier ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
-                <span style="font-size:11px; color:var(--sf-text-weakest);">${sorted.length} results</span>
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card">
                 <div class="table-container">
@@ -1786,7 +1788,7 @@ const app = {
             <div class="stat-cards" style="margin-bottom:8px;">
                 <div class="stat-card" style="cursor:pointer; ${!af.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status=''; app.renderActivities();">
                     <div class="label">Total</div>
-                    <div class="value">${this.data.activities.length}</div>
+                    <div class="value">${this.fmt(this.data.activities.length)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${af.status==='open'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status='${af.status==='open'?'':'open'}'; app.renderActivities();">
                     <div class="label">Open</div>
@@ -1808,7 +1810,7 @@ const app = {
                     ${['Call','Email','Meeting','Task','Follow-up','Note'].map(t => `<option value="${t}" ${af.type===t?'selected':''}>${typeIcons[t]||''} ${t}</option>`).join('')}
                 </select>
                 ${af.text||af.type||af.status ? `<button class="btn-small" onclick="app._actFilter={type:'',status:'',text:''}; app.renderActivities();">Clear</button>` : ''}
-                <span style="font-size:11px; color:var(--sf-text-weakest);">${filtered.length} results</span>
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(filtered.length)} results</span>
             </div>
             <div class="card">
                 <div class="table-container">
@@ -1928,7 +1930,7 @@ const app = {
                     <div>
                         <div style="font-size:11px; color:var(--sf-text-weak);">Map</div>
                         <h2 style="margin:0;">Contact Locations</h2>
-                        <div style="font-size:11px; color:var(--sf-text-weakest);">${this.data.contacts.length} contacts total, ${contactsWithAddr.length} with addresses · ${this.data.accounts.length} accounts total, ${accountsWithAddr.length} with addresses · ${cacheSize} geocoded</div>
+                        <div style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(this.data.contacts.length)} contacts total, ${this.fmt(contactsWithAddr.length)} with addresses · ${this.fmt(this.data.accounts.length)} accounts total, ${this.fmt(accountsWithAddr.length)} with addresses · ${cacheSize} geocoded</div>
                     </div>
                 </div>
             </div>
@@ -1936,15 +1938,15 @@ const app = {
             <div class="stat-cards" style="margin-bottom:8px;">
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','all'); document.querySelector('#mapTypeSelect').value='all';">
                     <div class="label">All Locations</div>
-                    <div class="value">${allItems.length}</div>
+                    <div class="value">${this.fmt(allItems.length)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','contact'); document.querySelector('#mapTypeSelect').value='contact';">
                     <div class="label">Contacts</div>
-                    <div class="value">${contactsWithAddr.length}</div>
+                    <div class="value">${this.fmt(contactsWithAddr.length)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','account'); document.querySelector('#mapTypeSelect').value='account';">
                     <div class="label">Accounts</div>
-                    <div class="value">${accountsWithAddr.length}</div>
+                    <div class="value">${this.fmt(accountsWithAddr.length)}</div>
                 </div>
             </div>
             <!-- Filter bar -->
@@ -2566,10 +2568,10 @@ const app = {
             <div class="card" style="padding:16px;">
                 <h3>Data Summary</h3>
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:16px;">
-                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
-                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
-                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Opportunities</div><div class="value">${this.data.deals.length}</div></div>
-                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Activities</div><div class="value">${this.data.activities.length}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Opportunities</div><div class="value">${this.fmt(this.data.deals.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Activities</div><div class="value">${this.fmt(this.data.activities.length)}</div></div>
                     <div class="stat-card"><div class="label">Emails</div><div class="value">${this.data.emails.length}</div></div>
                     <div class="stat-card"><div class="label">Referrals</div><div class="value">${this.data.referrals.length}</div></div>
                 </div>
