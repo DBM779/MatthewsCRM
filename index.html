@@ -2025,7 +2025,8 @@ const app = {
         const sorted = this._applySortToList(filtered.map(e => {
             const con = this.data.contacts.find(c => c.id === e.contactId);
             const acct = this.data.accounts.find(a => a.id === e.accountId);
-            return {...e, _contact: con ? con.name : '', _account: acct ? acct.name : '', _start: e.start || ''};
+            const contactCount = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees||'').toLowerCase().includes((c.name||'').toLowerCase())).length;
+            return {...e, _contact: con ? con.name : '', _account: acct ? acct.name : '', _start: e.start || '', _contactCount: contactCount, _accountCount: acct ? 1 : 0};
         }), 'events');
         if (!this._sortState.col || this._sortState.view !== 'events') {
             sorted.sort((a,b) => (b._start||'').localeCompare(a._start||''));
@@ -2078,8 +2079,8 @@ const app = {
                                 <th onclick="app.sortBy('events','type')" style="cursor:pointer;">Type${this._sortIndicator('events','type')}</th>
                                 <th onclick="app.sortBy('events','_start')" style="cursor:pointer;">Date${this._sortIndicator('events','_start')}</th>
                                 <th>Address</th>
-                                <th onclick="app.sortBy('events','_contact')" style="cursor:pointer;">Contact${this._sortIndicator('events','_contact')}</th>
-                                <th onclick="app.sortBy('events','_account')" style="cursor:pointer;">Account${this._sortIndicator('events','_account')}</th>
+                                <th onclick="app.sortBy('events','_contactCount')" style="cursor:pointer;">Contacts${this._sortIndicator('events','_contactCount')}</th>
+                                <th onclick="app.sortBy('events','_accountCount')" style="cursor:pointer;">Accounts${this._sortIndicator('events','_accountCount')}</th>
                                 <th onclick="app.sortBy('events','status')" style="cursor:pointer;">Status${this._sortIndicator('events','status')}</th>
                                 <th style="width:30px;"></th>
                             </tr>
@@ -2095,8 +2096,8 @@ const app = {
                                     <td>${typeIcons[e.type]||''} ${e.type||''}</td>
                                     <td>${startDisplay}</td>
                                     <td>${e.address||''}</td>
-                                    <td>${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : ''}</td>
-                                    <td>${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : ''}</td>
+                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand);">${e._contactCount||0}</a></td>
+                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand);">${e._accountCount||0}</a></td>
                                     <td>${e.status||''}</td>
                                     <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('evt_${e.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_evt_${e.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
                                 </tr>`;
