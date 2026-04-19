@@ -1637,6 +1637,27 @@ const app = {
         }
     },
 
+    addContactFile(contactId) {
+        const name = prompt('File name:');
+        if (!name) return;
+        const url = prompt('OneDrive URL:');
+        if (!url) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        if (!contact.files) contact.files = [];
+        contact.files.push({name, url});
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    removeContactFile(contactId, idx) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact || !contact.files) return;
+        contact.files.splice(idx, 1);
+        this.persist();
+        this.renderContactDetail();
+    },
+
     saveGeneralNotes(contactId, value) {
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
@@ -3101,6 +3122,19 @@ const app = {
                                     <td>${e.status||''}</td>
                                 </tr>`).join('')}
                             </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No events.</div>'}
+                            </div>
+                        </div>
+                        <div class="related-list card">
+                            <div class="card-header">
+                                <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
+                                Files <span class="related-count">(${(c.files||[]).length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.addContactFile('${c.id}')">Add File</button>
+                            </div>
+                            <div style="padding:8px 16px;">
+                            ${(c.files||[]).length ? (c.files||[]).map((f,i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a href="${f.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">📄 ${f.name}</a>
+                                <button class="btn-small" onclick="app.removeContactFile('${c.id}',${i})" style="padding:1px 6px; font-size:11px; color:var(--sf-error);">✕</button>
+                            </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files. Click Add File to link a OneDrive document.</div>'}
                             </div>
                         </div>
                     </div>
