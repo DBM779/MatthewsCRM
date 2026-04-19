@@ -1261,6 +1261,17 @@ const app = {
 
                 <!-- RIGHT COLUMN -->
                 <div style="width:360px; flex-shrink:0;">
+                    <!-- Recently Viewed -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recently Viewed</div>
+                        <div style="padding:8px 16px;">
+                            ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 5).map(r => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
+                                <span class="obj-icon obj-icon-${r.type}" style="width:18px; height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
+                                <span style="font-size:13px; font-weight:500; color:var(--sf-brand);">${r.name}</span>
+                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No recently viewed records</div>'}
+                        </div>
+                    </div>
+
                     <!-- Recent Activity Feed -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recent Activity</div>
@@ -1287,17 +1298,6 @@ const app = {
                                 <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a>
                                 <span style="color:var(--sf-text-weak); font-size:12px;">${c.daysAway === 0 ? '🎉 Today!' : new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' (' + c.daysAway + 'd)'}</span>
                             </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No upcoming birthdays</div>'}
-                        </div>
-                    </div>
-
-                    <!-- Recently Viewed -->
-                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recently Viewed</div>
-                        <div style="padding:8px 16px;">
-                            ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 8).map(r => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
-                                <span class="obj-icon obj-icon-${r.type}" style="width:18px; height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
-                                <span style="font-size:13px; font-weight:500; color:var(--sf-brand);">${r.name}</span>
-                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No recently viewed records</div>'}
                         </div>
                     </div>
 
@@ -1900,7 +1900,7 @@ const app = {
         const sfField = (label, value) => `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
 
         const html = `
-            <div class="detail-back" onclick="app.currentView='activities'; app.render();">&#8592; Back to Events</div>
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
             <div class="sf-highlight">
                 <div class="sf-hl-top">
                     <div style="width:40px; height:40px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; background:var(--sf-bg);">${typeIcons[a.type]||'📋'}</div>
@@ -2866,7 +2866,7 @@ const app = {
         };
 
         const html = `
-            <div class="detail-back" onclick="app.currentView='contacts'; app.render();">&#8592; Back to Contacts</div>
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
             <!-- SF Highlighted Panel -->
             <div class="sf-highlight">
                 <div class="sf-hl-top">
@@ -3128,7 +3128,7 @@ const app = {
 
         const acctInitial = (a.name || '').split(' ').filter(Boolean).slice(0,2).map(s => s[0]).join('').toUpperCase() || 'A';
         const html = `
-            <div class="detail-back" onclick="app.currentView='accounts'; app.render();">&#8592; Back to Accounts</div>
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
             <div class="sf-highlight">
                 <div class="sf-hl-top">
                     <div class="sf-hl-icon obj-icon-account">${acctInitial}</div>
@@ -3702,6 +3702,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     app.init();
+    window.addEventListener('hashchange', () => {
+        const h = location.hash.replace('#','');
+        if (h.startsWith('contactDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.contacts.find(c=>c.id===id); if(app.currentRecord) { app.currentView='contactDetail'; app.render(); } }
+        else if (h.startsWith('accountDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.accounts.find(a=>a.id===id); if(app.currentRecord) { app.currentView='accountDetail'; app.render(); } }
+        else if (h.startsWith('activityDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.activities.find(a=>a.id===id); if(app.currentRecord) { app.currentView='activityDetail'; app.render(); } }
+        else if (h && h !== 'sync') { app.currentView = h; app.render(); }
+    });
 });
     </script>
 </body>
