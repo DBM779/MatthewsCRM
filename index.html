@@ -573,10 +573,27 @@ const app = {
 
     async init() {
         this.loadData();
+        this.fillAccountAddresses();
         this.setupEventListeners();
         this.renderDashboard();
         this.updateSelectOptions();
         setTimeout(() => this.bgGeocodeAll(), 3000);
+    },
+
+    fillAccountAddresses() {
+        let filled = 0;
+        for (const acct of this.data.accounts) {
+            if (acct.address) continue;
+            const contact = this.data.contacts.find(c => (c.accountId || c.account_id) === acct.id && c.address);
+            if (contact) {
+                acct.address = contact.address;
+                filled++;
+            }
+        }
+        if (filled > 0) {
+            this.persist();
+            console.log(`[init] Filled ${filled} account addresses from their contacts`);
+        }
     },
 
     loadData() {
