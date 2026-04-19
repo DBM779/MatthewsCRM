@@ -1602,18 +1602,29 @@ const app = {
             map.setView([39.8283, -98.5795], 4);
         }
 
-        // Step 2: Geocode any uncached addresses in background
-        const uncached = items.filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
+        // Step 2: Geocode any uncached addresses and add pins as they resolve
+        const uncached = items.filter((item, i) => item.address && !this.mapMarkers.some(m => m.idx === i));
         if (uncached.length > 0) {
-            if (loadingEl && this.mapMarkers.length === 0) loadingEl.textContent = `Geocoding ${uncached.length} addresses…`;
+            const countEl = document.getElementById('mapPinCount');
+            let remaining = uncached.length;
+            if (loadingEl && this.mapMarkers.length === 0) {
+                loadingEl.textContent = `Geocoding ${remaining} addresses…`;
+            } else if (countEl) {
+                countEl.textContent += ` (geocoding ${remaining} more…)`;
+            }
             for (const item of uncached) {
                 const coords = await this.geocodeAddress(item.address);
+                remaining--;
                 if (coords) {
                     const idx = items.indexOf(item);
                     const marker = this._createMapMarker(item, coords);
                     this.mapMarkers.push({marker, coords, item, idx});
-                    this._markerLayerGroup.addLayer(marker);
+                    // Only add to map if it passes current filters
+                    if (this._itemPassesFilter(item)) {
+                        this._markerLayerGroup.addLayer(marker);
+                    }
                 }
+                if (countEl) countEl.textContent = `${this.mapMarkers.length} pins` + (remaining > 0 ? ` (geocoding ${remaining} more…)` : '');
                 await new Promise(r => setTimeout(r, 1100));
             }
             if (loadingEl) loadingEl.style.display = 'none';
