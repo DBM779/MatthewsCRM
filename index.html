@@ -456,17 +456,34 @@
 
     <div class="modal" id="modalActivity">
         <div class="modal-content">
-            <div class="modal-header">Activity</div>
+            <div class="modal-header">Log Activity</div>
             <form id="formActivity">
                 <input type="hidden" id="activityId">
-                <div class="form-group"><label>Type</label><select id="activityType"><option value="Call">Call</option><option value="Email">Email</option><option value="Meeting">Meeting</option><option value="Follow-up">Follow-up</option><option value="Note">Note</option><option value="Task">Task</option></select></div>
-                <div class="form-group"><label>Subject *</label><input type="text" id="activitySubject" required></div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+                <div class="form-group"><label>Type</label><select id="activityType" onchange="app.onActivityTypeChange()"><option value="Call">Call</option><option value="Email">Email</option><option value="Meeting">Meeting</option><option value="Task">Task</option><option value="Follow-up">Follow-up</option><option value="Note">Note</option></select></div>
+                <div class="form-group"><label>Priority</label><select id="activityPriority"><option value="Normal">Normal</option><option value="High">High</option><option value="Low">Low</option></select></div>
+                <div class="form-group" style="grid-column:span 2;"><label>Subject *</label><input type="text" id="activitySubject" required></div>
                 <div class="form-group"><label>Contact</label><select id="activityContact"></select></div>
                 <div class="form-group"><label>Account</label><select id="activityAccount"></select></div>
                 <div class="form-group"><label>Deal</label><select id="activityDeal"></select></div>
+                <div class="form-group"><label>Status</label><select id="activityStatus"><option value="Not Started">Not Started</option><option value="In Progress">In Progress</option><option value="Completed">Completed</option><option value="Waiting">Waiting on Someone</option><option value="Deferred">Deferred</option></select></div>
                 <div class="form-group"><label>Due Date</label><input type="date" id="activityDueDate"></div>
-                <div class="form-group"><label>Status</label><select id="activityStatus"><option value="Open">Open</option><option value="Closed">Closed</option></select></div>
-                <div class="form-group"><label>Notes</label><textarea id="activityNotes"></textarea></div>
+                <div class="form-group" id="activityDateTimeGroup" style="display:none;"><label>Date/Time</label><input type="datetime-local" id="activityDateTime"></div>
+                </div>
+                <div id="activityCallFields" style="display:none;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+                    <div class="form-group"><label>Call Direction</label><select id="activityCallDirection"><option value="Outbound">Outbound</option><option value="Inbound">Inbound</option></select></div>
+                    <div class="form-group"><label>Call Duration (min)</label><input type="number" id="activityCallDuration" min="0"></div>
+                    <div class="form-group"><label>Call Result</label><select id="activityCallResult"><option value="">--None--</option><option value="Connected">Connected</option><option value="Left Voicemail">Left Voicemail</option><option value="No Answer">No Answer</option><option value="Busy">Busy</option><option value="Wrong Number">Wrong Number</option></select></div>
+                    </div>
+                </div>
+                <div id="activityMeetingFields" style="display:none;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+                    <div class="form-group"><label>Location</label><input type="text" id="activityLocation"></div>
+                    <div class="form-group"><label>End Date/Time</label><input type="datetime-local" id="activityEndDateTime"></div>
+                    </div>
+                </div>
+                <div class="form-group"><label>Description</label><textarea id="activityNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalActivity')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
         </div>
@@ -840,25 +857,52 @@ const app = {
         this.render();
     },
 
+    onActivityTypeChange() {
+        const type = document.getElementById('activityType').value;
+        document.getElementById('activityCallFields').style.display = type === 'Call' ? '' : 'none';
+        document.getElementById('activityMeetingFields').style.display = type === 'Meeting' ? '' : 'none';
+        document.getElementById('activityDateTimeGroup').style.display = (type === 'Meeting' || type === 'Call') ? '' : 'none';
+    },
+
     async saveActivity(e) {
         e.preventDefault();
         const id = document.getElementById('activityId').value;
+        const type = document.getElementById('activityType').value;
         const activity = {
-            type: document.getElementById('activityType').value,
+            type,
             subject: document.getElementById('activitySubject').value,
             contactId: document.getElementById('activityContact').value || null,
             accountId: document.getElementById('activityAccount').value || null,
             dealId: document.getElementById('activityDeal').value || null,
             dueDate: document.getElementById('activityDueDate').value || null,
             status: document.getElementById('activityStatus').value,
-            notes: document.getElementById('activityNotes').value || null
+            priority: document.getElementById('activityPriority').value || 'Normal',
+            dateTime: document.getElementById('activityDateTime').value || null,
+            notes: document.getElementById('activityNotes').value || null,
         };
+        if (type === 'Call') {
+            activity.callDirection = document.getElementById('activityCallDirection').value || null;
+            activity.callDuration = parseInt(document.getElementById('activityCallDuration').value) || null;
+            activity.callResult = document.getElementById('activityCallResult').value || null;
+        }
+        if (type === 'Meeting') {
+            activity.location = document.getElementById('activityLocation').value || null;
+            activity.endDateTime = document.getElementById('activityEndDateTime').value || null;
+        }
 
         if (id) {
             const idx = this.data.activities.findIndex(a => a.id === id);
             if (idx >= 0) this.data.activities[idx] = {...this.data.activities[idx], ...activity};
         } else {
             this.data.activities.push({...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()});
+        }
+        // Update contact's Last Activity
+        if (activity.contactId && (activity.status === 'Completed' || activity.status === 'Closed')) {
+            const con = this.data.contacts.find(c => c.id === activity.contactId);
+            if (con) {
+                const today = new Date().toISOString().split('T')[0];
+                if (!con.la || con.la < today) con.la = today;
+            }
         }
         this.persist();
         this.closeModal('modalActivity');
@@ -1541,43 +1585,92 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
+    _actFilter: {type: '', status: '', text: ''},
     renderActivities() {
         const todayStr = new Date().toISOString().split('T')[0];
-        const sorted = [...this.data.activities].sort((a, b) => {
-            if (a.status === 'Open' && b.status !== 'Open') return -1;
-            if (a.status !== 'Open' && b.status === 'Open') return 1;
-            return (a.dueDate || 'z').localeCompare(b.dueDate || 'z');
+        const af = this._actFilter;
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        const openCount = this.data.activities.filter(a => isOpen(a.status)).length;
+        const overdueCount = this.data.activities.filter(a => isOpen(a.status) && a.dueDate && a.dueDate < todayStr).length;
+        const completedCount = this.data.activities.filter(a => a.status === 'Completed' || a.status === 'Closed').length;
+        const typeIcons = {Call:'📞', Email:'📧', Meeting:'📅', Task:'☑️', 'Follow-up':'🔄', Note:'📝'};
+
+        let filtered = [...this.data.activities];
+        if (af.type) filtered = filtered.filter(a => a.type === af.type);
+        if (af.status === 'open') filtered = filtered.filter(a => isOpen(a.status));
+        else if (af.status === 'overdue') filtered = filtered.filter(a => isOpen(a.status) && a.dueDate && a.dueDate < todayStr);
+        else if (af.status === 'completed') filtered = filtered.filter(a => a.status === 'Completed' || a.status === 'Closed');
+        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt)); }
+
+        filtered.sort((a, b) => {
+            if (isOpen(a.status) && !isOpen(b.status)) return -1;
+            if (!isOpen(a.status) && isOpen(b.status)) return 1;
+            return (a.dueDate || a.due_date || 'z').localeCompare(b.dueDate || b.due_date || 'z');
         });
+
         const html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h2 style="margin: 0;">Activities</h2>
-                <button class="btn-primary" onclick="app.openActivityForm()">New Activity</button>
+                <div style="display:flex; gap:6px;">
+                    <button onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">Log a Call</button>
+                    <button onclick="document.getElementById('activityType').value='Meeting'; app.openActivityForm();" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
+                    <button class="btn-primary" onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Task</button>
+                </div>
+            </div>
+            <div class="stat-cards" style="margin-bottom:8px;">
+                <div class="stat-card" style="cursor:pointer; ${!af.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status=''; app.renderActivities();">
+                    <div class="label">Total</div>
+                    <div class="value">${this.data.activities.length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${af.status==='open'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status='${af.status==='open'?'':'open'}'; app.renderActivities();">
+                    <div class="label">Open</div>
+                    <div class="value" style="color:var(--sf-brand);">${openCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${af.status==='overdue'?'border-bottom:3px solid var(--sf-error);':''}" onclick="app._actFilter.status='${af.status==='overdue'?'':'overdue'}'; app.renderActivities();">
+                    <div class="label">Overdue</div>
+                    <div class="value" style="color:var(--sf-error);">${overdueCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${af.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._actFilter.status='${af.status==='completed'?'':'completed'}'; app.renderActivities();">
+                    <div class="label">Completed</div>
+                    <div class="value" style="color:var(--sf-success);">${completedCount}</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <input type="text" placeholder="Search activities…" value="${af.text}" oninput="app._actFilter.text=this.value; app.renderActivities();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                <select onchange="app._actFilter.type=this.value; app.renderActivities();" style="min-height:32px; padding:4px; font-size:12px;">
+                    <option value="" ${!af.type?'selected':''}>All Types</option>
+                    ${['Call','Email','Meeting','Task','Follow-up','Note'].map(t => `<option value="${t}" ${af.type===t?'selected':''}>${typeIcons[t]||''} ${t}</option>`).join('')}
+                </select>
+                ${af.text||af.type||af.status ? `<button class="btn-small" onclick="app._actFilter={type:'',status:'',text:''}; app.renderActivities();">Clear</button>` : ''}
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${filtered.length} results</span>
             </div>
             <div class="card">
                 <div class="table-container">
-                    <table>
+                    <table class="compact-table">
                         <thead>
-                            <tr><th>Subject</th><th>Type</th><th>Contact</th><th>Account</th><th>Due Date</th><th>Status</th><th>Actions</th></tr>
+                            <tr><th style="width:24px;"></th><th>Subject</th><th>Type</th><th>Contact</th><th>Due Date</th><th>Priority</th><th>Status</th><th style="width:30px;"></th></tr>
                         </thead>
                         <tbody>
-                            ${sorted.map(a => {
-                                const isOverdue = a.status === 'Open' && a.dueDate && a.dueDate < todayStr;
-                                const isToday = a.status === 'Open' && a.dueDate === todayStr;
-                                const rowClass = isOverdue ? 'task-overdue' : isToday ? 'task-today' : '';
-                                return `
-                                <tr class="${rowClass}">
-                                    <td>${a.subject}${isOverdue ? '<span class="task-badge task-badge-overdue">OVERDUE</span>' : ''}${isToday ? '<span class="task-badge task-badge-today">TODAY</span>' : ''}</td>
-                                    <td>${a.type}</td>
-                                    <td>${this.data.contacts.find(c => c.id === a.contactId)?.name || ''}</td>
-                                    <td>${this.data.accounts.find(acc => acc.id === a.accountId)?.name || ''}</td>
-                                    <td>${a.dueDate || ''}</td>
-                                    <td>${a.status}</td>
-                                    <td>
-                                        <button class="btn-small" onclick="app.editActivity('${a.id}')">Edit</button>
-                                        <button class="btn-small" onclick="app.deleteActivity('${a.id}')">Delete</button>
-                                    </td>
-                                </tr>
-                            `;}).join('')}
+                            ${filtered.map(a => {
+                                const dd = a.dueDate || a.due_date || '';
+                                const open = isOpen(a.status);
+                                const isOverdue = open && dd && dd < todayStr;
+                                const isToday = open && dd === todayStr;
+                                const con = this.data.contacts.find(c => c.id === (a.contactId || a.contact_id));
+                                const pri = a.priority || 'Normal';
+                                const priColor = pri === 'High' ? 'var(--sf-error)' : pri === 'Low' ? 'var(--sf-text-weakest)' : '';
+                                const dateDisplay = dd ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2))(new Date(dd+'T12:00:00')) : '';
+                                return `<tr style="${isOverdue?'background:#fef2f2;':isToday?'background:#fffbeb;':''}">
+                                    <td style="text-align:center;">${open ? `<input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;" title="Mark complete">` : `<span style="color:var(--sf-success);">✓</span>`}</td>
+                                    <td><a onclick="app.editActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
+                                    <td>${typeIcons[a.type]||''} ${a.type}</td>
+                                    <td>${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : ''}</td>
+                                    <td>${dateDisplay}</td>
+                                    <td style="${priColor?'color:'+priColor+';font-weight:600;':''}">${pri}</td>
+                                    <td>${a.status||''}</td>
+                                    <td style="position:relative;"><button class="btn-small" onclick="app.toggleRowMenu('act_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_act_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
+                                </tr>`;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -2704,7 +2797,11 @@ const app = {
     completeActivity(id) {
         const act = this.data.activities.find(a => a.id === id);
         if (act) {
-            act.status = 'Closed';
+            act.status = 'Completed';
+            if (act.contactId || act.contact_id) {
+                const con = this.data.contacts.find(c => c.id === (act.contactId || act.contact_id));
+                if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) con.la = today; }
+            }
             this.persist();
             this.render();
         }
@@ -2875,31 +2972,45 @@ const app = {
         this.openModal('modalDeal');
     },
 
-    openActivityForm() {
-        document.getElementById('activityId').value = '';
+    _clearActivityForm() {
+        ['activityId','activitySubject','activityContact','activityAccount','activityDeal','activityDueDate','activityDateTime','activityNotes','activityCallDuration','activityLocation','activityEndDateTime'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
         document.getElementById('activityType').value = 'Call';
-        document.getElementById('activitySubject').value = '';
-        document.getElementById('activityContact').value = '';
-        document.getElementById('activityAccount').value = '';
-        document.getElementById('activityDeal').value = '';
-        document.getElementById('activityDueDate').value = '';
-        document.getElementById('activityStatus').value = 'Open';
-        document.getElementById('activityNotes').value = '';
+        document.getElementById('activityStatus').value = 'Not Started';
+        document.getElementById('activityPriority').value = 'Normal';
+        document.getElementById('activityCallDirection').value = 'Outbound';
+        document.getElementById('activityCallResult').value = '';
+        this.onActivityTypeChange();
+    },
+
+    openActivityForm() {
+        this._clearActivityForm();
+        document.getElementById('activityDueDate').value = new Date().toISOString().split('T')[0];
         this.openModal('modalActivity');
     },
 
     editActivity(id) {
-        const activity = this.data.activities.find(a => a.id === id);
-        if (!activity) return;
-        document.getElementById('activityId').value = activity.id;
-        document.getElementById('activityType').value = activity.type || 'Call';
-        document.getElementById('activitySubject').value = activity.subject;
-        document.getElementById('activityContact').value = activity.contactId || '';
-        document.getElementById('activityAccount').value = activity.accountId || '';
-        document.getElementById('activityDeal').value = activity.dealId || '';
-        document.getElementById('activityDueDate').value = activity.dueDate || '';
-        document.getElementById('activityStatus').value = activity.status || 'Open';
-        document.getElementById('activityNotes').value = activity.notes || '';
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        this._clearActivityForm();
+        document.getElementById('activityId').value = a.id;
+        document.getElementById('activityType').value = a.type || 'Call';
+        document.getElementById('activitySubject').value = a.subject || '';
+        document.getElementById('activityContact').value = a.contactId || a.contact_id || '';
+        document.getElementById('activityAccount').value = a.accountId || a.account_id || '';
+        document.getElementById('activityDeal').value = a.dealId || a.deal_id || '';
+        document.getElementById('activityDueDate').value = a.dueDate || a.due_date || '';
+        document.getElementById('activityDateTime').value = a.dateTime || '';
+        // Map old status values
+        const statusMap = {'Open':'Not Started','Closed':'Completed'};
+        document.getElementById('activityStatus').value = statusMap[a.status] || a.status || 'Not Started';
+        document.getElementById('activityPriority').value = a.priority || 'Normal';
+        document.getElementById('activityNotes').value = a.notes || '';
+        if (a.callDirection) document.getElementById('activityCallDirection').value = a.callDirection;
+        if (a.callDuration) document.getElementById('activityCallDuration').value = a.callDuration;
+        if (a.callResult) document.getElementById('activityCallResult').value = a.callResult;
+        if (a.location) document.getElementById('activityLocation').value = a.location;
+        if (a.endDateTime) document.getElementById('activityEndDateTime').value = a.endDateTime;
+        this.onActivityTypeChange();
         this.openModal('modalActivity');
     },
 
