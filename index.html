@@ -276,6 +276,11 @@
         .ref-status-active {background: #dcfce7; color: #166534;}
         .ref-status-pending {background: #fef3c7; color: #92400e;}
         .ref-status-closed {background: #f3f4f6; color: #374151;}
+        /* Compact table for contacts/accounts list views */
+        .compact-table th {padding: 4px 8px; font-size: 11px; height: 28px;}
+        .compact-table td {padding: 3px 8px; font-size: 12px; height: 28px; line-height: 1.3;}
+        .compact-table tr:hover {background: #f0f7ff;}
+        .compact-table td[data-editing="true"] {padding: 1px 2px;}
         /* SF Detail field (two-column layout on record pages) */
         .sf-detail-field {padding: 8px 0; border-bottom: 1px solid var(--sf-border-weak);}
         .sf-detail-field-label {font-size: 11px; color: var(--sf-text-weakest); margin-bottom: 2px; font-weight: 400;}
@@ -1157,81 +1162,153 @@ const app = {
     },
 
     contactFilters: {tier: '', tag: '', company: '', text: ''},
+    _contactCols: null,
+    _allContactCols: [
+        {key:'name', label:'Name', editable:true, type:'text'},
+        {key:'email', label:'Email', editable:true, type:'email'},
+        {key:'mobile', label:'Mobile', editable:true, type:'tel'},
+        {key:'phone', label:'Phone', editable:true, type:'tel'},
+        {key:'_company', label:'Company', editable:false},
+        {key:'title', label:'Title', editable:true, type:'text'},
+        {key:'department', label:'Department', editable:true, type:'text'},
+        {key:'tier', label:'Tier', editable:true, type:'select', options:['1-VIP','2','3','4','5']},
+        {key:'tags', label:'Tags', editable:true, type:'text'},
+        {key:'address', label:'Address', editable:true, type:'text'},
+        {key:'lead_source', label:'Lead Source', editable:true, type:'text'},
+        {key:'birthdate', label:'Birthday', editable:true, type:'date'},
+        {key:'la', label:'LA', editable:true, type:'date'},
+        {key:'_dsla', label:'DSLA', editable:false},
+        {key:'notes', label:'Notes', editable:true, type:'text'},
+    ],
+    _getContactCols() {
+        if (!this._contactCols) {
+            const saved = localStorage.getItem('matthewsCRM_contactCols');
+            this._contactCols = saved ? JSON.parse(saved) : ['name','email','mobile','_company','tier','la','_dsla'];
+        }
+        return this._contactCols;
+    },
+    toggleContactCol(key) {
+        const cols = this._getContactCols();
+        const idx = cols.indexOf(key);
+        if (idx >= 0) { if (cols.length > 2) cols.splice(idx, 1); }
+        else cols.push(key);
+        this._contactCols = cols;
+        localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cols));
+        this.renderContacts();
+    },
+    _showColPicker: false,
+
+    inlineEdit(contactId, field, el) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const colDef = this._allContactCols.find(c => c.key === field);
+        if (!colDef || !colDef.editable) return;
+        const currentVal = contact[field] || '';
+        const td = el;
+        td.dataset.editing = 'true';
+
+        if (colDef.type === 'select') {
+            td.innerHTML = `<select onchange="app.saveInlineEdit('${contactId}','${field}',this.value)" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px;">
+                ${colDef.options.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}
+            </select>`;
+            td.querySelector('select').focus();
+        } else {
+            td.innerHTML = `<input type="${colDef.type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
+            const input = td.querySelector('input');
+            input.focus();
+            input.select();
+        }
+    },
+
+    saveInlineEdit(contactId, field, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        contact[field] = value || null;
+        this.persist();
+        if (field === 'address' && value) this.geocodeAddress(value);
+        this.renderContacts();
+    },
+
     renderContacts() {
         const f = this.contactFilters;
+        const visibleCols = this._getContactCols();
+        const cols = this._allContactCols.filter(c => visibleCols.includes(c.key));
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         let filtered = this.data.contacts;
         if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
         if (f.tag) filtered = filtered.filter(c => (c.tags || '').split(',').map(t => t.trim()).includes(f.tag));
-        if (f.company) filtered = filtered.filter(c => c.accountId === f.company);
+        if (f.company) filtered = filtered.filter(c => (c.accountId || c.account_id) === f.company);
         if (f.text) {
             const lt = f.text.toLowerCase();
             filtered = filtered.filter(c => (c.name || '').toLowerCase().includes(lt) || (c.email || '').toLowerCase().includes(lt) || (c.mobile || '').includes(lt));
         }
+
+        const sorted = this._applySortToList(filtered.map(c => {
+            const cpy = this.data.accounts.find(a => a.id === (c.accountId || c.account_id));
+            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la) ?? 9999};
+        }), 'contacts');
+
         const html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h2 style="margin: 0;">Contacts</h2>
-                <button class="btn-primary" onclick="app.openContactForm()">New Contact</button>
+                <div style="display:flex; gap:6px;">
+                    <button class="btn-small" onclick="app._showColPicker=!app._showColPicker; app.renderContacts();">Edit Columns</button>
+                    <button class="btn-primary" onclick="app.openContactForm()">New Contact</button>
+                </div>
             </div>
-            <div class="card" style="margin-bottom:12px; padding:12px;">
-                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                    <input type="text" placeholder="Search name/email/mobile" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-width:180px;">
-                    <select onchange="app.updateContactFilter('tier', this.value)">
+            ${this._showColPicker ? `<div class="card" style="padding:10px 14px; margin-bottom:8px;">
+                <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Show/Hide Columns:</div>
+                <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                    ${this._allContactCols.map(c => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; padding:3px 8px; border-radius:3px; background:${visibleCols.includes(c.key)?'var(--sf-brand)':'var(--sf-bg)'}; color:${visibleCols.includes(c.key)?'#fff':'var(--sf-text)'}; cursor:pointer;">
+                        <input type="checkbox" ${visibleCols.includes(c.key)?'checked':''} onchange="app.toggleContactCol('${c.key}')" style="width:auto; min-height:auto;"> ${c.label}
+                    </label>`).join('')}
+                </div>
+            </div>` : ''}
+            <div class="card" style="margin-bottom:8px; padding:8px 12px;">
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <input type="text" placeholder="Search name/email/mobile" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-width:160px; min-height:28px; padding:2px 8px; font-size:12px;">
+                    <select onchange="app.updateContactFilter('tier', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
                         <option value="">All tiers</option>
                         ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <select onchange="app.updateContactFilter('company', this.value)">
+                    <select onchange="app.updateContactFilter('company', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
                         <option value="">All companies</option>
-                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===a.id?'selected':''}>${a.name}</option>`).join('')}
+                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===(a.id)?'selected':''}>${a.name}</option>`).join('')}
                     </select>
-                    <select onchange="app.updateContactFilter('tag', this.value)">
+                    <select onchange="app.updateContactFilter('tag', this.value)" style="min-height:28px; padding:2px 4px; font-size:12px;">
                         <option value="">All tags</option>
                         ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <button onclick="app.clearContactFilters()">Clear</button>
-                    <span style="font-size:12px; color:#6b7280;">${filtered.length} of ${this.data.contacts.length}</span>
+                    <button class="btn-small" onclick="app.clearContactFilters()">Clear</button>
+                    <span style="font-size:11px; color:var(--sf-text-weakest);">${sorted.length} of ${this.data.contacts.length}</span>
                 </div>
             </div>
             <div class="card">
                 <div class="table-container">
-                    <table>
+                    <table class="compact-table">
                         <thead>
                             <tr>
-                                <th onclick="app.sortBy('contacts','name')" style="cursor:pointer;">Name${this._sortIndicator('contacts','name')}</th>
-                                <th onclick="app.sortBy('contacts','email')" style="cursor:pointer;">Email${this._sortIndicator('contacts','email')}</th>
-                                <th onclick="app.sortBy('contacts','mobile')" style="cursor:pointer;">Mobile${this._sortIndicator('contacts','mobile')}</th>
-                                <th onclick="app.sortBy('contacts','_company')" style="cursor:pointer;">Company${this._sortIndicator('contacts','_company')}</th>
-                                <th onclick="app.sortBy('contacts','tier')" style="cursor:pointer;">Tier${this._sortIndicator('contacts','tier')}</th>
-                                <th>Tags</th>
-                                <th onclick="app.sortBy('contacts','la')" style="cursor:pointer;">LA${this._sortIndicator('contacts','la')}</th>
-                                <th onclick="app.sortBy('contacts','_dsla')" style="cursor:pointer;">DSLA${this._sortIndicator('contacts','_dsla')}</th>
-                                <th>Actions</th>
+                                ${cols.map(c => `<th onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;">${c.label}${this._sortIndicator('contacts',c.key)}</th>`).join('')}
+                                <th style="width:40px;"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${this._applySortToList(filtered.map(c => {
-                                const cpy = this.data.accounts.find(a => a.id === c.accountId);
-                                return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la) ?? 9999};
-                            }), 'contacts').map(c => {
+                            ${sorted.map(c => {
                                 const dsla = this.calculateDSLA(c.la);
                                 const asClass = 'as-' + this.calculateAS(dsla);
-                                const tagPills = (c.tags || '').split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ');
-                                return `
-                                    <tr>
-                                        <td><a onclick="app.viewContact('${c.id}')" style="cursor: pointer; color: #3b82f6;">${c.name}</a></td>
-                                        <td>${c.email || ''}</td>
-                                        <td>${c.mobile || ''}</td>
-                                        <td>${this.data.accounts.find(a => a.id === c.accountId)?.name || ''}</td>
-                                        <td><span class="badge tier-${c.tier.replace('-', '').toLowerCase()}">${c.tier}</span></td>
-                                        <td>${tagPills}</td>
-                                        <td>${c.la ? c.la : ''}</td>
-                                        <td><span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}</td>
-                                        <td>
-                                            <button class="btn-small" onclick="app.editContact('${c.id}')">Edit</button>
-                                            <button class="btn-small" onclick="app.deleteContact('${c.id}')">Delete</button>
-                                        </td>
-                                    </tr>
-                                `;
+                                return `<tr>${cols.map(col => {
+                                    const editable = col.editable ? `ondblclick="app.inlineEdit('${c.id}','${col.key}',this)"` : '';
+                                    const cursor = col.editable ? 'cursor:cell;' : '';
+                                    let val = '';
+                                    if (col.key === 'name') val = `<a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a>`;
+                                    else if (col.key === '_company') val = c._company;
+                                    else if (col.key === 'tier') val = `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>`;
+                                    else if (col.key === '_dsla') val = `<span class="activity-score ${asClass}"></span>${dsla !== null ? dsla + 'd' : ''}`;
+                                    else if (col.key === 'tags') val = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="tag-pill">${t}</span>`).join(' ');
+                                    else if (col.key === 'email' && c.email) val = `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>`;
+                                    else val = c[col.key] || '';
+                                    return `<td ${editable} style="${cursor}" title="${col.editable ? 'Double-click to edit' : ''}">${val}</td>`;
+                                }).join('')}<td><button class="btn-small" onclick="app.deleteContact('${c.id}')" style="padding:1px 6px; font-size:11px;">✕</button></td></tr>`;
                             }).join('')}
                         </tbody>
                     </table>
