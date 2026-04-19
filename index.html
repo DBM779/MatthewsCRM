@@ -1380,14 +1380,9 @@ const app = {
     renderMap() {
         const contactsWithAddr = this.data.contacts.filter(c => c.address);
         const accountsWithAddr = this.data.accounts.filter(a => a.address);
-        const accountsNoAddr = this.data.accounts.filter(a => !a.address);
-        const contactsNoAddr = this.data.contacts.filter(a => !a.address);
-        console.log('[Map] Accounts total:', this.data.accounts.length, 'with address:', accountsWithAddr.length, 'without:', accountsNoAddr.length);
-        console.log('[Map] Accounts with addresses:', accountsWithAddr.map(a => a.name + ': "' + a.address + '"'));
-        console.log('[Map] Contacts total:', this.data.contacts.length, 'with address:', contactsWithAddr.length);
         const allItems = [
-            ...this.data.contacts.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
-            ...this.data.accounts.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
+            ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
+            ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
         ];
         this._mapAllItems = allItems;
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
@@ -1410,12 +1405,12 @@ const app = {
                     <div class="value">${allItems.length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','contact'); document.querySelector('#mapTypeSelect').value='contact';">
-                    <div class="label">Contacts on Map</div>
-                    <div class="value">${contactsWithAddr.length}<span style="font-size:12px; font-weight:400; color:var(--sf-text-weakest);"> / ${this.data.contacts.length}</span></div>
+                    <div class="label">Contacts</div>
+                    <div class="value">${contactsWithAddr.length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','account'); document.querySelector('#mapTypeSelect').value='account';">
-                    <div class="label">Accounts on Map</div>
-                    <div class="value">${accountsWithAddr.length}<span style="font-size:12px; font-weight:400; color:var(--sf-text-weakest);"> / ${this.data.accounts.length}</span></div>
+                    <div class="label">Accounts</div>
+                    <div class="value">${accountsWithAddr.length}</div>
                 </div>
             </div>
             <!-- Filter bar -->
@@ -1450,11 +1445,11 @@ const app = {
                     </div>
                     <div class="map-sidebar-list" id="mapSidebarList">
                         ${allItems.map((item, i) => `
-                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" data-hasaddr="${item.address?'yes':'no'}" onclick="${item.address ? `app.focusMapItem(${i})` : `app.${item._type==='contact'?'editContact':'editAccount'}('${item.id}')`}" style="${!item.address?'opacity:0.5;':''}">
+                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
                                 <div class="map-item-icon ${item._type}">${item._initials}</div>
                                 <div class="map-item-info">
                                     <div class="map-item-name">${item.name}</div>
-                                    <div class="map-item-address">${item.address || '<span style="color:var(--sf-error); font-style:italic;">No address — click to add</span>'}</div>
+                                    <div class="map-item-address">${item.address}</div>
                                 </div>
                             </div>
                         `).join('')}
@@ -1584,11 +1579,9 @@ const app = {
                 const item = items[i];
                 if (!item.address) continue;
                 const coords = cache[item.address.toLowerCase().trim()];
-                if (!coords) { console.log(`[Map] No geocode for ${item._type} "${item.name}": "${item.address}"`); continue; }
+                if (!coords) continue;
                 this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
             }
-            console.log(`[Map] Fast path: ${this.mapMarkers.length} markers (${this.mapMarkers.filter(m=>m.item._type==='contact').length} contacts, ${this.mapMarkers.filter(m=>m.item._type==='account').length} accounts)`);
-            this._updateSidebarStatus(items);
             this.applyMapFilters();
             return;
         }
@@ -1618,8 +1611,6 @@ const app = {
             this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
         }
 
-        this._updateSidebarStatus(items);
-
         if (loadingEl) {
             if (failed > 0) {
                 loadingEl.textContent = `${this.mapMarkers.length} plotted, ${failed} couldn't be found`;
@@ -1631,22 +1622,6 @@ const app = {
         }
 
         this.applyMapFilters();
-    },
-
-    _updateSidebarStatus(items) {
-        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
-            const idx = parseInt(el.getAttribute('data-idx'));
-            const item = items[idx];
-            if (!item || !item.address) return;
-            const hasMarker = this.mapMarkers.some(m => m.idx === idx);
-            const dot = hasMarker
-                ? '<span style="color:#2e844a; font-size:8px; margin-right:4px;">●</span>'
-                : '<span style="color:#ba0517; font-size:8px; margin-right:4px;">●</span>';
-            const nameEl = el.querySelector('.map-item-name');
-            if (nameEl && !nameEl.innerHTML.includes('●')) {
-                nameEl.innerHTML = dot + nameEl.textContent;
-            }
-        });
     },
 
     _focusedIdx: null,
