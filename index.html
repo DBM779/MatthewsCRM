@@ -573,6 +573,17 @@
         </div>
     </div>
 
+    <div class="modal" id="modalBulkUpdate">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header" id="bulkUpdateHeader">Bulk Update</div>
+            <div id="bulkUpdateFields"></div>
+            <div class="modal-footer">
+                <button type="button" onclick="app.closeModal('modalBulkUpdate')">Cancel</button>
+                <button type="button" class="btn-primary" onclick="app.executeBulkUpdate()">Update Selected</button>
+            </div>
+        </div>
+    </div>
+
     <script>
 // === Data layer: localStorage with auto-save ===
 const STORAGE_KEY = 'matthewsCRM';
@@ -1056,6 +1067,7 @@ const app = {
 
     navigate(view) {
         this.currentView = view;
+        this._bulkSelected.clear();
         location.hash = view;
         const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
         const activeTabId = tabMap[view] || view;
@@ -1456,6 +1468,90 @@ const app = {
         });
     },
 
+    _bulkSelected: new Set(),
+    _bulkType: null,
+
+    toggleBulkSelect(id) {
+        if (this._bulkSelected.has(id)) this._bulkSelected.delete(id);
+        else this._bulkSelected.add(id);
+        this._updateBulkBar();
+    },
+
+    toggleBulkSelectAll(type) {
+        const items = type === 'contacts' ? this.data.contacts : type === 'accounts' ? this.data.accounts : this.data.activities;
+        if (this._bulkSelected.size === items.length) this._bulkSelected.clear();
+        else items.forEach(i => this._bulkSelected.add(i.id));
+        this.render();
+    },
+
+    _updateBulkBar() {
+        const bar = document.getElementById('bulkBar');
+        if (!bar) return;
+        if (this._bulkSelected.size > 0) {
+            bar.style.display = 'flex';
+            bar.querySelector('.bulk-count').textContent = this._bulkSelected.size + ' selected';
+        } else {
+            bar.style.display = 'none';
+        }
+    },
+
+    openBulkUpdate(type) {
+        this._bulkType = type;
+        const fields = type === 'contacts' ? [
+            {key:'tier', label:'Tier', type:'select', options:['1-VIP','2','3','4','5']},
+            {key:'lead_source', label:'Lead Source', type:'text'},
+            {key:'department', label:'Department', type:'text'},
+            {key:'tags', label:'Tags', type:'text'},
+            {key:'address', label:'Address', type:'text'},
+        ] : type === 'accounts' ? [
+            {key:'type', label:'Type', type:'select', options:['Client','Prospect','Partner','Own Company','Vendor','Other']},
+            {key:'industry', label:'Industry', type:'text'},
+        ] : [
+            {key:'status', label:'Status', type:'select', options:['Not Started','In Progress','Completed','Waiting','Deferred']},
+            {key:'priority', label:'Priority', type:'select', options:['High','Normal','Low']},
+            {key:'type', label:'Type', type:'select', options:['Call','Email','Meeting','Task','Follow-up','Note']},
+        ];
+        document.getElementById('bulkUpdateHeader').textContent = `Bulk Update ${this._bulkSelected.size} ${type}`;
+        document.getElementById('bulkUpdateFields').innerHTML = fields.map(f => `
+            <div class="form-group">
+                <label><input type="checkbox" class="bulk-field-check" data-field="${f.key}" style="width:auto; min-height:auto; margin-right:6px;">${f.label}</label>
+                ${f.type === 'select' ? `<select id="bulk_${f.key}" disabled style="margin-top:4px;"><option value="">--Select--</option>${f.options.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`
+                : `<input type="text" id="bulk_${f.key}" disabled style="margin-top:4px;">`}
+            </div>
+        `).join('');
+        document.querySelectorAll('.bulk-field-check').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const input = document.getElementById('bulk_' + cb.dataset.field);
+                if (input) input.disabled = !cb.checked;
+            });
+        });
+        this.openModal('modalBulkUpdate');
+    },
+
+    executeBulkUpdate() {
+        const type = this._bulkType;
+        const items = type === 'contacts' ? this.data.contacts : type === 'accounts' ? this.data.accounts : this.data.activities;
+        const checks = document.querySelectorAll('.bulk-field-check:checked');
+        let updated = 0;
+        checks.forEach(cb => {
+            const field = cb.dataset.field;
+            const input = document.getElementById('bulk_' + field);
+            if (!input || !input.value) return;
+            const val = input.value;
+            items.forEach(item => {
+                if (this._bulkSelected.has(item.id)) {
+                    item[field] = val;
+                    updated++;
+                }
+            });
+        });
+        this.persist();
+        this._bulkSelected.clear();
+        this.closeModal('modalBulkUpdate');
+        this.render();
+        if (updated) alert(`Updated ${updated} field(s) across ${this._bulkSelected.size || 'selected'} records.`);
+    },
+
     toggleRowMenu(id) {
         const menu = document.getElementById('rowMenu_' + id);
         if (!menu) return;
@@ -1560,6 +1656,11 @@ const app = {
         }), 'contacts');
 
         const html = `
+            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
+                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('contacts')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderContacts();">Deselect All</button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h2 style="margin: 0;">Contacts</h2>
                 <div style="display:flex; gap:6px;">
@@ -1603,6 +1704,7 @@ const app = {
                     <table class="compact-table" id="contactsTable">
                         <thead>
                             <tr>
+                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('contacts')" ${this._bulkSelected.size === sorted.length && sorted.length ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;"></th>
                                 ${(() => { const cw = this._getColWidths(); return cols.map(c => `<th data-colkey="${c.key}" onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;${cw[c.key] ? 'width:'+cw[c.key]+'px;' : ''}">${c.label}${this._sortIndicator('contacts',c.key)}<div class="col-resize-handle" onmousedown="event.stopPropagation();"></div></th>`).join(''); })()}
                                 <th style="width:30px;"></th>
                             </tr>
@@ -1611,7 +1713,7 @@ const app = {
                             ${sorted.map(c => {
                                 const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
                                 const asClass = 'as-' + this.calculateAS(dsla);
-                                return `<tr>${cols.map(col => {
+                                return `<tr><td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:14px;height:14px;cursor:pointer;"></td>${cols.map(col => {
                                     const editable = col.editable ? `ondblclick="app.inlineEdit('${c.id}','${col.key}',this)"` : '';
                                     const cursor = col.editable ? 'cursor:cell;' : '';
                                     let val = '';
@@ -1682,6 +1784,11 @@ const app = {
 
     renderAccounts() {
         const html = `
+            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
+                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('accounts')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderAccounts();">Deselect All</button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h2 style="margin: 0;">Accounts</h2>
                 <button class="btn-primary" onclick="app.openAccountForm()">New Account</button>
@@ -1691,6 +1798,7 @@ const app = {
                     <table class="compact-table">
                         <thead>
                             <tr>
+                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('accounts')" style="width:14px;height:14px;cursor:pointer;"></th>
                                 <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
                                 <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
                                 <th onclick="app.sortBy('accounts','type')" style="cursor:pointer;">Type${this._sortIndicator('accounts','type')}</th>
@@ -1705,6 +1813,7 @@ const app = {
                                 const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
                                 return {...a, _conCount: conCount};
                             }), 'accounts').map(a => `<tr>
+                                    <td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
                                     <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: var(--sf-brand);">${a.name}</a></td>
                                     <td>${a.industry || ''}</td>
                                     <td>${a.type || ''}</td>
@@ -1800,6 +1909,11 @@ const app = {
         }
 
         const html = `
+            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
+                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('activities')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderActivities();">Deselect All</button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h2 style="margin: 0;">Events</h2>
                 <div style="display:flex; gap:6px;">
@@ -1840,6 +1954,7 @@ const app = {
                     <table class="compact-table">
                         <thead>
                             <tr>
+                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('activities')" style="width:14px;height:14px;cursor:pointer;"></th>
                                 <th style="width:24px;"></th>
                                 <th onclick="app.sortBy('activities','subject')" style="cursor:pointer;">Subject${this._sortIndicator('activities','subject')}</th>
                                 <th onclick="app.sortBy('activities','type')" style="cursor:pointer;">Type${this._sortIndicator('activities','type')}</th>
@@ -1859,6 +1974,7 @@ const app = {
                                 const pri = a.priority || 'Normal';
                                 const priColor = pri === 'High' ? 'var(--sf-error)' : pri === 'Low' ? 'var(--sf-text-weakest)' : '';
                                 return `<tr style="${isOverdue?'background:#fef2f2;':isToday?'background:#fffbeb;':''}">
+                                    <td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
                                     <td style="text-align:center;">${open ? `<input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;" title="Mark complete">` : `<span style="color:var(--sf-success);">✓</span>`}</td>
                                     <td><a onclick="app.viewActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
                                     <td>${typeIcons[a.type]||''} ${a.type}</td>
