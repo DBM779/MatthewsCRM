@@ -1704,7 +1704,7 @@ const app = {
                     <table class="compact-table" id="contactsTable">
                         <thead>
                             <tr>
-                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('contacts')" ${this._bulkSelected.size === sorted.length && sorted.length ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;"></th>
+                                <th style="width:18px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('contacts')" ${this._bulkSelected.size === sorted.length && sorted.length ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;"></th>
                                 ${(() => { const cw = this._getColWidths(); return cols.map(c => `<th data-colkey="${c.key}" onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;${cw[c.key] ? 'width:'+cw[c.key]+'px;' : ''}">${c.label}${this._sortIndicator('contacts',c.key)}<div class="col-resize-handle" onmousedown="event.stopPropagation();"></div></th>`).join(''); })()}
                                 <th style="width:30px;"></th>
                             </tr>
@@ -1713,7 +1713,7 @@ const app = {
                             ${sorted.map(c => {
                                 const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
                                 const asClass = 'as-' + this.calculateAS(dsla);
-                                return `<tr><td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:14px;height:14px;cursor:pointer;"></td>${cols.map(col => {
+                                return `<tr><td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:14px;height:14px;cursor:pointer;"></td>${cols.map(col => {
                                     const editable = col.editable ? `ondblclick="app.inlineEdit('${c.id}','${col.key}',this)"` : '';
                                     const cursor = col.editable ? 'cursor:cell;' : '';
                                     let val = '';
@@ -1798,7 +1798,7 @@ const app = {
                     <table class="compact-table">
                         <thead>
                             <tr>
-                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('accounts')" style="width:14px;height:14px;cursor:pointer;"></th>
+                                <th style="width:18px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('accounts')" style="width:14px;height:14px;cursor:pointer;"></th>
                                 <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
                                 <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
                                 <th onclick="app.sortBy('accounts','type')" style="cursor:pointer;">Type${this._sortIndicator('accounts','type')}</th>
@@ -1813,7 +1813,7 @@ const app = {
                                 const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
                                 return {...a, _conCount: conCount};
                             }), 'accounts').map(a => `<tr>
-                                    <td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
+                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
                                     <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: var(--sf-brand);">${a.name}</a></td>
                                     <td>${a.industry || ''}</td>
                                     <td>${a.type || ''}</td>
@@ -1954,7 +1954,7 @@ const app = {
                     <table class="compact-table">
                         <thead>
                             <tr>
-                                <th style="width:24px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('activities')" style="width:14px;height:14px;cursor:pointer;"></th>
+                                <th style="width:18px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('activities')" style="width:14px;height:14px;cursor:pointer;"></th>
                                 <th style="width:24px;"></th>
                                 <th onclick="app.sortBy('activities','subject')" style="cursor:pointer;">Subject${this._sortIndicator('activities','subject')}</th>
                                 <th onclick="app.sortBy('activities','type')" style="cursor:pointer;">Type${this._sortIndicator('activities','type')}</th>
@@ -1974,7 +1974,7 @@ const app = {
                                 const pri = a.priority || 'Normal';
                                 const priColor = pri === 'High' ? 'var(--sf-error)' : pri === 'Low' ? 'var(--sf-text-weakest)' : '';
                                 return `<tr style="${isOverdue?'background:#fef2f2;':isToday?'background:#fffbeb;':''}">
-                                    <td style="text-align:center;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
+                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:14px;height:14px;cursor:pointer;"></td>
                                     <td style="text-align:center;">${open ? `<input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;" title="Mark complete">` : `<span style="color:var(--sf-success);">✓</span>`}</td>
                                     <td><a onclick="app.viewActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
                                     <td>${typeIcons[a.type]||''} ${a.type}</td>
