@@ -2188,6 +2188,7 @@ const app = {
                             <div class="card-header">
                                 <span class="obj-icon obj-icon-contact" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">C</span>
                                 Contacts <span class="related-count">(${relatedContacts.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.openContactForm(); setTimeout(()=>document.getElementById('contactCompany').value='${e.accountId||''}',100);">Add</button>
                             </div>
                             <div class="card-body-flush">
                             ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>Title</th><th>PC#</th><th>PE@</th></tr></thead><tbody>
@@ -2204,6 +2205,7 @@ const app = {
                             <div class="card-header">
                                 <span class="obj-icon obj-icon-account" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
                                 Accounts <span class="related-count">(${relatedAccounts.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.openAccountForm();">Add</button>
                             </div>
                             <div class="card-body-flush">
                             ${relatedAccounts.length ? `<table><thead><tr><th>Name</th><th>Industry</th><th>Type</th></tr></thead><tbody>
@@ -2219,6 +2221,7 @@ const app = {
                             <div class="card-header">
                                 <span class="obj-icon obj-icon-activity" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
                                 Activities <span class="related-count">(${relatedActivities.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('activityContact').value='${e.contactId||''}'; app.openActivityForm();">Add</button>
                             </div>
                             <div class="card-body-flush">
                             ${relatedActivities.length ? `<table><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Date</th><th>Status</th></tr></thead><tbody>
