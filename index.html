@@ -2118,7 +2118,7 @@ const app = {
         const relatedContacts = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
         const relatedAccounts = acct ? [acct] : [];
         const actTypeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
-        const relatedActivities = this.data.activities.filter(a => relatedContacts.some(c => c.id === (a.contactId||a.contact_id)) || (acct && (a.accountId||a.account_id) === acct.id));
+        const relatedActivities = this.data.activities.filter(a => (e.activityIds || []).includes(a.id));
         const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
         const sfField = (label, value, fieldKey, type) => {
             if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
@@ -2182,7 +2182,10 @@ const app = {
                         <div class="card-header">
                             <span class="obj-icon obj-icon-activity" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
                             Activities <span class="related-count">(${relatedActivities.length})</span>
-                            <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('activityContact').value='${e.contactId||''}'; app.openActivityForm();">Add</button>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search activities…" oninput="app.searchRelatedActivity(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtActivityResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:240px;"></div>
+                            </div>
                         </div>
                         <div class="card-body-flush">
                         ${relatedActivities.length ? `<table><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Date</th><th>Status</th></tr></thead><tbody>
@@ -2302,6 +2305,27 @@ const app = {
         if (!evt) return;
         evt.notes = value || null;
         this.persist();
+    },
+
+    searchRelatedActivity(input, eventId) {
+        const dd = document.getElementById('evtActivityResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const evt = this.data.events.find(x => x.id === eventId);
+        const linked = evt ? (evt.activityIds || []) : [];
+        const matches = this.data.activities.filter(a => !linked.includes(a.id) && ((a.subject||'').toLowerCase().includes(term) || (a.type||'').toLowerCase().includes(term))).slice(0, 8);
+        const actIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkActivityToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${actIcons[a.type]||''} ${a.subject||'(no subject)'}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkActivityToEvent(eventId, activityId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.activityIds) evt.activityIds = [];
+        if (!evt.activityIds.includes(activityId)) evt.activityIds.push(activityId);
+        this.persist();
+        this.renderEventDetail();
     },
 
     searchRelatedContact(input, eventId) {
