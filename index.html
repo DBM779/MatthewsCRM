@@ -1341,7 +1341,7 @@ const app = {
 
         const sorted = this._applySortToList(filtered.map(c => {
             const cpy = this.data.accounts.find(a => a.id === (c.accountId || c.account_id));
-            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la) ?? 9999};
+            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity ?? 9999};
         }), 'contacts');
 
         const html = `
@@ -1394,7 +1394,7 @@ const app = {
                         </thead>
                         <tbody>
                             ${sorted.map(c => {
-                                const dsla = this.calculateDSLA(c.la);
+                                const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
                                 const asClass = 'as-' + this.calculateAS(dsla);
                                 return `<tr>${cols.map(col => {
                                     const editable = col.editable ? `ondblclick="app.inlineEdit('${c.id}','${col.key}',this)"` : '';
