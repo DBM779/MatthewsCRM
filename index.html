@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
@@ -205,15 +207,26 @@
         .related-list table {font-size: 13px;}
         .related-list td {padding: 6px 12px; font-size: 13px;}
         input[type="checkbox"] {width: auto; margin-right: 8px; cursor: pointer;}
-        .map-container {display: flex; gap: 16px; height: calc(100vh - 76px);}
-        .map-sidebar {width: 300px; border-right: 1px solid #e5e7eb; overflow-y: auto;}
-        .map-main {flex: 1;}
-        .map-item {padding: 12px; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s;}
-        .map-item:hover {background: #f9fafb;}
-        .map-item.active {background: #e0e7ff; border-left: 3px solid #3b82f6;}
-        .map-item-name {font-weight: 600; font-size: 13px; margin-bottom: 4px;}
-        .map-item-address {font-size: 12px; color: #6b7280;}
-        iframe {width: 100%; height: 100%; border: none;}
+        .map-page {display: flex; height: calc(100vh - 120px); gap: 0; border-radius: 4px; overflow: hidden; border: 1px solid var(--sf-border-weak); box-shadow: 0 2px 2px rgba(0,0,0,0.05);}
+        .map-sidebar-panel {width: 320px; background: #fff; border-right: 1px solid var(--sf-border-weak); display: flex; flex-direction: column; flex-shrink: 0;}
+        .map-sidebar-header {padding: 12px 16px; border-bottom: 1px solid var(--sf-border-weak); background: var(--sf-bg-alt);}
+        .map-sidebar-header input {width: 100%; padding: 6px 10px; border: 1px solid var(--sf-border); border-radius: 4px; font-size: 13px;}
+        .map-sidebar-list {flex: 1; overflow-y: auto;}
+        .map-item {padding: 10px 16px; border-bottom: 1px solid var(--sf-border-weak); cursor: pointer; transition: background 0.1s; display: flex; gap: 10px; align-items: flex-start;}
+        .map-item:hover {background: var(--sf-bg);}
+        .map-item.active {background: #eef4fc; border-left: 3px solid var(--sf-brand);}
+        .map-item-icon {width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0;}
+        .map-item-icon.contact {background: #a094ed;}
+        .map-item-icon.account {background: #7f8de1;}
+        .map-item-info {flex: 1; min-width: 0;}
+        .map-item-name {font-weight: 600; font-size: 13px; color: var(--sf-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+        .map-item-address {font-size: 11px; color: var(--sf-text-weak); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+        .map-main-panel {flex: 1; position: relative;}
+        .map-main-panel #crmMap {width: 100%; height: 100%;}
+        .map-loading {position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 14px; color: var(--sf-text-weak);}
+        .leaflet-popup-content {font-family: inherit; font-size: 13px;}
+        .leaflet-popup-content a {color: var(--sf-brand); font-weight: 600; cursor: pointer;}
+        @media (max-width: 768px) { .map-sidebar-panel { display: none; } }
         ::-webkit-scrollbar {width: 8px; height: 8px;}
         ::-webkit-scrollbar-track {background: transparent;}
         ::-webkit-scrollbar-thumb {background: #d1d5db; border-radius: 4px;}
@@ -1252,37 +1265,164 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
+    _geocodeCache: null,
+    _loadGeocodeCache() {
+        if (!this._geocodeCache) {
+            try { this._geocodeCache = JSON.parse(localStorage.getItem('matthewsCRM_geocache') || '{}'); }
+            catch { this._geocodeCache = {}; }
+        }
+        return this._geocodeCache;
+    },
+    _saveGeocodeCache() {
+        localStorage.setItem('matthewsCRM_geocache', JSON.stringify(this._geocodeCache || {}));
+    },
+
+    async geocodeAddress(address) {
+        const cache = this._loadGeocodeCache();
+        const key = address.toLowerCase().trim();
+        if (cache[key]) return cache[key];
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`, {headers: {'User-Agent': 'MatthewsCRM/1.0'}});
+            const data = await res.json();
+            if (data && data.length > 0) {
+                const result = {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
+                cache[key] = result;
+                this._saveGeocodeCache();
+                return result;
+            }
+        } catch (e) { console.error('Geocode error:', e); }
+        return null;
+    },
+
+    mapInstance: null,
+    mapMarkers: [],
+
     renderMap() {
         const contactsWithAddr = this.data.contacts.filter(c => c.address);
         const accountsWithAddr = this.data.accounts.filter(a => a.address);
+        const allItems = [
+            ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
+            ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
+        ];
+
         const html = `
-            <h2>Map View</h2>
-            <p style="color: #6b7280; margin-bottom: 16px;">Click any entry to open in Google Maps (logged into your account).</p>
-            <h3>Contacts (${contactsWithAddr.length})</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px;">
-                ${contactsWithAddr.map(c => `
-                    <div class="card" style="cursor: pointer; margin-bottom: 0;" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}', '_blank')">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${c.name}</div>
-                        <div style="font-size: 12px; color: #6b7280;">${c.address}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div class="obj-icon obj-icon-map" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">M</div>
+                    <div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">Map</div>
+                        <h2 style="margin:0;">Contact Locations (${allItems.length})</h2>
                     </div>
-                `).join('')}
+                </div>
             </div>
-            <h3>Accounts (${accountsWithAddr.length})</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
-                ${accountsWithAddr.map(a => `
-                    <div class="card" style="cursor: pointer; margin-bottom: 0;" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.address)}', '_blank')">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${a.name}</div>
-                        <div style="font-size: 12px; color: #6b7280;">${a.address}</div>
+            <div class="map-page">
+                <div class="map-sidebar-panel">
+                    <div class="map-sidebar-header">
+                        <input type="text" placeholder="Filter by name…" oninput="app.filterMapSidebar(this.value)">
                     </div>
-                `).join('')}
+                    <div class="map-sidebar-list" id="mapSidebarList">
+                        ${allItems.map((item, i) => `
+                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
+                                <div class="map-item-icon ${item._type}">${item._initials}</div>
+                                <div class="map-item-info">
+                                    <div class="map-item-name">${item.name}</div>
+                                    <div class="map-item-address">${item.address || ''}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="map-main-panel">
+                    <div id="crmMap"></div>
+                    <div class="map-loading" id="mapLoadingMsg">Loading map and geocoding addresses…</div>
+                </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
+
+        // Init Leaflet map
+        setTimeout(() => this.initMapWithMarkers(allItems), 100);
     },
 
-    showMapLocation(address) {
-        const encoded = encodeURIComponent(address);
-        window.open(`https://www.google.com/maps/search/?api=1&query=${encoded}`, '_blank');
+    async initMapWithMarkers(items) {
+        if (this.mapInstance) { this.mapInstance.remove(); this.mapInstance = null; }
+        this.mapMarkers = [];
+
+        const map = L.map('crmMap').setView([39.8283, -98.5795], 4); // center US
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+        this.mapInstance = map;
+
+        const bounds = [];
+        let geocoded = 0;
+        const total = items.length;
+        const loadingEl = document.getElementById('mapLoadingMsg');
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.address) continue;
+            if (loadingEl) loadingEl.textContent = `Geocoding ${geocoded + 1} of ${total}…`;
+
+            const coords = await this.geocodeAddress(item.address);
+            if (!coords) continue;
+            geocoded++;
+
+            const color = item._type === 'contact' ? '#a094ed' : '#7f8de1';
+            const icon = L.divIcon({
+                className: '',
+                html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${item._initials}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15],
+                popupAnchor: [0, -18]
+            });
+
+            const popupHtml = `
+                <div style="min-width:180px;">
+                    <div style="font-weight:700; font-size:14px; margin-bottom:4px;">
+                        <a onclick="app.${item._type === 'contact' ? 'viewContact' : 'viewAccount'}('${item.id}')">${item.name}</a>
+                    </div>
+                    ${item.title ? `<div style="font-size:12px; color:#666;">${item.title}</div>` : ''}
+                    ${item.email ? `<div style="font-size:12px;"><a href="mailto:${item.email}">${item.email}</a></div>` : ''}
+                    ${item.mobile || item.phone ? `<div style="font-size:12px;"><a href="tel:${item.mobile || item.phone}">${item.mobile || item.phone}</a></div>` : ''}
+                    <div style="font-size:11px; color:#888; margin-top:4px;">${item.address}</div>
+                    <div style="margin-top:6px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}" target="_blank" style="font-size:12px;">Open in Google Maps ↗</a></div>
+                </div>
+            `;
+
+            const marker = L.marker([coords.lat, coords.lng], {icon}).addTo(map).bindPopup(popupHtml);
+            this.mapMarkers.push({marker, coords, item, idx: i});
+            bounds.push([coords.lat, coords.lng]);
+
+            // rate limit nominatim (1 req/sec for uncached)
+            if (!this._loadGeocodeCache()[item.address.toLowerCase().trim()]) {
+                await new Promise(r => setTimeout(r, 1100));
+            }
+        }
+
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (bounds.length > 0) {
+            map.fitBounds(bounds, {padding: [40, 40]});
+        }
+    },
+
+    focusMapItem(idx) {
+        const entry = this.mapMarkers.find(m => m.idx === idx);
+        if (!entry) return;
+        this.mapInstance.setView([entry.coords.lat, entry.coords.lng], 15);
+        entry.marker.openPopup();
+        // highlight sidebar item
+        document.querySelectorAll('.map-item').forEach(el => el.classList.remove('active'));
+        const sideItem = document.querySelector(`.map-item[data-idx="${idx}"]`);
+        if (sideItem) { sideItem.classList.add('active'); sideItem.scrollIntoView({block: 'nearest'}); }
+    },
+
+    filterMapSidebar(term) {
+        const lower = term.toLowerCase();
+        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
+            el.style.display = el.getAttribute('data-name').includes(lower) ? '' : 'none';
+        });
     },
 
     renderReferrals() {
