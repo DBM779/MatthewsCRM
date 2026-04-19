@@ -1367,7 +1367,7 @@ const app = {
         {key:'la', label:'LA', editable:false},
         {key:'_dsla', label:'DSLA', editable:false},
         {key:'notes', label:'Notes', editable:true, type:'text'},
-        {key:'general_notes', label:'General Notes', editable:true, type:'text'},
+        {key:'general_notes', label:'*Notes', editable:true, type:'text'},
     ],
     _getContactCols() {
         if (!this._contactCols) {
@@ -3035,9 +3035,9 @@ const app = {
                             }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
                         </div>
                     </div>
-                    <!-- General Notes section -->
+                    <!-- *Notes section -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">General Notes</div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">*Notes</div>
                         <div style="padding:12px 16px;">
                             <textarea id="contactGeneralNotes" onblur="app.saveGeneralNotes('${c.id}', this.value)" style="width:100%; min-height:100px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(c.general_notes || '').replace(/</g,'&lt;')}</textarea>
                         </div>
