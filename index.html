@@ -2124,8 +2124,6 @@ const app = {
             return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineEventEdit('${e.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
         };
 
-        // Related contacts for this event
-        const relatedContacts = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
 
         const html = `
             <div class="detail-back" onclick="history.back();">&#8592; Back</div>
