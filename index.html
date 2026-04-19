@@ -1537,11 +1537,26 @@ const app = {
             if (sideItem) sideItem.querySelector('.map-item-address').textContent = 'Geocoding…';
             const coords = await this.geocodeAddress(item.address);
             if (!coords) {
-                // Geocoding failed — open Google Maps as fallback
-                if (sideItem) sideItem.querySelector('.map-item-address').textContent = item.address + ' (opening Google Maps)';
-                window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}`, '_blank');
+                // Geocoding failed — embed Google Maps in the map panel as fallback
+                if (sideItem) sideItem.querySelector('.map-item-address').textContent = item.address + ' (showing in map)';
+                const mapDiv = document.getElementById('crmMap');
+                if (mapDiv) {
+                    mapDiv.style.display = 'none';
+                    let iframe = document.getElementById('crmMapFallbackIframe');
+                    if (!iframe) {
+                        iframe = document.createElement('iframe');
+                        iframe.id = 'crmMapFallbackIframe';
+                        iframe.style.cssText = 'width:100%;height:100%;border:none;';
+                        mapDiv.parentElement.appendChild(iframe);
+                    }
+                    iframe.src = `https://www.google.com/maps?q=${encodeURIComponent(item.address)}&output=embed`;
+                    iframe.style.display = '';
+                }
                 return;
             }
+            // If we were showing a Google Maps fallback iframe, hide it and restore leaflet
+            const fallbackIframe = document.getElementById('crmMapFallbackIframe');
+            if (fallbackIframe) { fallbackIframe.style.display = 'none'; document.getElementById('crmMap').style.display = ''; }
             // Create the marker
             const color = item._type === 'contact' ? '#a094ed' : '#7f8de1';
             const icon = L.divIcon({
