@@ -3093,6 +3093,7 @@ const app = {
                     <div><div class="sf-hl-field-label">WE@</div><div class="sf-hl-field-value">${c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
                     <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Tier</div><div class="sf-hl-field-value">${c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : '—'}</div></div>
                 </div>
             </div>
 
