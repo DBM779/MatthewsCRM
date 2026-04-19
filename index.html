@@ -2575,9 +2575,11 @@ const app = {
 
         const initials = (c.name || '').split(' ').map(s => s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
         const todayStr = new Date().toISOString().split('T')[0];
-        const openTasks = activities.filter(a => a.status === 'Open');
-        const closedActs = activities.filter(a => a.status === 'Closed' || a.status !== 'Open');
-        const allTimeline = [...activities, ...emails.map(e => ({...e, _isEmail: true, dueDate: e.date, createdAt: e.created_at, type: 'Email', subject: e.subject, status: 'Sent'}))].sort((a,b) => ((b.dueDate||b.createdAt)||'').localeCompare((a.dueDate||a.createdAt)||''));
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        // Also match activities by contact_id (snake_case from SF import)
+        const allActs = this.data.activities.filter(a => (a.contactId || a.contact_id) === c.id);
+        const openTasks = allActs.filter(a => isOpen(a.status));
+        const allTimeline = [...allActs, ...emails.map(e => ({...e, _isEmail: true, dueDate: e.date, createdAt: e.created_at, type: 'Email', subject: e.subject, status: 'Sent'}))].sort((a,b) => ((b.dueDate||b.due_date||b.createdAt)||'').localeCompare((a.dueDate||a.due_date||a.createdAt)||''));
 
         const sfField = (label, value) => `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
 
@@ -2593,8 +2595,9 @@ const app = {
                     </div>
                     <div class="sf-hl-actions">
                         <button onclick="app.editContact('${c.id}')">Edit</button>
-                        <button onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();">New Task</button>
-                        <button onclick="app.quickLogActivity('${c.id}', 'Call')">Log a Call</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();">New Task</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">Log a Call</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">New Event</button>
                         <button onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Email</button>
                     </div>
                 </div>
@@ -2678,12 +2681,11 @@ const app = {
                 <div style="background:var(--sf-bg); border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; margin-bottom:16px;">
                     <div style="font-weight:600; font-size:13px; margin-bottom:8px;">Log Activity</div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Call')">Log a Call</button>
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Email')">Log Email</button>
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Meeting')">Log Meeting</button>
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Task')">New Task</button>
-                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Note')">Add Note</button>
-                        <button class="btn-primary btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; app.openActivityForm();" style="margin-left:auto;">Full Form</button>
+                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">📞 Log a Call</button>
+                        <button class="btn-small" onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">📧 Email</button>
+                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">📅 New Event</button>
+                        <button class="btn-small" onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();">☑️ New Task</button>
+                        <button class="btn-small" onclick="app.quickLogActivity('${c.id}', 'Note')">📝 Quick Note</button>
                     </div>
                 </div>
                 <!-- Filter buttons -->
@@ -2724,7 +2726,12 @@ const app = {
                                 <div style="font-weight:600; font-size:13px;">${a.subject || '(no subject)'}</div>
                                 <div style="font-size:11px; color:var(--sf-text-weakest); white-space:nowrap; margin-left:8px;">${dateStr}</div>
                             </div>
-                            <div style="font-size:12px; color:var(--sf-text-weak); margin-top:2px;">${a.type}${a.status ? ' · ' + a.status : ''}${a.notes ? ' — ' + (a.notes||'').substring(0,100) : ''}</div>
+                            <div style="font-size:12px; color:var(--sf-text-weak); margin-top:2px;">
+                                ${a.type}${a.status ? ' · ' + a.status : ''}${a.priority && a.priority !== 'Normal' ? ' · <span style="color:' + (a.priority==='High'?'var(--sf-error)':'var(--sf-text-weakest)') + ';">' + a.priority + ' Priority</span>' : ''}
+                                ${a.callDirection ? ' · ' + a.callDirection : ''}${a.callDuration ? ' · ' + a.callDuration + ' min' : ''}${a.callResult ? ' · ' + a.callResult : ''}
+                                ${a.location ? ' · 📍 ' + a.location : ''}
+                            </div>
+                            ${a.notes ? `<div style="font-size:12px; color:var(--sf-text-weakest); margin-top:4px; white-space:pre-wrap; max-height:60px; overflow:hidden;">${(a.notes||'').substring(0,200)}</div>` : ''}
                             ${a._isEmail && a.body ? `<div style="font-size:12px; color:var(--sf-text-weakest); margin-top:4px; white-space:pre-wrap; max-height:60px; overflow:hidden;">${(a.body||'').substring(0,200)}</div>` : ''}
                         </div>
                     </div>`;
