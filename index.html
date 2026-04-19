@@ -1276,6 +1276,18 @@ const app = {
         });
     },
 
+    toggleRowMenu(id) {
+        const menu = document.getElementById('rowMenu_' + id);
+        if (!menu) return;
+        const showing = menu.style.display !== 'none';
+        document.querySelectorAll('[id^="rowMenu_"]').forEach(m => m.style.display = 'none');
+        if (!showing) {
+            menu.style.display = 'block';
+            const close = (e) => { if (!menu.contains(e.target)) { menu.style.display = 'none'; document.removeEventListener('click', close); }};
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+    },
+
     inlineEdit(contactId, field, el) {
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
@@ -1387,7 +1399,7 @@ const app = {
                                     else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
                                     else val = c[col.key] || '';
                                     return `<td ${editable} style="${cursor}" title="${col.editable ? 'Double-click to edit' : ''}">${val}</td>`;
-                                }).join('')}<td><button class="btn-small" onclick="app.deleteContact('${c.id}')" style="padding:1px 6px; font-size:11px;">✕</button></td></tr>`;
+                                }).join('')}<td style="position:relative;"><button class="btn-small" onclick="app.toggleRowMenu('${c.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_${c.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.editContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.viewContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.deleteContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error); white-space:nowrap;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td></tr>`;
                             }).join('')}
                         </tbody>
                     </table>
