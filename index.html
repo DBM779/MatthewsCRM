@@ -277,10 +277,13 @@
         .ref-status-pending {background: #fef3c7; color: #92400e;}
         .ref-status-closed {background: #f3f4f6; color: #374151;}
         /* Compact table for contacts/accounts list views */
-        .compact-table th {padding: 4px 8px; font-size: 11px; height: 28px;}
-        .compact-table td {padding: 3px 8px; font-size: 12px; height: 28px; line-height: 1.3;}
+        .compact-table {table-layout: fixed;}
+        .compact-table th {padding: 4px 8px; font-size: 11px; height: 28px; position: relative; overflow: hidden; text-overflow: ellipsis;}
+        .compact-table td {padding: 3px 8px; font-size: 12px; height: 28px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis;}
         .compact-table tr:hover {background: #f0f7ff;}
-        .compact-table td[data-editing="true"] {padding: 1px 2px;}
+        .compact-table td[data-editing="true"] {padding: 1px 2px; overflow: visible;}
+        .col-resize-handle {position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; background: transparent; z-index: 1;}
+        .col-resize-handle:hover, .col-resize-handle.dragging {background: var(--sf-brand);}
         /* SF Detail field (two-column layout on record pages) */
         .sf-detail-field {padding: 8px 0; border-bottom: 1px solid var(--sf-border-weak);}
         .sf-detail-field-label {font-size: 11px; color: var(--sf-text-weakest); margin-bottom: 2px; font-weight: 400;}
@@ -579,7 +582,11 @@ const app = {
     async init() {
         this.loadData();
         this.setupEventListeners();
-        this.renderDashboard();
+        const savedView = location.hash.replace('#','');
+        if (savedView && savedView !== 'sync' && ['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedView)) {
+            this.currentView = savedView;
+        }
+        this.render();
         this.updateSelectOptions();
         setTimeout(() => this.bgGeocodeAll(), 3000);
     },
@@ -949,7 +956,7 @@ const app = {
 
     navigate(view) {
         this.currentView = view;
-        // update SF top nav tabs
+        location.hash = view;
         const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
         const activeTabId = tabMap[view] || view;
         document.querySelectorAll('.sf-app-tab').forEach(el => {
@@ -1198,6 +1205,39 @@ const app = {
     },
     _showColPicker: false,
 
+    _getColWidths() {
+        try { return JSON.parse(localStorage.getItem('matthewsCRM_colWidths') || '{}'); } catch { return {}; }
+    },
+    _saveColWidth(key, width) {
+        const widths = this._getColWidths();
+        widths[key] = width;
+        localStorage.setItem('matthewsCRM_colWidths', JSON.stringify(widths));
+    },
+    initColumnResize() {
+        document.querySelectorAll('.col-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const th = handle.parentElement;
+                const colKey = th.dataset.colkey;
+                const startX = e.clientX;
+                const startW = th.offsetWidth;
+                handle.classList.add('dragging');
+                const onMove = (ev) => {
+                    const newW = Math.max(40, startW + ev.clientX - startX);
+                    th.style.width = newW + 'px';
+                };
+                const onUp = () => {
+                    handle.classList.remove('dragging');
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    if (colKey) this._saveColWidth(colKey, th.offsetWidth);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    },
+
     inlineEdit(contactId, field, el) {
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
@@ -1285,11 +1325,11 @@ const app = {
             </div>
             <div class="card">
                 <div class="table-container">
-                    <table class="compact-table">
+                    <table class="compact-table" id="contactsTable">
                         <thead>
                             <tr>
-                                ${cols.map(c => `<th onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;">${c.label}${this._sortIndicator('contacts',c.key)}</th>`).join('')}
-                                <th style="width:40px;"></th>
+                                ${(() => { const cw = this._getColWidths(); return cols.map(c => `<th data-colkey="${c.key}" onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;${cw[c.key] ? 'width:'+cw[c.key]+'px;' : ''}">${c.label}${this._sortIndicator('contacts',c.key)}<div class="col-resize-handle" onmousedown="event.stopPropagation();"></div></th>`).join(''); })()}
+                                <th style="width:30px;"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1316,6 +1356,7 @@ const app = {
             </div>
         `;
         document.getElementById('content').innerHTML = html;
+        this.initColumnResize();
     },
 
     updateContactFilter(key, val) {
