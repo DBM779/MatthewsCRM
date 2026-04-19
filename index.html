@@ -391,6 +391,8 @@
                 <div class="form-group"><label>Account</label><select id="contactCompany"></select></div>
                 <div class="form-group"><label>Title</label><input type="text" id="contactTitle"></div>
                 <div class="form-group"><label>Department</label><input type="text" id="contactDepartment"></div>
+                <div class="form-group"><label>PE@ (Personal Email)</label><input type="email" id="contactPeEmail"></div>
+                <div class="form-group"><label>WE@ (Work Email)</label><input type="email" id="contactWeEmail"></div>
                 <div class="form-group"><label>Email</label><input type="email" id="contactEmail"></div>
                 <div class="form-group"><label>Lead Source</label><select id="contactLeadSource"><option value="">--None--</option><option value="Web">Web</option><option value="Phone">Phone Inquiry</option><option value="Referral">Referral</option><option value="Partner">Partner</option><option value="Event">Event</option><option value="Cold Call">Cold Call</option><option value="Other">Other</option></select></div>
                 <div class="form-group"><label>PC# (Personal Cell)</label><input type="tel" id="contactPcNumber"></div>
@@ -821,6 +823,8 @@ const app = {
         const id = document.getElementById('contactId').value;
         const contact = {
             name: document.getElementById('contactName').value,
+            pe_email: document.getElementById('contactPeEmail').value || null,
+            we_email: document.getElementById('contactWeEmail').value || null,
             email: document.getElementById('contactEmail').value,
             pc_number: document.getElementById('contactPcNumber').value || null,
             wc_number: document.getElementById('contactWcNumber').value || null,
@@ -1392,6 +1396,8 @@ const app = {
     _contactCols: null,
     _allContactCols: [
         {key:'name', label:'Name', editable:true, type:'text'},
+        {key:'pe_email', label:'PE@', editable:true, type:'email'},
+        {key:'we_email', label:'WE@', editable:true, type:'email'},
         {key:'email', label:'Email', editable:true, type:'email'},
         {key:'pc_number', label:'PC#', editable:true, type:'tel'},
         {key:'wc_number', label:'WC#', editable:true, type:'tel'},
@@ -2980,7 +2986,7 @@ const app = {
     },
 
     _clearContactForm() {
-        ['contactId','contactName','contactEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactDepartment','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
+        ['contactId','contactName','contactPeEmail','contactWeEmail','contactEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactDepartment','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
@@ -2999,6 +3005,8 @@ const app = {
         this._clearContactForm();
         document.getElementById('contactId').value = c.id;
         document.getElementById('contactName').value = c.name || '';
+        document.getElementById('contactPeEmail').value = c.pe_email || '';
+        document.getElementById('contactWeEmail').value = c.we_email || '';
         document.getElementById('contactEmail').value = c.email || '';
         document.getElementById('contactPcNumber').value = c.pc_number || '';
         document.getElementById('contactWcNumber').value = c.wc_number || '';
@@ -3083,7 +3091,8 @@ const app = {
                     <div><div class="sf-hl-field-label">Account Name</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">PC#</div><div class="sf-hl-field-value">${c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">WC#</div><div class="sf-hl-field-value">${c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : '—'}</div></div>
-                    <div><div class="sf-hl-field-label">Email</div><div class="sf-hl-field-value">${c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">PE@</div><div class="sf-hl-field-value">${c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">WE@</div><div class="sf-hl-field-value">${c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : '—'}</div></div>
                 </div>
             </div>
 
@@ -3156,6 +3165,8 @@ const app = {
                             ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
                             ${sfField('Title', c.title, 'title')}
                             ${sfField('Department', c.department, 'department')}
+                            ${sfField('PE@', c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : null, 'pe_email', 'email')}
+                            ${sfField('WE@', c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : null, 'we_email', 'email')}
                             ${sfField('Email', c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : null, 'email', 'email')}
                             ${sfField('Lead Source', c.lead_source, 'lead_source')}
                             ${sfField('PC#', c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : null, 'pc_number', 'tel')}
