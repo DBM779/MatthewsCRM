@@ -1389,7 +1389,7 @@ const app = {
     mapInstance: null,
     mapMarkers: [],
 
-    mapFilters: {type: 'all', tier: '', company: '', tag: '', text: ''},
+    mapFilters: {type: 'all', tier: '', tag: '', text: ''},
     _mapAllItems: [],
 
     renderMap() {
@@ -1440,15 +1440,11 @@ const app = {
                         <option value="">All Tiers</option>
                         ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <select onchange="app.updateMapFilter('company', this.value)" style="min-width:120px;">
-                        <option value="">All Companies</option>
-                        ${this.data.accounts.map(a => `<option value="${a.id}" ${f.company===a.id?'selected':''}>${a.name}</option>`).join('')}
-                    </select>
                     <select onchange="app.updateMapFilter('tag', this.value)" style="min-width:90px;">
                         <option value="">All Tags</option>
                         ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',company:'',tag:'',text:''}; app.showAllFilteredPins();">Clear</button>
+                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; app.showAllFilteredPins();">Clear</button>
                     <button class="btn-small btn-primary" id="mapShowAllBtn" style="display:none;" onclick="app.showAllFilteredPins();">Show All Pins</button>
                     <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
                 </div>
@@ -1490,10 +1486,6 @@ const app = {
         if (f.type !== 'all' && item._type !== f.type) return false;
         if (f.tier && (item.tier || '') !== f.tier) return false;
         if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) return false;
-        if (f.company) {
-            if (item._type === 'contact' && (item.accountId || item.account_id || '') !== f.company) return false;
-            if (item._type === 'account' && item.id !== f.company) return false;
-        }
         if (f.text && !(item.name || '').toLowerCase().includes(f.text.toLowerCase())) return false;
         return true;
     },
