@@ -1431,6 +1431,7 @@ const app = {
             <!-- Filter bar -->
             <div class="card" style="padding:10px 14px; margin-bottom:8px;">
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <input type="text" placeholder="Search name, city, state…" value="${f.text}" oninput="app.updateMapFilter('text', this.value)" style="flex:1; min-width:200px;">
                     <select id="mapTypeSelect" onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
                         <option value="all" ${f.type==='all'?'selected':''}>All Types</option>
                         <option value="contact" ${f.type==='contact'?'selected':''}>Contacts Only</option>
@@ -1444,19 +1445,16 @@ const app = {
                         <option value="">All Tags</option>
                         ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; app.showAllFilteredPins();">Clear</button>
+                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; app.showAllFilteredPins(); this.closest('.card').querySelector('input').value='';">Clear</button>
                     <button class="btn-small btn-primary" id="mapShowAllBtn" style="display:none;" onclick="app.showAllFilteredPins();">Show All Pins</button>
                     <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
                 </div>
             </div>
             <div class="map-page">
                 <div class="map-sidebar-panel">
-                    <div class="map-sidebar-header">
-                        <input type="text" placeholder="Search name…" value="${f.text}" oninput="app.updateMapFilter('text', this.value)">
-                    </div>
                     <div class="map-sidebar-list" id="mapSidebarList">
                         ${allItems.map((item, i) => `
-                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-company="${item.accountId||item.account_id||''}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
+                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-addr="${(item.address||'').toLowerCase()}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
                                 <div class="map-item-icon ${item._type}">${item._initials}</div>
                                 <div class="map-item-info">
                                     <div class="map-item-name">${item.name}</div>
@@ -1486,7 +1484,11 @@ const app = {
         if (f.type !== 'all' && item._type !== f.type) return false;
         if (f.tier && (item.tier || '') !== f.tier) return false;
         if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) return false;
-        if (f.text && !(item.name || '').toLowerCase().includes(f.text.toLowerCase())) return false;
+        if (f.text) {
+            const t = f.text.toLowerCase();
+            const searchable = ((item.name || '') + ' ' + (item.address || '') + ' ' + (item.email || '')).toLowerCase();
+            if (!searchable.includes(t)) return false;
+        }
         return true;
     },
 
