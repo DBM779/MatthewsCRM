@@ -588,7 +588,7 @@
                 <div class="form-group"><label>Status</label><select id="eventStatus"><option value="Scheduled">Scheduled</option><option value="Completed">Completed</option><option value="Cancelled">Cancelled</option></select></div>
                 <div class="form-group"><label>Start Date/Time *</label><input type="datetime-local" id="eventStart" required></div>
                 <div class="form-group"><label>End Date/Time</label><input type="datetime-local" id="eventEnd"></div>
-                <div class="form-group"><label>Location</label><input type="text" id="eventLocation"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="eventAddress"></div>
                 <div class="form-group"><label>Account</label><select id="eventAccount"></select></div>
                 <div class="form-group"><label>Primary Contact</label><select id="eventContact"></select></div>
                 <div class="form-group"><label>Additional Contacts</label><input type="text" id="eventAttendees" placeholder="Names, comma-separated"></div>
@@ -786,7 +786,7 @@ const app = {
 
     async bgGeocodeAll() {
         const cache = this._loadGeocodeCache();
-        const items = [...this.data.contacts, ...this.data.accounts].filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
+        const items = [...this.data.contacts, ...this.data.accounts, ...this.data.events].filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
         if (!items.length) return;
         console.log(`[bgGeocode] Geocoding ${items.length} new addresses in background…`);
         for (const item of items) {
@@ -1937,7 +1937,7 @@ const app = {
             status: document.getElementById('eventStatus').value,
             start: document.getElementById('eventStart').value || null,
             end: document.getElementById('eventEnd').value || null,
-            location: document.getElementById('eventLocation').value || null,
+            location: document.getElementById('eventAddress').value || null,
             accountId: document.getElementById('eventAccount').value || null,
             contactId: document.getElementById('eventContact').value || null,
             attendees: document.getElementById('eventAttendees').value || null,
@@ -1950,12 +1950,13 @@ const app = {
             this.data.events.push({...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()});
         }
         this.persist();
+        if (evt.address) this.geocodeAddress(evt.address);
         this.closeModal('modalEvent');
         this.render();
     },
 
     openEventForm() {
-        ['eventId','eventName','eventStart','eventEnd','eventLocation','eventAccount','eventContact','eventAttendees','eventDescription'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        ['eventId','eventName','eventStart','eventEnd','eventAddress','eventAccount','eventContact','eventAttendees','eventDescription'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
         document.getElementById('eventType').value = 'Meeting';
         document.getElementById('eventStatus').value = 'Scheduled';
         this.openModal('modalEvent');
@@ -1970,7 +1971,7 @@ const app = {
         document.getElementById('eventStatus').value = evt.status || 'Scheduled';
         document.getElementById('eventStart').value = evt.start || '';
         document.getElementById('eventEnd').value = evt.end || '';
-        document.getElementById('eventLocation').value = evt.location || '';
+        document.getElementById('eventAddress').value = evt.address || '';
         document.getElementById('eventAccount').value = evt.accountId || '';
         document.getElementById('eventContact').value = evt.contactId || '';
         document.getElementById('eventAttendees').value = evt.attendees || '';
@@ -2018,7 +2019,7 @@ const app = {
         if (ef.text) { const lt = ef.text.toLowerCase(); filtered = filtered.filter(e => {
             const con = this.data.contacts.find(c => c.id === e.contactId);
             const acct = this.data.accounts.find(a => a.id === e.accountId);
-            return (e.name||'').toLowerCase().includes(lt) || (e.location||'').toLowerCase().includes(lt) || (e.description||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt)) || (acct && acct.name.toLowerCase().includes(lt));
+            return (e.name||'').toLowerCase().includes(lt) || (e.address||'').toLowerCase().includes(lt) || (e.description||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt)) || (acct && acct.name.toLowerCase().includes(lt));
         }); }
 
         const sorted = this._applySortToList(filtered.map(e => {
@@ -2076,7 +2077,7 @@ const app = {
                                 <th onclick="app.sortBy('events','name')" style="cursor:pointer;">Event Name${this._sortIndicator('events','name')}</th>
                                 <th onclick="app.sortBy('events','type')" style="cursor:pointer;">Type${this._sortIndicator('events','type')}</th>
                                 <th onclick="app.sortBy('events','_start')" style="cursor:pointer;">Date${this._sortIndicator('events','_start')}</th>
-                                <th>Location</th>
+                                <th>Address</th>
                                 <th onclick="app.sortBy('events','_contact')" style="cursor:pointer;">Contact${this._sortIndicator('events','_contact')}</th>
                                 <th onclick="app.sortBy('events','_account')" style="cursor:pointer;">Account${this._sortIndicator('events','_account')}</th>
                                 <th onclick="app.sortBy('events','status')" style="cursor:pointer;">Status${this._sortIndicator('events','status')}</th>
@@ -2093,7 +2094,7 @@ const app = {
                                     <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${e.name||'(no name)'}</a></td>
                                     <td>${typeIcons[e.type]||''} ${e.type||''}</td>
                                     <td>${startDisplay}</td>
-                                    <td>${e.location||''}</td>
+                                    <td>${e.address||''}</td>
                                     <td>${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : ''}</td>
                                     <td>${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : ''}</td>
                                     <td>${e.status||''}</td>
@@ -2140,7 +2141,7 @@ const app = {
                 <div class="sf-hl-fields">
                     <div><div class="sf-hl-field-label">Start</div><div class="sf-hl-field-value">${e.start ? new Date(e.start).toLocaleString() : '—'}</div></div>
                     <div><div class="sf-hl-field-label">End</div><div class="sf-hl-field-value">${e.end ? new Date(e.end).toLocaleString() : '—'}</div></div>
-                    <div><div class="sf-hl-field-label">Location</div><div class="sf-hl-field-value">${e.location||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Address</div><div class="sf-hl-field-value">${e.address||'—'}</div></div>
                     <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${e.status||'—'}</div></div>
                     <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Contact</div><div class="sf-hl-field-value">${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : '—'}</div></div>
@@ -2165,7 +2166,7 @@ const app = {
                             ${sfField('Status', e.status)}
                             ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null)}
                             ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null)}
-                            ${sfField('Location', e.location, 'location')}
+                            ${sfField('Address', e.address, 'location')}
                         </div>
 
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Relationships</h3>
@@ -3253,12 +3254,12 @@ const app = {
                                 <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('eventContact').value='${c.id}'; app.openEventForm();">New</button>
                             </div>
                             <div class="card-body-flush">
-                            ${contactEvents.length ? `<table><thead><tr><th>Event Name</th><th>Type</th><th>Date</th><th>Location</th><th>Status</th></tr></thead><tbody>
+                            ${contactEvents.length ? `<table><thead><tr><th>Event Name</th><th>Type</th><th>Date</th><th>Address</th><th>Status</th></tr></thead><tbody>
                                 ${contactEvents.map(e => `<tr style="cursor:pointer;" onclick="app.viewEvent('${e.id}')">
                                     <td style="color:var(--sf-brand); font-weight:600;">${e.name||''}</td>
                                     <td>${e.type||''}</td>
                                     <td>${e.start ? new Date(e.start).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : ''}</td>
-                                    <td>${e.location||''}</td>
+                                    <td>${e.address||''}</td>
                                     <td>${e.status||''}</td>
                                 </tr>`).join('')}
                             </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No events.</div>'}
@@ -3359,7 +3360,7 @@ const app = {
                                     <div style="display:inline-flex; align-items:center; padding:3px 8px; font-size:12px; border-radius:4px; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; flex-shrink:0; height:26px;">${iconEmojis[a.type]||'📋'} ${a.type}</div>
                                     <div style="flex:1; min-width:0;">
                                         <div style="font-size:12px; font-weight:600;"><a onclick="app.editActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand);">${a.subject || '(no subject)'}</a></div>
-                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.location ? ' · 📍' + a.location : ''}</div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.address ? ' · 📍' + a.address : ''}</div>
                                         ${a.notes ? `<div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; max-height:32px; overflow:hidden;">${(a.notes||'').substring(0,120)}</div>` : ''}
                                     </div>
                                     <div style="flex-shrink:0; position:relative;">
@@ -3603,7 +3604,7 @@ const app = {
         if (a.callDirection) document.getElementById('activityCallDirection').value = a.callDirection;
         if (a.callDuration) document.getElementById('activityCallDuration').value = a.callDuration;
         if (a.callResult) document.getElementById('activityCallResult').value = a.callResult;
-        if (a.location) document.getElementById('activityLocation').value = a.location;
+        if (a.address) document.getElementById('activityLocation').value = a.address;
         if (a.endDateTime) document.getElementById('activityEndDateTime').value = a.endDateTime;
         this.onActivityTypeChange();
         this.openModal('modalActivity');
