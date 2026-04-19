@@ -1096,20 +1096,24 @@ const app = {
         const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
         const in7Str = in7.toISOString().split('T')[0];
         const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
-        const in30Str = in30.toISOString().split('T')[0];
 
-        const openActs = this.data.activities.filter(a => a.status === 'Open');
-        const overdue = openActs.filter(a => a.dueDate && a.dueDate < todayStr);
-        const dueToday = openActs.filter(a => a.dueDate === todayStr);
-        const upcoming = openActs.filter(a => a.dueDate > todayStr && a.dueDate <= in7Str);
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        const openActs = this.data.activities.filter(a => isOpen(a.status));
+        const overdue = openActs.filter(a => (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr);
+        const dueToday = openActs.filter(a => (a.dueDate||a.due_date) === todayStr);
+        const upcoming = openActs.filter(a => (a.dueDate||a.due_date) > todayStr && (a.dueDate||a.due_date) <= in7Str);
 
         const activeDeals = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
         const wonDeals = this.data.deals.filter(d => d.stage === 'Closed Won');
         const lostDeals = this.data.deals.filter(d => d.stage === 'Closed Lost');
         const pipelineVal = activeDeals.reduce((s, d) => s + (d.value || 0), 0);
         const wonVal = wonDeals.reduce((s, d) => s + (d.value || 0), 0);
+        const winRate = (wonDeals.length + lostDeals.length) > 0 ? Math.round(wonDeals.length / (wonDeals.length + lostDeals.length) * 100) : 0;
 
-        // Upcoming birthdays (next 30 days)
+        const vipContacts = this.data.contacts.filter(c => c.tier === '1-VIP');
+        const recentActs = [...this.data.activities].sort((a,b) => ((b.dueDate||b.due_date||b.createdAt)||'').localeCompare((a.dueDate||a.due_date||a.createdAt)||'')).slice(0, 10);
+
+        // Upcoming birthdays
         const birthdays = this.data.contacts.filter(c => {
             if (!c.birthdate) return false;
             const bd = new Date(c.birthdate);
@@ -1120,15 +1124,22 @@ const app = {
             const bd = new Date(c.birthdate);
             const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
             if (thisYear < today) thisYear.setFullYear(thisYear.getFullYear() + 1);
-            const daysAway = Math.ceil((thisYear - today) / (1000*60*60*24));
-            return {...c, nextBirthday: thisYear, daysAway};
+            return {...c, daysAway: Math.ceil((thisYear - today) / 86400000)};
         }).sort((a, b) => a.daysAway - b.daysAway);
 
         // Pipeline by stage
         const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation'];
         const stageColors = ['#94a3b8', '#3b82f6', '#8b5cf6', '#f59e0b', '#f97316'];
-        const stageCounts = stages.map(s => this.data.deals.filter(d => d.stage === s).length);
-        const maxCount = Math.max(...stageCounts, 1);
+        const stageVals = stages.map(s => activeDeals.filter(d => d.stage === s).reduce((sum,d) => sum + (d.value||0), 0));
+        const maxVal = Math.max(...stageVals, 1);
+
+        // Contacts needing attention (no activity in 60+ days)
+        const stale = this.data.contacts.filter(c => {
+            const la = c.la || c.last_activity_display;
+            if (!la) return true;
+            const days = Math.floor((today - new Date(la)) / 86400000);
+            return days >= 60;
+        }).sort((a,b) => (a.la||a.last_activity_display||'').localeCompare(b.la||b.last_activity_display||'')).slice(0, 8);
 
         // Backup reminder
         let backupBanner = '';
@@ -1137,97 +1148,164 @@ const app = {
         if (autoBackup) {
             const daysSince = lastBackup ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000) : 999;
             if (daysSince >= 7) {
-                backupBanner = `<div class="card" style="border-left:4px solid var(--sf-warning); padding:12px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                backupBanner = `<div class="card" style="border-left:4px solid var(--sf-warning); padding:12px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
                     <div style="font-size:13px;"><strong>Backup reminder:</strong> It's been ${daysSince === 999 ? 'a while' : daysSince + ' days'} since your last backup. <a style="color:var(--sf-brand); cursor:pointer; font-weight:600;" onclick="app.backupJSON()">Download backup now</a></div>
                 </div>`;
             }
         }
 
+        const typeEmoji = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+
         const html = `
             <h2>Home</h2>
             ${backupBanner}
-            <div class="stat-cards">
+            <!-- KPI Cards -->
+            <div class="stat-cards" style="grid-template-columns:repeat(6, 1fr);">
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('active')"><div class="label">Active Opportunities</div><div class="value">${activeDeals.length}</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('active')"><div class="label">Pipeline Value</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterDeals('won')"><div class="label">Won Value</div><div class="value" style="color:var(--sf-success);">$${wonVal.toFixed(0)}M</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.dashFilterActivities('overdue')"><div class="label">Overdue Tasks</div><div class="value" style="color:${overdue.length ? 'var(--sf-error)' : 'var(--sf-success)'}">${overdue.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Won</div><div class="value" style="color:var(--sf-success);">$${wonVal.toFixed(0)}M</div></div>
+                <div class="stat-card"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${overdue.length}</div></div>
             </div>
-            <div class="dash-grid">
-                <div class="dash-section">
-                    <h3>Pipeline by Stage</h3>
-                    <div class="chart-bar-container">
-                        ${stages.map((s, i) => `
-                            <div class="chart-bar-wrapper">
-                                <div class="chart-bar-value">${stageCounts[i]}</div>
-                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
-                                    <div class="chart-bar" style="background:${stageColors[i]}; height:${Math.max(stageCounts[i] / maxCount * 100, 5)}%; width:100%;"></div>
-                                </div>
-                                <div class="chart-bar-label">${s}</div>
-                            </div>
-                        `).join('')}
+
+            <!-- Main layout: left + right like SF home -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN -->
+                <div style="flex:1; min-width:0;">
+                    <!-- My Tasks -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-weight:700; font-size:14px;">My Tasks</span>
+                            <button class="btn-small" onclick="app.openActivityForm();">New Task</button>
+                        </div>
+                        <div style="padding:0 16px;">
+                            ${overdue.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-error); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Overdue (${overdue.length})</div>` : ''}
+                            ${overdue.slice(0,5).map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-error);">Due ${a.dueDate||a.due_date}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${dueToday.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-warning); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Due Today (${dueToday.length})</div>` : ''}
+                            ${dueToday.map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">Today${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${upcoming.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-brand); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Upcoming This Week (${upcoming.length})</div>` : ''}
+                            ${upcoming.slice(0,5).map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.dueDate||a.due_date}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${!overdue.length && !dueToday.length && !upcoming.length ? '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">No open tasks. You\'re all caught up!</div>' : ''}
+                        </div>
+                    </div>
+
+                    <!-- Pipeline by Stage -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Pipeline by Stage</div>
+                        <div style="padding:16px;">
+                            ${stages.map((s, i) => {
+                                const count = activeDeals.filter(d => d.stage === s).length;
+                                const val = stageVals[i];
+                                const pct = Math.max(val / maxVal * 100, 2);
+                                return `<div style="margin-bottom:10px;">
+                                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
+                                        <span style="font-weight:500;">${s} (${count})</span>
+                                        <span style="color:var(--sf-text-weak);">$${val.toFixed(1)}M</span>
+                                    </div>
+                                    <div style="height:16px; background:var(--sf-bg); border-radius:3px; overflow:hidden;">
+                                        <div style="height:100%; width:${pct}%; background:${stageColors[i]}; border-radius:3px;"></div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Contacts Needing Attention -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days since last activity)</span></div>
+                        <div style="padding:0 16px;">
+                            ${stale.length ? stale.map(c => {
+                                const dsla = this.calculateDSLA(c.la || c.last_activity_display);
+                                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                    <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.tier||''}</span></div>
+                                    <span style="font-size:12px; color:var(--sf-error);">${dsla != null ? dsla+'D' : 'Never'}</span>
+                                </div>`;
+                            }).join('') : '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">All contacts are up to date!</div>'}
+                        </div>
                     </div>
                 </div>
-                <div class="dash-section">
-                    <h3 style="color:${overdue.length ? '#ef4444' : '#374151'}">Overdue Tasks (${overdue.length})</h3>
-                    ${overdue.length ? overdue.slice(0, 5).map(a => {
-                        const con = this.data.contacts.find(c => c.id === a.contactId);
-                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
-                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}<br><span style="font-size:11px; color:var(--sf-error);">Due ${a.dueDate}</span></div>
-                            <span class="task-badge task-badge-overdue">${a.type}</span>
-                        </div>`;
-                    }).join('') : '<p class="text-muted" style="font-size:13px;">No overdue tasks</p>'}
-                    <h3 style="margin-top: 16px;">Due Today (${dueToday.length})</h3>
-                    ${dueToday.length ? dueToday.map(a => {
-                        const con = this.data.contacts.find(c => c.id === a.contactId);
-                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
-                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
-                            <span class="task-badge task-badge-today">${a.type}</span>
-                        </div>`;
-                    }).join('') : '<p class="text-muted" style="font-size:13px;">Nothing due today</p>'}
-                    <h3 style="margin-top: 16px;">Upcoming This Week (${upcoming.length})</h3>
-                    ${upcoming.length ? upcoming.slice(0, 5).map(a => {
-                        const con = this.data.contacts.find(c => c.id === a.contactId);
-                        return `<div class="dash-task-item" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
-                            <div><strong>${a.subject}</strong>${con ? `<br><a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="font-size:11px; color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}<br><span style="font-size:11px; color:var(--sf-text-weak);">Due ${a.dueDate}</span></div>
-                            <span class="task-badge task-badge-upcoming">${a.type}</span>
-                        </div>`;
-                    }).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming tasks</p>'}
-                </div>
-                <div class="dash-section">
-                    <h3>Upcoming Birthdays</h3>
-                    ${birthdays.length ? birthdays.map(c => `
-                        <div class="birthday-item">
-                            <div><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:#3b82f6; font-weight:500;">${c.name}</a><br><span style="font-size:11px; color:#6b7280;">${new Date(c.birthdate).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span></div>
-                            <span style="font-size:12px; color:#6b7280;">${c.daysAway === 0 ? 'Today!' : c.daysAway + 'd away'}</span>
+
+                <!-- RIGHT COLUMN -->
+                <div style="width:360px; flex-shrink:0;">
+                    <!-- Recent Activity Feed -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recent Activity</div>
+                        <div style="padding:8px 16px; max-height:300px; overflow-y:auto;">
+                            ${recentActs.map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                const dd = a.dueDate || a.due_date || '';
+                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <span style="font-size:13px;">${typeEmoji[a.type]||'📋'}</span>
+                                    <div style="flex:1; min-width:0;">
+                                        <div style="font-size:12px; font-weight:500;">${a.subject||'(no subject)'}</div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${dd}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
                         </div>
-                    `).join('') : '<p class="text-muted" style="font-size:13px;">No upcoming birthdays</p>'}
-                </div>
-                <div class="dash-section">
-                    <h3>Recently Viewed</h3>
-                    ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 8).map(r => `
-                        <div class="dash-task-item" style="cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <span class="obj-icon obj-icon-${r.type}" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
-                                <span style="font-weight:500;">${r.name}</span>
-                            </div>
-                            <span style="font-size:11px; color:var(--sf-text-weakest);">${r.type}</span>
+                    </div>
+
+                    <!-- Upcoming Birthdays -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">🎂 Upcoming Birthdays</div>
+                        <div style="padding:8px 16px;">
+                            ${birthdays.length ? birthdays.slice(0,8).map(c => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a>
+                                <span style="color:var(--sf-text-weak); font-size:12px;">${c.daysAway === 0 ? '🎉 Today!' : new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' (' + c.daysAway + 'd)'}</span>
+                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No upcoming birthdays</div>'}
                         </div>
-                    `).join('') : '<p class="text-muted" style="font-size:13px;">No recently viewed records</p>'}
-                </div>
-                <div class="dash-section">
-                    <h3>Recent Activities</h3>
-                    <div class="timeline">
-                        ${this.data.activities.slice(-10).reverse().map(a => {
-                            const con = this.data.contacts.find(c => c.id === a.contactId);
-                            const acct = this.data.accounts.find(ac => ac.id === a.accountId);
-                            return `<div class="timeline-item ${a.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
-                                <div class="timeline-date">${a.dueDate || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '')}</div>
-                                <div class="timeline-title">${a.subject}</div>
-                                <div class="timeline-note">${a.type} - ${a.status}${con ? ` · <a onclick="event.stopPropagation(); app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}${acct ? ` · ${acct.name}` : ''}</div>
-                            </div>`;
-                        }).join('')}
+                    </div>
+
+                    <!-- Recently Viewed -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recently Viewed</div>
+                        <div style="padding:8px 16px;">
+                            ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 8).map(r => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
+                                <span class="obj-icon obj-icon-${r.type}" style="width:18px; height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
+                                <span style="font-size:13px; font-weight:500; color:var(--sf-brand);">${r.name}</span>
+                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No recently viewed records</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Quick Stats -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Quick Stats</div>
+                        <div style="padding:12px 16px; font-size:13px;">
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>VIP Contacts</span><strong style="color:#166534;">${vipContacts.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Opportunities</span><strong>${activeDeals.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Won This Year</span><strong style="color:var(--sf-success);">${wonDeals.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Lost This Year</span><strong style="color:var(--sf-error);">${lostDeals.length}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Win Rate</span><strong>${winRate}%</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Total Activities</span><strong>${this.data.activities.length}</strong></div>
+                        </div>
                     </div>
                 </div>
             </div>
