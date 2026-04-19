@@ -1431,7 +1431,8 @@ const app = {
             <!-- Filter bar -->
             <div class="card" style="padding:10px 14px; margin-bottom:8px;">
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                    <input type="text" placeholder="Search name, city, state…" value="${f.text}" oninput="app.updateMapFilter('text', this.value)" style="flex:1; min-width:200px;">
+                    <input type="text" id="mapSearchInput" placeholder="Search name, city, state… (hit Enter)" value="${f.text}" onkeydown="if(event.key==='Enter'){app.updateMapFilter('text', this.value);}" style="flex:1; min-width:200px;">
+                    <button class="btn-small btn-primary" onclick="app.updateMapFilter('text', document.getElementById('mapSearchInput').value);">Search</button>
                     <select id="mapTypeSelect" onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
                         <option value="all" ${f.type==='all'?'selected':''}>All Types</option>
                         <option value="contact" ${f.type==='contact'?'selected':''}>Contacts Only</option>
@@ -1445,7 +1446,7 @@ const app = {
                         <option value="">All Tags</option>
                         ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; app.showAllFilteredPins(); this.closest('.card').querySelector('input').value='';">Clear</button>
+                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; document.getElementById('mapSearchInput').value=''; app.showAllFilteredPins();">Clear</button>
                     <button class="btn-small btn-primary" id="mapShowAllBtn" style="display:none;" onclick="app.showAllFilteredPins();">Show All Pins</button>
                     <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
                 </div>
@@ -1486,7 +1487,12 @@ const app = {
         if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) return false;
         if (f.text) {
             const t = f.text.toLowerCase();
-            const searchable = ((item.name || '') + ' ' + (item.address || '') + ' ' + (item.email || '')).toLowerCase();
+            const searchable = [
+                item.name, item.address, item.email,
+                item.mailing_city, item.mailing_state, item.mailing_country,
+                item.MailingCity, item.MailingState, item.MailingCountry,
+                item.industry, item.type
+            ].filter(Boolean).join(' ').toLowerCase();
             if (!searchable.includes(t)) return false;
         }
         return true;
