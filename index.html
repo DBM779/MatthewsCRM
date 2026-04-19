@@ -573,26 +573,70 @@ const app = {
 
     async init() {
         this.loadData();
-        this.fillAccountAddresses();
+        this.deduplicateData();
+        this.normalizeAddresses();
         this.setupEventListeners();
         this.renderDashboard();
         this.updateSelectOptions();
         setTimeout(() => this.bgGeocodeAll(), 3000);
     },
 
-    fillAccountAddresses() {
-        let filled = 0;
+    deduplicateData() {
+        const dedup = (arr) => {
+            const seen = new Set();
+            return arr.filter(item => {
+                if (!item.id || seen.has(item.id)) return false;
+                seen.add(item.id);
+                return true;
+            });
+        };
+        const before = {c: this.data.contacts.length, a: this.data.accounts.length, d: this.data.deals.length, act: this.data.activities.length};
+        this.data.contacts = dedup(this.data.contacts);
+        this.data.accounts = dedup(this.data.accounts);
+        this.data.deals = dedup(this.data.deals);
+        this.data.activities = dedup(this.data.activities);
+        this.data.emails = dedup(this.data.emails);
+        this.data.referrals = dedup(this.data.referrals);
+        const removed = (before.c - this.data.contacts.length) + (before.a - this.data.accounts.length) + (before.d - this.data.deals.length) + (before.act - this.data.activities.length);
+        if (removed > 0) {
+            this.persist();
+            console.log(`[init] Removed ${removed} duplicate records`);
+        }
+    },
+
+    normalizeAddresses() {
+        let fixed = 0;
+        // Fix contacts: build address from individual mailing fields if address is empty
+        for (const c of this.data.contacts) {
+            if (c.address) continue;
+            const parts = [
+                c.mailing_street || c.MailingStreet || c.mailingStreet || '',
+                [c.mailing_city || c.MailingCity || c.mailingCity || '',
+                 c.mailing_state || c.MailingState || c.mailingState || '',
+                 c.mailing_postal_code || c.MailingPostalCode || c.mailingPostalCode || c.mailing_zip || ''].filter(Boolean).join(' ')
+            ].filter(Boolean);
+            if (parts.length) { c.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
+        }
+        // Fix accounts: build address from billing fields if address is empty
+        for (const a of this.data.accounts) {
+            if (a.address) continue;
+            const parts = [
+                a.billing_street || a.BillingStreet || a.billingStreet || '',
+                [a.billing_city || a.BillingCity || a.billingCity || '',
+                 a.billing_state || a.BillingState || a.billingState || '',
+                 a.billing_postal_code || a.BillingPostalCode || a.billingPostalCode || a.billing_zip || ''].filter(Boolean).join(' ')
+            ].filter(Boolean);
+            if (parts.length) { a.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
+        }
+        // Fill remaining empty account addresses from their contacts
         for (const acct of this.data.accounts) {
             if (acct.address) continue;
             const contact = this.data.contacts.find(c => (c.accountId || c.account_id) === acct.id && c.address);
-            if (contact) {
-                acct.address = contact.address;
-                filled++;
-            }
+            if (contact) { acct.address = contact.address; fixed++; }
         }
-        if (filled > 0) {
+        if (fixed > 0) {
             this.persist();
-            console.log(`[init] Filled ${filled} account addresses from their contacts`);
+            console.log(`[init] Normalized ${fixed} addresses`);
         }
     },
 
@@ -1366,20 +1410,12 @@ const app = {
                     <div class="value">${allItems.length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','contact'); document.querySelector('#mapTypeSelect').value='contact';">
-                    <div class="label">Contacts</div>
-                    <div class="value">${contactsWithAddr.length}</div>
+                    <div class="label">Contacts on Map</div>
+                    <div class="value">${contactsWithAddr.length}<span style="font-size:12px; font-weight:400; color:var(--sf-text-weakest);"> / ${this.data.contacts.length}</span></div>
                 </div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','account'); document.querySelector('#mapTypeSelect').value='account';">
-                    <div class="label">Accounts</div>
-                    <div class="value">${accountsWithAddr.length}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="label">Contacts Missing Address</div>
-                    <div class="value" style="color:var(--sf-text-weakest);">${contactsNoAddr.length}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="label">Accounts Missing Address</div>
-                    <div class="value" style="color:var(--sf-text-weakest);">${accountsNoAddr.length}</div>
+                    <div class="label">Accounts on Map</div>
+                    <div class="value">${accountsWithAddr.length}<span style="font-size:12px; font-weight:400; color:var(--sf-text-weakest);"> / ${this.data.accounts.length}</span></div>
                 </div>
             </div>
             <!-- Filter bar -->
