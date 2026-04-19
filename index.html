@@ -1433,20 +1433,20 @@ const app = {
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                     <input type="text" id="mapSearchInput" placeholder="Search name, city, state… (hit Enter)" value="${f.text}" onkeydown="if(event.key==='Enter'){app.updateMapFilter('text', this.value);}" style="flex:1; min-width:200px;">
                     <button class="btn-small btn-primary" onclick="app.updateMapFilter('text', document.getElementById('mapSearchInput').value);">Search</button>
-                    <select id="mapTypeSelect" onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
+                    <select id="mapFilterType" onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
                         <option value="all" ${f.type==='all'?'selected':''}>All Types</option>
                         <option value="contact" ${f.type==='contact'?'selected':''}>Contacts Only</option>
                         <option value="account" ${f.type==='account'?'selected':''}>Accounts Only</option>
                     </select>
-                    <select onchange="app.updateMapFilter('tier', this.value)" style="min-width:90px;">
+                    <select id="mapFilterTier" onchange="app.updateMapFilter('tier', this.value)" style="min-width:90px;">
                         <option value="">All Tiers</option>
                         ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <select onchange="app.updateMapFilter('tag', this.value)" style="min-width:90px;">
+                    <select id="mapFilterTag" onchange="app.updateMapFilter('tag', this.value)" style="min-width:90px;">
                         <option value="">All Tags</option>
                         ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
                     </select>
-                    <button class="btn-small" onclick="app.mapFilters={type:'all',tier:'',tag:'',text:''}; document.getElementById('mapSearchInput').value=''; app.showAllFilteredPins();">Clear</button>
+                    <button class="btn-small" onclick="app.clearMapFilters();">Clear</button>
                     <button class="btn-small btn-primary" id="mapShowAllBtn" style="display:none;" onclick="app.showAllFilteredPins();">Show All Pins</button>
                     <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
                 </div>
@@ -1681,6 +1681,24 @@ const app = {
     },
 
     // Call this to go back to showing all filtered pins (e.g. after focusing one)
+    clearMapFilters() {
+        this.mapFilters = {type: 'all', tier: '', tag: '', text: ''};
+        this._focusedIdx = null;
+        const search = document.getElementById('mapSearchInput');
+        const type = document.getElementById('mapFilterType');
+        const tier = document.getElementById('mapFilterTier');
+        const tag = document.getElementById('mapFilterTag');
+        const showAllBtn = document.getElementById('mapShowAllBtn');
+        if (search) search.value = '';
+        if (type) type.value = 'all';
+        if (tier) tier.value = '';
+        if (tag) tag.value = '';
+        if (showAllBtn) showAllBtn.style.display = 'none';
+        document.querySelectorAll('.map-item').forEach(el => el.classList.remove('active'));
+        this.applyMapFilters();
+        this.mapInstance.setView([39.8283, -98.5795], 4);
+    },
+
     showAllFilteredPins() {
         this._focusedIdx = null;
         const showAllBtn = document.getElementById('mapShowAllBtn');
