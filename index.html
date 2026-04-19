@@ -610,6 +610,10 @@ const app = {
                 const cid = savedHash.split(':')[1];
                 this.currentRecord = this.data.contacts.find(c => c.id === cid);
                 if (this.currentRecord) this.currentView = 'contactDetail';
+            } else if (savedHash.startsWith('activityDetail:')) {
+                const actId = savedHash.split(':')[1];
+                this.currentRecord = this.data.activities.find(a => a.id === actId);
+                if (this.currentRecord) this.currentView = 'activityDetail';
             } else if (savedHash.startsWith('accountDetail:')) {
                 const aid = savedHash.split(':')[1];
                 this.currentRecord = this.data.accounts.find(a => a.id === aid);
@@ -1084,6 +1088,7 @@ const app = {
             case 'accountDetail': this.renderAccountDetail(); break;
             case 'deals': this.renderDeals(); break;
             case 'activities': this.renderActivities(); break;
+            case 'activityDetail': this.renderActivityDetail(); break;
             case 'map': this.renderMap(); break;
             case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
@@ -1754,35 +1759,55 @@ const app = {
     },
 
     _actFilter: {type: '', status: '', text: ''},
+
+    _fmtDate(dd) {
+        if (!dd) return '';
+        const d = new Date(dd + (dd.includes('T') ? '' : 'T12:00:00'));
+        if (isNaN(d)) return dd;
+        return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2);
+    },
+
     renderActivities() {
         const todayStr = new Date().toISOString().split('T')[0];
         const af = this._actFilter;
         const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
         const openCount = this.data.activities.filter(a => isOpen(a.status)).length;
-        const overdueCount = this.data.activities.filter(a => isOpen(a.status) && a.dueDate && a.dueDate < todayStr).length;
+        const overdueCount = this.data.activities.filter(a => isOpen(a.status) && (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr).length;
         const completedCount = this.data.activities.filter(a => a.status === 'Completed' || a.status === 'Closed').length;
         const typeIcons = {Call:'📞', Email:'📧', Meeting:'📅', Task:'☑️', 'Follow-up':'🔄', Note:'📝'};
 
         let filtered = [...this.data.activities];
         if (af.type) filtered = filtered.filter(a => a.type === af.type);
         if (af.status === 'open') filtered = filtered.filter(a => isOpen(a.status));
-        else if (af.status === 'overdue') filtered = filtered.filter(a => isOpen(a.status) && a.dueDate && a.dueDate < todayStr);
+        else if (af.status === 'overdue') filtered = filtered.filter(a => isOpen(a.status) && (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr);
         else if (af.status === 'completed') filtered = filtered.filter(a => a.status === 'Completed' || a.status === 'Closed');
-        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt)); }
+        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => {
+            const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+            return (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt));
+        }); }
 
-        filtered.sort((a, b) => {
-            if (isOpen(a.status) && !isOpen(b.status)) return -1;
-            if (!isOpen(a.status) && isOpen(b.status)) return 1;
-            return (a.dueDate || a.due_date || 'z').localeCompare(b.dueDate || b.due_date || 'z');
-        });
+        const sorted = this._applySortToList(filtered.map(a => {
+            const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+            const dd = a.dueDate || a.due_date || '';
+            return {...a, _contact: con ? con.name : '', _date: dd};
+        }), 'activities');
+
+        // Default sort: open first, then by date
+        if (!this._sortState.view || this._sortState.view !== 'activities' || !this._sortState.col) {
+            sorted.sort((a, b) => {
+                if (isOpen(a.status) && !isOpen(b.status)) return -1;
+                if (!isOpen(a.status) && isOpen(b.status)) return 1;
+                return (a._date || 'z').localeCompare(b._date || 'z');
+            });
+        }
 
         const html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h2 style="margin: 0;">Activities</h2>
+                <h2 style="margin: 0;">Events</h2>
                 <div style="display:flex; gap:6px;">
-                    <button onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">Log a Call</button>
-                    <button onclick="document.getElementById('activityType').value='Meeting'; app.openActivityForm();" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
-                    <button class="btn-primary" onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Task</button>
+                    <button onclick="app.quickActivityForm(null,'Call')" style="padding:2px 10px; font-size:12px; height:26px;">Log a Call</button>
+                    <button onclick="app.quickActivityForm(null,'Meeting')" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
+                    <button class="btn-primary" onclick="app.openActivityForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Activity</button>
                 </div>
             </div>
             <div class="stat-cards" style="margin-bottom:8px;">
@@ -1792,51 +1817,58 @@ const app = {
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${af.status==='open'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._actFilter.status='${af.status==='open'?'':'open'}'; app.renderActivities();">
                     <div class="label">Open</div>
-                    <div class="value" style="color:var(--sf-brand);">${openCount}</div>
+                    <div class="value" style="color:var(--sf-brand);">${this.fmt(openCount)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${af.status==='overdue'?'border-bottom:3px solid var(--sf-error);':''}" onclick="app._actFilter.status='${af.status==='overdue'?'':'overdue'}'; app.renderActivities();">
                     <div class="label">Overdue</div>
-                    <div class="value" style="color:var(--sf-error);">${overdueCount}</div>
+                    <div class="value" style="color:var(--sf-error);">${this.fmt(overdueCount)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${af.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._actFilter.status='${af.status==='completed'?'':'completed'}'; app.renderActivities();">
                     <div class="label">Completed</div>
-                    <div class="value" style="color:var(--sf-success);">${completedCount}</div>
+                    <div class="value" style="color:var(--sf-success);">${this.fmt(completedCount)}</div>
                 </div>
             </div>
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
-                <input type="text" placeholder="Search activities…" value="${af.text}" oninput="app._actFilter.text=this.value; app.renderActivities();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                <input type="text" placeholder="Search events…" value="${af.text}" oninput="app._actFilter.text=this.value; app.renderActivities();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
                 <select onchange="app._actFilter.type=this.value; app.renderActivities();" style="min-height:32px; padding:4px; font-size:12px;">
                     <option value="" ${!af.type?'selected':''}>All Types</option>
                     ${['Call','Email','Meeting','Task','Follow-up','Note'].map(t => `<option value="${t}" ${af.type===t?'selected':''}>${typeIcons[t]||''} ${t}</option>`).join('')}
                 </select>
                 ${af.text||af.type||af.status ? `<button class="btn-small" onclick="app._actFilter={type:'',status:'',text:''}; app.renderActivities();">Clear</button>` : ''}
-                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(filtered.length)} results</span>
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card">
                 <div class="table-container">
                     <table class="compact-table">
                         <thead>
-                            <tr><th style="width:24px;"></th><th>Subject</th><th>Type</th><th>Contact</th><th>Due Date</th><th>Priority</th><th>Status</th><th style="width:30px;"></th></tr>
+                            <tr>
+                                <th style="width:24px;"></th>
+                                <th onclick="app.sortBy('activities','subject')" style="cursor:pointer;">Subject${this._sortIndicator('activities','subject')}</th>
+                                <th onclick="app.sortBy('activities','type')" style="cursor:pointer;">Type${this._sortIndicator('activities','type')}</th>
+                                <th onclick="app.sortBy('activities','_contact')" style="cursor:pointer;">Contact${this._sortIndicator('activities','_contact')}</th>
+                                <th onclick="app.sortBy('activities','_date')" style="cursor:pointer;">Date${this._sortIndicator('activities','_date')}</th>
+                                <th onclick="app.sortBy('activities','priority')" style="cursor:pointer;">Priority${this._sortIndicator('activities','priority')}</th>
+                                <th onclick="app.sortBy('activities','status')" style="cursor:pointer;">Status${this._sortIndicator('activities','status')}</th>
+                                <th style="width:30px;"></th>
+                            </tr>
                         </thead>
                         <tbody>
-                            ${filtered.map(a => {
-                                const dd = a.dueDate || a.due_date || '';
+                            ${sorted.map(a => {
                                 const open = isOpen(a.status);
-                                const isOverdue = open && dd && dd < todayStr;
-                                const isToday = open && dd === todayStr;
-                                const con = this.data.contacts.find(c => c.id === (a.contactId || a.contact_id));
+                                const isOverdue = open && a._date && a._date < todayStr;
+                                const isToday = open && a._date === todayStr;
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
                                 const pri = a.priority || 'Normal';
                                 const priColor = pri === 'High' ? 'var(--sf-error)' : pri === 'Low' ? 'var(--sf-text-weakest)' : '';
-                                const dateDisplay = dd ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2))(new Date(dd+'T12:00:00')) : '';
                                 return `<tr style="${isOverdue?'background:#fef2f2;':isToday?'background:#fffbeb;':''}">
                                     <td style="text-align:center;">${open ? `<input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px;height:14px;cursor:pointer;" title="Mark complete">` : `<span style="color:var(--sf-success);">✓</span>`}</td>
-                                    <td><a onclick="app.editActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
+                                    <td><a onclick="app.viewActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.subject||'(no subject)'}</a>${isOverdue?'<span class="task-badge task-badge-overdue">OVERDUE</span>':''}${isToday?'<span class="task-badge task-badge-today">TODAY</span>':''}</td>
                                     <td>${typeIcons[a.type]||''} ${a.type}</td>
                                     <td>${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : ''}</td>
-                                    <td>${dateDisplay}</td>
+                                    <td>${this._fmtDate(a._date)}</td>
                                     <td style="${priColor?'color:'+priColor+';font-weight:600;':''}">${pri}</td>
                                     <td>${a.status||''}</td>
-                                    <td style="position:relative;"><button class="btn-small" onclick="app.toggleRowMenu('act_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_act_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
+                                    <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('act_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_act_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
                                 </tr>`;
                             }).join('')}
                         </tbody>
@@ -1845,6 +1877,84 @@ const app = {
             </div>
         `;
         document.getElementById('content').innerHTML = html;
+    },
+
+    viewActivity(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        this.currentRecord = a;
+        this.currentView = 'activityDetail';
+        location.hash = 'activityDetail:' + id;
+        this.render();
+    },
+
+    renderActivityDetail() {
+        const a = this.currentRecord;
+        if (!a) { this.currentView = 'activities'; this.render(); return; }
+        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+        const acct = this.data.accounts.find(ac => ac.id === (a.accountId||a.account_id));
+        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+        const dd = a.dueDate || a.due_date || '';
+        const typeIcons = {Call:'📞', Email:'📧', Meeting:'📅', Task:'☑️', 'Follow-up':'🔄', Note:'📝'};
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        const sfField = (label, value) => `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
+
+        const html = `
+            <div class="detail-back" onclick="app.currentView='activities'; app.render();">&#8592; Back to Events</div>
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div style="width:40px; height:40px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; background:var(--sf-bg);">${typeIcons[a.type]||'📋'}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">${a.type || 'Activity'}</div>
+                        <div class="sf-hl-title">${a.subject || '(no subject)'}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button onclick="app.editActivity('${a.id}')">Edit</button>
+                        ${isOpen(a.status) ? `<button onclick="app.completeActivity('${a.id}')">Mark Complete</button>` : ''}
+                        <button onclick="if(confirm('Delete this activity?')){app.deleteActivity('${a.id}')}" style="color:var(--sf-error);">Delete</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${a.status || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Due Date</div><div class="sf-hl-field-value">${this._fmtDate(dd)}</div></div>
+                    <div><div class="sf-hl-field-label">Priority</div><div class="sf-hl-field-value" style="${a.priority==='High'?'color:var(--sf-error);font-weight:600;':''}">${a.priority || 'Normal'}</div></div>
+                    <div><div class="sf-hl-field-label">Contact</div><div class="sf-hl-field-value">${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : '—'}</div></div>
+                </div>
+            </div>
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:20px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Activity Details</h3>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                    ${sfField('Subject', a.subject)}
+                    ${sfField('Type', (typeIcons[a.type]||'') + ' ' + (a.type||''))}
+                    ${sfField('Status', a.status)}
+                    ${sfField('Priority', a.priority || 'Normal')}
+                    ${sfField('Due Date', this._fmtDate(dd))}
+                    ${sfField('Date/Time', a.dateTime ? new Date(a.dateTime).toLocaleString() : null)}
+                    ${sfField('Contact', con ? `<a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : null)}
+                    ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
+                    ${sfField('Opportunity', deal ? deal.name : null)}
+                </div>
+                ${a.type === 'Call' ? `
+                    <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Call Details</h3>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                        ${sfField('Direction', a.callDirection)}
+                        ${sfField('Duration', a.callDuration ? a.callDuration + ' min' : null)}
+                        ${sfField('Result', a.callResult)}
+                    </div>
+                ` : ''}
+                ${a.type === 'Meeting' ? `
+                    <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Meeting Details</h3>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                        ${sfField('Location', a.location)}
+                        ${sfField('End Date/Time', a.endDateTime ? new Date(a.endDateTime).toLocaleString() : null)}
+                    </div>
+                ` : ''}
+                <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
+                <div style="font-size:13px; white-space:pre-wrap; color:var(--sf-text);">${a.notes || '—'}</div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (a.subject || '(no subject)');
     },
 
     _geocodeCache: null,
