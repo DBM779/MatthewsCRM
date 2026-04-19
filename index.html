@@ -606,7 +606,7 @@ const app = {
 
     normalizeAddresses() {
         let fixed = 0;
-        // Fix contacts: build address from individual mailing fields if address is empty
+        // Contacts: if address is empty, build from mailing fields
         for (const c of this.data.contacts) {
             if (c.address) continue;
             const parts = [
@@ -617,26 +617,28 @@ const app = {
             ].filter(Boolean);
             if (parts.length) { c.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
         }
-        // Fix accounts: build address from billing fields if address is empty
+        // Accounts: use whatever address field exists, then fall back to contact
         for (const a of this.data.accounts) {
-            if (a.address) continue;
-            const parts = [
-                a.billing_street || a.BillingStreet || a.billingStreet || '',
-                [a.billing_city || a.BillingCity || a.billingCity || '',
-                 a.billing_state || a.BillingState || a.billingState || '',
-                 a.billing_postal_code || a.BillingPostalCode || a.billingPostalCode || a.billing_zip || ''].filter(Boolean).join(' ')
-            ].filter(Boolean);
-            if (parts.length) { a.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
-        }
-        // Fill remaining empty account addresses from their contacts
-        for (const acct of this.data.accounts) {
-            if (acct.address) continue;
-            const contact = this.data.contacts.find(c => (c.accountId || c.account_id) === acct.id && c.address);
-            if (contact) { acct.address = contact.address; fixed++; }
+            if (!a.address) {
+                // Try any address-like field on the account itself
+                const any = a.billing_street || a.BillingStreet || a.billingStreet
+                    || a.shipping_street || a.ShippingStreet || a.shippingStreet || '';
+                const anyCity = [
+                    a.billing_city || a.BillingCity || a.billingCity || a.shipping_city || a.ShippingCity || '',
+                    a.billing_state || a.BillingState || a.billingState || a.shipping_state || a.ShippingState || '',
+                    a.billing_postal_code || a.BillingPostalCode || a.billingPostalCode || a.shipping_postal_code || ''
+                ].filter(Boolean).join(' ');
+                const parts = [any, anyCity].filter(Boolean);
+                if (parts.length) { a.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
+            }
+            // Still no address? Copy from the account's first contact with an address
+            if (!a.address) {
+                const contact = this.data.contacts.find(c => (c.accountId || c.account_id) === a.id && c.address);
+                if (contact) { a.address = contact.address; fixed++; }
+            }
         }
         if (fixed > 0) {
             this.persist();
-            console.log(`[init] Normalized ${fixed} addresses`);
         }
     },
 
