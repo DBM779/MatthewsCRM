@@ -3087,12 +3087,12 @@ const app = {
                     </div>
                 </div>
                 <div class="sf-hl-fields">
-                    <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
-                    <div><div class="sf-hl-field-label">Account Name</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">PC#</div><div class="sf-hl-field-value">${c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">WC#</div><div class="sf-hl-field-value">${c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">PE@</div><div class="sf-hl-field-value">${c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">WE@</div><div class="sf-hl-field-value">${c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
                 </div>
             </div>
 
