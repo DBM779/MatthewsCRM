@@ -2204,7 +2204,10 @@ const app = {
                         <div class="card-header">
                             <span class="obj-icon obj-icon-contact" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">C</span>
                             Contacts <span class="related-count">(${relatedContacts.length})</span>
-                            <button class="btn-small" style="margin-left:auto;" onclick="app.openContactForm();">Add</button>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search contacts…" oninput="app.searchRelatedContact(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtContactResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:200px;"></div>
+                            </div>
                         </div>
                         <div class="card-body-flush">
                         ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>Title</th><th>PC#</th><th>PE@</th></tr></thead><tbody>
@@ -2223,7 +2226,10 @@ const app = {
                         <div class="card-header">
                             <span class="obj-icon obj-icon-account" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
                             Accounts <span class="related-count">(${relatedAccounts.length})</span>
-                            <button class="btn-small" style="margin-left:auto;" onclick="app.openAccountForm();">Add</button>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search accounts…" oninput="app.searchRelatedAccount(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtAccountResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:200px;"></div>
+                            </div>
                         </div>
                         <div class="card-body-flush">
                         ${relatedAccounts.length ? `<table><thead><tr><th>Name</th><th>Industry</th><th>Type</th></tr></thead><tbody>
@@ -2295,6 +2301,48 @@ const app = {
         if (!evt) return;
         evt.notes = value || null;
         this.persist();
+    },
+
+    searchRelatedContact(input, eventId) {
+        const dd = document.getElementById('evtContactResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const matches = this.data.contacts.filter(c => (c.name||'').toLowerCase().includes(term)).slice(0, 8);
+        dd.innerHTML = matches.map(c => `<div onclick="app.linkContactToEvent('${eventId}','${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${c.name}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkContactToEvent(eventId, contactId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        if (!evt.contactId) { evt.contactId = contactId; }
+        else {
+            const existing = evt.attendees || '';
+            if (!existing.toLowerCase().includes(contact.name.toLowerCase())) {
+                evt.attendees = existing ? existing + ', ' + contact.name : contact.name;
+            }
+        }
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    searchRelatedAccount(input, eventId) {
+        const dd = document.getElementById('evtAccountResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const matches = this.data.accounts.filter(a => (a.name||'').toLowerCase().includes(term)).slice(0, 8);
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkAccountToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${a.name}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkAccountToEvent(eventId, accountId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt.accountId = accountId;
+        this.persist();
+        this.renderEventDetail();
     },
 
     addEventFile(eventId) {
