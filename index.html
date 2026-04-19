@@ -2114,6 +2114,10 @@ const app = {
         if (!e) { this.currentView = 'activities'; this.render(); return; }
         const con = this.data.contacts.find(c => c.id === e.contactId);
         const acct = this.data.accounts.find(a => a.id === e.accountId);
+        const relatedContacts = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
+        const relatedAccounts = acct ? [acct] : [];
+        const actTypeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+        const relatedActivities = this.data.activities.filter(a => relatedContacts.some(c => c.id === (a.contactId||a.contact_id)) || (acct && (a.accountId||a.account_id) === acct.id));
         const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
         const sfField = (label, value, fieldKey, type) => {
             if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
@@ -2198,6 +2202,41 @@ const app = {
                             </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
                             </div>
                         </div>
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-account" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
+                                Accounts <span class="related-count">(${relatedAccounts.length})</span>
+                            </div>
+                            <div class="card-body-flush">
+                            ${relatedAccounts.length ? `<table><thead><tr><th>Name</th><th>Industry</th><th>Type</th></tr></thead><tbody>
+                                ${relatedAccounts.map(a => `<tr style="cursor:pointer;" onclick="app.viewAccount('${a.id}')">
+                                    <td style="color:var(--sf-brand); font-weight:600;">${a.name}</td>
+                                    <td>${a.industry||''}</td>
+                                    <td>${a.type||''}</td>
+                                </tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related accounts.</div>'}
+                            </div>
+                        </div>
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-activity" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
+                                Activities <span class="related-count">(${relatedActivities.length})</span>
+                            </div>
+                            <div class="card-body-flush">
+                            ${relatedActivities.length ? `<table><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Date</th><th>Status</th></tr></thead><tbody>
+                                ${relatedActivities.slice(0,10).map(a => {
+                                    const aCon = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                    return `<tr style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                                        <td>${actTypeIcons[a.type]||''} ${a.type||''}</td>
+                                        <td style="color:var(--sf-brand); font-weight:600;">${a.subject||''}</td>
+                                        <td>${aCon ? aCon.name : ''}</td>
+                                        <td>${this._fmtDate(a.dueDate||a.due_date||'')}</td>
+                                        <td>${a.status||''}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related activities.</div>'}
+                            </div>
+                        </div>
                         <div class="related-list card">
                             <div class="card-header">
                                 <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
@@ -2208,7 +2247,7 @@ const app = {
                             ${(e.files||[]).length ? (e.files||[]).map((f,i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
                                 <a href="${f.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">📄 ${f.name}</a>
                                 <button class="btn-small" onclick="app.removeEventFile('${e.id}',${i})" style="padding:1px 6px; font-size:11px; color:var(--sf-error);">✕</button>
-                            </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files. Click Add File to link a OneDrive document.</div>'}
+                            </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files.</div>'}
                             </div>
                         </div>
                     </div>
