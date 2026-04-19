@@ -1160,11 +1160,10 @@ const app = {
             <h2>Home</h2>
             ${backupBanner}
             <!-- KPI Cards -->
-            <div class="stat-cards" style="grid-template-columns:repeat(6, 1fr);">
+            <div class="stat-cards" style="grid-template-columns:repeat(4, 1fr);">
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.data.contacts.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.data.accounts.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Won</div><div class="value" style="color:var(--sf-success);">$${wonVal.toFixed(0)}M</div></div>
                 <div class="stat-card"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${overdue.length}</div></div>
             </div>
