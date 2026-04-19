@@ -597,10 +597,23 @@ const app = {
         this.data.activities = dedup(this.data.activities);
         this.data.emails = dedup(this.data.emails);
         this.data.referrals = dedup(this.data.referrals);
+        // Remove non-Salesforce seed/junk records (SF IDs are 15-18 char alphanumeric)
+        const isSfId = (id) => id && /^[a-zA-Z0-9]{15,18}$/.test(id);
+        if (this.data.accounts.some(a => isSfId(a.id)) && this.data.accounts.some(a => !isSfId(a.id))) {
+            this.data.accounts = this.data.accounts.filter(a => isSfId(a.id));
+        }
+        if (this.data.contacts.some(c => isSfId(c.id)) && this.data.contacts.some(c => !isSfId(c.id))) {
+            this.data.contacts = this.data.contacts.filter(c => isSfId(c.id));
+        }
+        if (this.data.deals.some(d => isSfId(d.id)) && this.data.deals.some(d => !isSfId(d.id))) {
+            this.data.deals = this.data.deals.filter(d => isSfId(d.id));
+        }
+        if (this.data.activities.some(a => isSfId(a.id)) && this.data.activities.some(a => !isSfId(a.id))) {
+            this.data.activities = this.data.activities.filter(a => isSfId(a.id));
+        }
         const removed = (before.c - this.data.contacts.length) + (before.a - this.data.accounts.length) + (before.d - this.data.deals.length) + (before.act - this.data.activities.length);
         if (removed > 0) {
             this.persist();
-            console.log(`[init] Removed ${removed} duplicate records`);
         }
     },
 
