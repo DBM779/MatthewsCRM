@@ -645,6 +645,9 @@ const app = {
             if (c.department) { delete c.department; migrated = true; }
         }
         if (migrated) this.persist();
+        // Clean stale columns from saved preferences
+        const validCols = this._allContactCols.map(c => c.key);
+        try { const saved = JSON.parse(localStorage.getItem('matthewsCRM_contactCols')); if (saved) { const cleaned = saved.filter(k => validCols.includes(k)); if (cleaned.length !== saved.length) { this._contactCols = cleaned; localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cleaned)); } } } catch {}
         try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
         try { const ss = JSON.parse(localStorage.getItem('matthewsCRM_sortState')); if (ss) this._sortState = ss; } catch {}
         this.setupEventListeners();
@@ -1724,7 +1727,7 @@ const app = {
         if (f.text) {
             const lt = f.text.toLowerCase();
             filtered = filtered.filter(c => {
-                const searchable = [c.name, c.email, c.mobile, c.phone, c.title, c.address, c.department, c.tags, c.notes, c.lead_source].filter(Boolean).join(' ').toLowerCase();
+                const searchable = [c.name, c.pe_email, c.we_email, c.mobile, c.phone, c.title, c.address, c.tags, c.notes, c.lead_source, c.obligation].filter(Boolean).join(' ').toLowerCase();
                 return searchable.includes(lt);
             });
         }
@@ -3293,7 +3296,7 @@ const app = {
     },
 
     _clearContactForm() {
-        ['contactId','contactName','contactPeEmail','contactWeEmail','contactEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactDepartment','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
+        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
@@ -3315,7 +3318,6 @@ const app = {
         document.getElementById('contactName').value = c.name || '';
         document.getElementById('contactPeEmail').value = c.pe_email || '';
         document.getElementById('contactWeEmail').value = c.we_email || '';
-        document.getElementById('contactEmail').value = c.email || '';
         document.getElementById('contactPcNumber').value = c.pc_number || '';
         document.getElementById('contactWcNumber').value = c.wc_number || '';
         document.getElementById('contactMobile').value = c.mobile || '';
