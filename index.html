@@ -2159,10 +2159,10 @@ const app = {
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Event Information</h3>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
                             ${sfField('Event Name', e.name, 'name')}
-                            ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''))}
-                            ${sfField('Status', e.status)}
-                            ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null)}
-                            ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null)}
+                            ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''), 'type', 'select-event-type')}
+                            ${sfField('Status', e.status, 'status', 'select-event-status')}
+                            ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null, 'start', 'datetime-local')}
+                            ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null, 'end', 'datetime-local')}
                             ${sfField('Address', e.address, 'address')}
                         </div>
 
@@ -2215,9 +2215,9 @@ const app = {
                         ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Instagram</th><th>Account</th><th>Evnt Stts</th></tr></thead><tbody>
                             ${relatedContacts.map(c => { const cAcct = this.data.accounts.find(a => a.id === (c.accountId||c.account_id)); const evtStatus = (e.contactStatuses||{})[c.id] || 'Invited'; return `<tr>
                                 <td><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a></td>
-                                <td>${c.pc_number||c.mobile||''}</td>
-                                <td>${c.pe_email||c.email||''}</td>
-                                <td>${c.instagram||''}</td>
+                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pc_number','tel',this)">${c.pc_number||c.mobile||''}</td>
+                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pe_email','email',this)">${c.pe_email||c.email||''}</td>
+                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','instagram','text',this)">${c.instagram||''}</td>
                                 <td>${cAcct ? cAcct.name : ''}</td>
                                 <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>Attending</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>Attended</option></select></td>
                             </tr>`; }).join('')}
@@ -2302,6 +2302,16 @@ const app = {
         const evt = this.data.events.find(x => x.id === eventId);
         if (!evt) return;
         const currentVal = evt[field] || '';
+        if (type === 'select-event-type') {
+            const opts = ['Meeting','Conference','Lunch','Dinner','Call','Presentation','Networking','Other'];
+            el.innerHTML = `<select onchange="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">${opts.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}</select>`;
+            const sel = el.querySelector('select'); sel.focus(); sel.click(); return;
+        }
+        if (type === 'select-event-status') {
+            const opts = ['Scheduled','Completed','Cancelled'];
+            el.innerHTML = `<select onchange="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">${opts.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}</select>`;
+            const sel = el.querySelector('select'); sel.focus(); sel.click(); return;
+        }
         if (type === 'textarea') {
             el.innerHTML = `<textarea onblur="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
             el.querySelector('textarea').focus();
@@ -2325,6 +2335,24 @@ const app = {
         if (!evt) return;
         evt.notes = value || null;
         this.persist();
+    },
+
+    inlineEditContactFromEvent(contactId, field, type, el) {
+        if (el.querySelector('input')) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const currentVal = contact[field] || '';
+        el.innerHTML = `<input type="${type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveContactFromEvent('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter')this.blur();" style="width:100%; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
+        const input = el.querySelector('input');
+        input.focus(); input.select();
+    },
+
+    saveContactFromEvent(contactId, field, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        contact[field] = value || null;
+        this.persist();
+        this.renderEventDetail();
     },
 
     setEventContactStatus(eventId, contactId, status) {
