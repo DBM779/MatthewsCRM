@@ -388,12 +388,14 @@
                 <input type="hidden" id="contactId">
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
                 <div class="form-group"><label>Name *</label><input type="text" id="contactName" required></div>
+                <div class="form-group"><label>Obligation</label><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                    ${['Colleague','Client','Service Provider','Family','Friend'].map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="${o}" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+                </div></div>
                 <div class="form-group"><label>Account</label><select id="contactCompany"></select></div>
+                <div class="form-group"><label>Birthdate</label><input type="date" id="contactBirthdate"></div>
                 <div class="form-group"><label>Title</label><input type="text" id="contactTitle"></div>
-                <div class="form-group"><label>Department</label><input type="text" id="contactDepartment"></div>
                 <div class="form-group"><label>PE@ (Personal Email)</label><input type="email" id="contactPeEmail"></div>
                 <div class="form-group"><label>WE@ (Work Email)</label><input type="email" id="contactWeEmail"></div>
-                <div class="form-group"><label>Email</label><input type="email" id="contactEmail"></div>
                 <div class="form-group"><label>Lead Source</label><select id="contactLeadSource"><option value="">--None--</option><option value="Web">Web</option><option value="Phone">Phone Inquiry</option><option value="Referral">Referral</option><option value="Partner">Partner</option><option value="Event">Event</option><option value="Cold Call">Cold Call</option><option value="Other">Other</option></select></div>
                 <div class="form-group"><label>PC# (Personal Cell)</label><input type="tel" id="contactPcNumber"></div>
                 <div class="form-group"><label>WC# (Work Cell)</label><input type="tel" id="contactWcNumber"></div>
@@ -402,14 +404,10 @@
                 <div class="form-group"><label>Home Phone</label><input type="tel" id="contactHomePhone"></div>
                 <div class="form-group"><label>Other Phone</label><input type="tel" id="contactOtherPhone"></div>
                 <div class="form-group"><label>Fax</label><input type="tel" id="contactFax"></div>
-                <div class="form-group"><label>Birthdate</label><input type="date" id="contactBirthdate"></div>
                 <div class="form-group"><label>Assistant Name</label><input type="text" id="contactAssistantName"></div>
                 <div class="form-group"><label>Assistant Phone</label><input type="tel" id="contactAssistantPhone"></div>
                 <div class="form-group"><label>Tier</label><select id="contactTier"><option value="1-VIP">1-VIP</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
                 <div class="form-group"><label>VIP</label><select id="contactVip"><option value="">No</option><option value="true">Yes</option></select></div>
-                <div class="form-group"><label>Obligation (multi-select)</label><div id="contactObligationGroup" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
-                    ${['Colleague','Client','Service Provider','Family','Friend'].map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="${o}" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
-                </div></div>
                 </div>
                 <div class="form-group"><label>Mailing Address</label><input type="text" id="contactAddress"></div>
                 <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
@@ -639,6 +637,14 @@ const app = {
 
     async init() {
         this.loadData();
+        // Migrate email → we_email
+        let migrated = false;
+        for (const c of this.data.contacts) {
+            if (c.email && !c.we_email) { c.we_email = c.email; migrated = true; }
+            if (c.email) { delete c.email; migrated = true; }
+            if (c.department) { delete c.department; migrated = true; }
+        }
+        if (migrated) this.persist();
         try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
         try { const ss = JSON.parse(localStorage.getItem('matthewsCRM_sortState')); if (ss) this._sortState = ss; } catch {}
         this.setupEventListeners();
@@ -828,7 +834,6 @@ const app = {
             name: document.getElementById('contactName').value,
             pe_email: document.getElementById('contactPeEmail').value || null,
             we_email: document.getElementById('contactWeEmail').value || null,
-            email: document.getElementById('contactEmail').value,
             pc_number: document.getElementById('contactPcNumber').value || null,
             wc_number: document.getElementById('contactWcNumber').value || null,
             mobile: document.getElementById('contactMobile').value,
@@ -844,7 +849,6 @@ const app = {
             la: document.getElementById('contactLA').value || null,
             birthdate: document.getElementById('contactBirthdate').value || null,
             title: document.getElementById('contactTitle').value || null,
-            department: document.getElementById('contactDepartment').value || null,
             lead_source: document.getElementById('contactLeadSource').value || null,
             assistant_name: document.getElementById('contactAssistantName').value || null,
             assistant_phone: document.getElementById('contactAssistantPhone').value || null,
@@ -1402,14 +1406,12 @@ const app = {
         {key:'name', label:'Name', editable:true, type:'text'},
         {key:'pe_email', label:'PE@', editable:true, type:'email'},
         {key:'we_email', label:'WE@', editable:true, type:'email'},
-        {key:'email', label:'Email', editable:true, type:'email'},
         {key:'pc_number', label:'PC#', editable:true, type:'tel'},
         {key:'wc_number', label:'WC#', editable:true, type:'tel'},
         {key:'mobile', label:'Mobile', editable:true, type:'tel'},
         {key:'phone', label:'Phone', editable:true, type:'tel'},
         {key:'_company', label:'Company', editable:false},
         {key:'title', label:'Title', editable:true, type:'text'},
-        {key:'department', label:'Department', editable:true, type:'text'},
         {key:'tier', label:'Tier', editable:true, type:'select', options:['1-VIP','2','3','4','5']},
         {key:'tags', label:'Tags', editable:true, type:'text'},
         {key:'address', label:'Address', editable:true, type:'text'},
@@ -1542,7 +1544,6 @@ const app = {
         const fields = type === 'contacts' ? [
             {key:'tier', label:'Tier', type:'select', options:['1-VIP','2','3','4','5']},
             {key:'lead_source', label:'Lead Source', type:'text'},
-            {key:'department', label:'Department', type:'text'},
             {key:'tags', label:'Tags', type:'text'},
             {key:'address', label:'Address', type:'text'},
         ] : type === 'accounts' ? [
@@ -3331,7 +3332,6 @@ const app = {
         document.getElementById('contactLA').value = c.la || c.last_activity_display || '';
         document.getElementById('contactBirthdate').value = c.birthdate || '';
         document.getElementById('contactTitle').value = c.title || '';
-        document.getElementById('contactDepartment').value = c.department || '';
         document.getElementById('contactLeadSource').value = c.lead_source || '';
         document.getElementById('contactAssistantName').value = c.assistant_name || '';
         document.getElementById('contactAssistantPhone').value = c.assistant_phone || '';
@@ -3473,11 +3473,11 @@ const app = {
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
                             ${sfField('Name', c.name, 'name')}
                             ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
+                            ${sfField('Obligation', c.obligation ? c.obligation.split(',').map(o => o.trim()).filter(Boolean).map(o => `<span class="tag-pill">${o}</span>`).join(' ') : null, 'obligation', 'multi-obligation')}
+                            ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null, 'birthdate', 'date')}
                             ${sfField('Title', c.title, 'title')}
-                            ${sfField('Department', c.department, 'department')}
                             ${sfField('PE@', c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : null, 'pe_email', 'email')}
                             ${sfField('WE@', c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : null, 'we_email', 'email')}
-                            ${sfField('Email', c.email ? `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>` : null, 'email', 'email')}
                             ${sfField('Lead Source', c.lead_source, 'lead_source')}
                             ${sfField('PC#', c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : null, 'pc_number', 'tel')}
                             ${sfField('WC#', c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : null, 'wc_number', 'tel')}
@@ -3485,9 +3485,7 @@ const app = {
                             ${sfField('Phone', c.phone ? `<a href="tel:${c.phone}" style="color:var(--sf-brand);">${c.phone}</a>` : null, 'phone', 'tel')}
                             ${sfField('Home Phone', c.home_phone, 'home_phone', 'tel')}
                             ${sfField('Other Phone', c.other_phone, 'other_phone', 'tel')}
-                            ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null, 'birthdate', 'date')}
                             ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null, 'tier', 'select-tier')}
-                            ${sfField('Obligation', c.obligation ? c.obligation.split(',').map(o => o.trim()).filter(Boolean).map(o => `<span class="tag-pill">${o}</span>`).join(' ') : null, 'obligation', 'multi-obligation')}
                         </div>
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address</h3>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
