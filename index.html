@@ -2212,13 +2212,14 @@ const app = {
                             </div>
                         </div>
                         <div class="card-body-flush">
-                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Instagram</th><th>Account</th></tr></thead><tbody>
-                            ${relatedContacts.map(c => { const cAcct = this.data.accounts.find(a => a.id === (c.accountId||c.account_id)); return `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')">
-                                <td style="color:var(--sf-brand); font-weight:600;">${c.name}</td>
+                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Instagram</th><th>Account</th><th>Evnt Stts</th></tr></thead><tbody>
+                            ${relatedContacts.map(c => { const cAcct = this.data.accounts.find(a => a.id === (c.accountId||c.account_id)); const evtStatus = (e.contactStatuses||{})[c.id] || 'Invited'; return `<tr>
+                                <td><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a></td>
                                 <td>${c.pc_number||c.mobile||''}</td>
                                 <td>${c.pe_email||c.email||''}</td>
                                 <td>${c.instagram||''}</td>
                                 <td>${cAcct ? cAcct.name : ''}</td>
+                                <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>Attending</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>Attended</option></select></td>
                             </tr>`; }).join('')}
                         </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
                         </div>
@@ -2323,6 +2324,14 @@ const app = {
         const evt = this.data.events.find(x => x.id === eventId);
         if (!evt) return;
         evt.notes = value || null;
+        this.persist();
+    },
+
+    setEventContactStatus(eventId, contactId, status) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.contactStatuses) evt.contactStatuses = {};
+        evt.contactStatuses[contactId] = status;
         this.persist();
     },
 
