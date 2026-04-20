@@ -1736,6 +1736,7 @@ const app = {
         let filtered = this.data.contacts;
         if (f.tier === '3-5') filtered = filtered.filter(c => c.tier === '3' || c.tier === '4' || c.tier === '5');
         else if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
+        if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
         if (f.text) {
             const lt = f.text.toLowerCase();
             filtered = filtered.filter(c => {
@@ -1762,22 +1763,42 @@ const app = {
                     <button class="btn-primary" onclick="app.openContactForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Contact</button>
                 </div>
             </div>
-            <div class="stat-cards" style="margin-bottom:8px;">
-                <div class="stat-card" style="cursor:pointer; ${!f.tier?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.updateContactFilter('tier','')">
-                    <div class="label">Total Contacts</div>
-                    <div class="value">${this.fmt(this.data.contacts.length)}</div>
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(9, 1fr);">
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','')">
+                    <div class="label" style="font-size:9px;">Total</div>
+                    <div class="value" style="font-size:18px;">${this.fmt(this.data.contacts.length)}</div>
                 </div>
-                <div class="stat-card" style="cursor:pointer; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
-                    <div class="label">1-VIP</div>
-                    <div class="value" style="color:#166534;">${this.data.contacts.filter(c=>c.tier==='1-VIP').length}</div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
+                    <div class="label" style="font-size:9px;">1-VIP</div>
+                    <div class="value" style="font-size:18px; color:#166534;">${this.data.contacts.filter(c=>c.tier==='1-VIP').length}</div>
                 </div>
-                <div class="stat-card" style="cursor:pointer; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
-                    <div class="label">Tier 2</div>
-                    <div class="value" style="color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
+                    <div class="label" style="font-size:9px;">Tier 2</div>
+                    <div class="value" style="font-size:18px; color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
                 </div>
-                <div class="stat-card" style="cursor:pointer; ${f.tier==='3-5'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app.updateContactFilter('tier','${f.tier==='3-5'?'':'3-5'}')">
-                    <div class="label">Tier 3-5</div>
-                    <div class="value" style="color:var(--sf-text-weakest);">${this.data.contacts.filter(c=>c.tier==='3'||c.tier==='4'||c.tier==='5').length}</div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='3-5'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='3-5'?'':'3-5'}')">
+                    <div class="label" style="font-size:9px;">Tier 3-5</div>
+                    <div class="value" style="font-size:18px; color:var(--sf-text-weakest);">${this.data.contacts.filter(c=>c.tier==='3'||c.tier==='4'||c.tier==='5').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Colleague'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Colleague'?'':'Colleague'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Colleague</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Colleague')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Client'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Client'?'':'Client'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Client</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Client')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Service Provider'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Service Provider'?'':'Service Provider'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Service</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Service Provider')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Family'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Family'?'':'Family'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Family</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Family')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Friend'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Friend'?'':'Friend'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Friend</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Friend')).length}</div>
                 </div>
             </div>
             ${this._showColPicker ? `<div class="card" style="padding:10px 14px; margin-bottom:8px;">
