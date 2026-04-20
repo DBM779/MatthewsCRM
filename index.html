@@ -1636,6 +1636,21 @@ const app = {
             td.innerHTML = `<div style="display:flex; gap:4px; flex-wrap:wrap; padding:2px 0;">
                 ${opts.map(o => `<label style="display:flex; align-items:center; gap:2px; font-size:11px; cursor:pointer; white-space:nowrap;"><input type="checkbox" class="ob-tbl-cb" data-cid="${contactId}" value="${o}" ${selected.includes(o)?'checked':''} onchange="app.saveObligationFromTable('${contactId}')" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
             </div>`;
+        } else if (field === 'general_notes' || field === 'notes') {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
+            overlay.onclick = (ev) => { if (ev.target === overlay) { overlay.remove(); } };
+            overlay.innerHTML = `<div style="background:#fff;border-radius:8px;padding:20px;width:600px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                <div style="font-weight:700;font-size:14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">${field === 'general_notes' ? '*Notes' : 'Notes'}<button onclick="this.closest('[style*=fixed]').remove();" style="border:none;background:none;font-size:18px;cursor:pointer;color:var(--sf-text-weak);">✕</button></div>
+                <textarea id="notesPopout" style="flex:1;min-height:300px;padding:10px;font-size:13px;font-family:inherit;border:1px solid var(--sf-border);border-radius:4px;resize:vertical;">${currentVal.replace(/</g,'&lt;')}</textarea>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+                    <button onclick="this.closest('[style*=fixed]').remove();" style="padding:6px 14px;font-size:13px;">Cancel</button>
+                    <button class="btn-primary" onclick="app.saveInlineEdit('${contactId}','${field}',document.getElementById('notesPopout').value); this.closest('[style*=fixed]').remove();" style="padding:6px 14px;font-size:13px;">Save</button>
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+            document.getElementById('notesPopout').focus();
+            return;
         } else {
             td.innerHTML = `<input type="${colDef.type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
             const input = td.querySelector('input');
