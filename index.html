@@ -643,6 +643,7 @@ const app = {
             if (c.email && !c.we_email) { c.we_email = c.email; migrated = true; }
             if (c.email) { delete c.email; migrated = true; }
             if (c.department) { delete c.department; migrated = true; }
+            if (!c.tier) { c.tier = '5'; migrated = true; }
         }
         if (migrated) this.persist();
         // Clean stale columns from saved preferences
@@ -1734,8 +1735,7 @@ const app = {
         const cols = visibleCols.map(k => this._allContactCols.find(c => c.key === k)).filter(Boolean);
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         let filtered = this.data.contacts;
-        if (f.tier === '3-5') filtered = filtered.filter(c => c.tier === '3' || c.tier === '4' || c.tier === '5');
-        else if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
+        if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
         if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
         if (f.text) {
             const lt = f.text.toLowerCase();
@@ -1763,7 +1763,7 @@ const app = {
                     <button class="btn-primary" onclick="app.openContactForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Contact</button>
                 </div>
             </div>
-            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(9, 1fr);">
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(8, 1fr);">
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','')">
                     <div class="label" style="font-size:9px;">Total</div>
                     <div class="value" style="font-size:18px;">${this.fmt(this.data.contacts.length)}</div>
@@ -1775,10 +1775,6 @@ const app = {
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
                     <div class="label" style="font-size:9px;">Tier 2</div>
                     <div class="value" style="font-size:18px; color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
-                </div>
-                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='3-5'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='3-5'?'':'3-5'}')">
-                    <div class="label" style="font-size:9px;">Tier 3-5</div>
-                    <div class="value" style="font-size:18px; color:var(--sf-text-weakest);">${this.data.contacts.filter(c=>c.tier==='3'||c.tier==='4'||c.tier==='5').length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Colleague'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Colleague'?'':'Colleague'}'; app.renderContacts();">
                     <div class="label" style="font-size:9px;">Colleague</div>
