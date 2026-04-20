@@ -1422,7 +1422,7 @@ const app = {
         {key:'birthdate', label:'Birthday', editable:true, type:'date'},
         {key:'la', label:'LA', editable:false},
         {key:'_dsla', label:'DSLA', editable:false},
-        {key:'obligation', label:'Obligation', editable:true, type:'text'},
+        {key:'obligation', label:'Obligation', editable:true, type:'multi-obligation'},
         {key:'notes', label:'Notes', editable:true, type:'text'},
         {key:'general_notes', label:'*Notes', editable:true, type:'text'},
     ],
@@ -1627,6 +1627,12 @@ const app = {
                 ${colDef.options.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}
             </select>`;
             td.querySelector('select').focus();
+        } else if (colDef.type === 'multi-obligation') {
+            const opts = ['Colleague','Client','Service Provider','Family','Friend'];
+            const selected = currentVal.split(',').map(s=>s.trim()).filter(Boolean);
+            td.innerHTML = `<div style="display:flex; gap:4px; flex-wrap:wrap; padding:2px 0;">
+                ${opts.map(o => `<label style="display:flex; align-items:center; gap:2px; font-size:11px; cursor:pointer; white-space:nowrap;"><input type="checkbox" class="ob-tbl-cb" data-cid="${contactId}" value="${o}" ${selected.includes(o)?'checked':''} onchange="app.saveObligationFromTable('${contactId}')" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+            </div>`;
         } else {
             td.innerHTML = `<input type="${colDef.type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
             const input = td.querySelector('input');
@@ -1690,6 +1696,12 @@ const app = {
         if (!contact) return;
         contact.general_notes = value || null;
         this.persist();
+    },
+
+    saveObligationFromTable(contactId) {
+        const vals = [...document.querySelectorAll(`.ob-tbl-cb[data-cid="${contactId}"]:checked`)].map(cb => cb.value).join(', ');
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (contact) { contact.obligation = vals || null; this.persist(); }
     },
 
     saveObligationFromCheckboxes(contactId) {
@@ -1804,7 +1816,9 @@ const app = {
                                     else if (col.key === 'tier') val = `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>`;
                                     else if (col.key === '_dsla') val = dsla != null ? `<span class="activity-score ${asClass}"></span>${String(dsla).trim()}D` : '';
                                     else if (col.key === 'tags') val = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="tag-pill">${t}</span>`).join(' ');
-                                    else if (col.key === 'email' && c.email) val = `<a href="mailto:${c.email}" style="color:var(--sf-brand);">${c.email}</a>`;
+                                    else if (col.key === 'obligation') val = (c.obligation||'').split(',').map(o=>o.trim()).filter(Boolean).map(o=>`<span class="tag-pill">${o}</span>`).join(' ');
+                                    else if (col.key === 'pe_email' && c.pe_email) val = `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>`;
+                                    else if (col.key === 'we_email' && c.we_email) val = `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>`;
                                     else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
                                     else if (col.key === 'la') { const raw = c.la || c.last_activity_display; if (raw) { const bd = new Date(raw.includes('T') ? raw : raw+'T12:00:00'); if (!isNaN(bd)) val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); else val = raw; } }
                                     else val = c[col.key] || '';
