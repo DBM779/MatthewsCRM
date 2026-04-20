@@ -407,6 +407,9 @@
                 <div class="form-group"><label>Assistant Phone</label><input type="tel" id="contactAssistantPhone"></div>
                 <div class="form-group"><label>Tier</label><select id="contactTier"><option value="1-VIP">1-VIP</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
                 <div class="form-group"><label>VIP</label><select id="contactVip"><option value="">No</option><option value="true">Yes</option></select></div>
+                <div class="form-group"><label>Obligation (multi-select)</label><div id="contactObligationGroup" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                    ${['Colleague','Client','Service Provider','Family','Friend'].map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="${o}" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+                </div></div>
                 </div>
                 <div class="form-group"><label>Mailing Address</label><input type="text" id="contactAddress"></div>
                 <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
@@ -837,6 +840,7 @@ const app = {
             accountId: document.getElementById('contactCompany').value || null,
             tier: document.getElementById('contactTier').value,
             vip: document.getElementById('contactVip').value === 'true' || false,
+            obligation: [...document.querySelectorAll('.obligation-cb:checked')].map(cb => cb.value).join(', ') || null,
             la: document.getElementById('contactLA').value || null,
             birthdate: document.getElementById('contactBirthdate').value || null,
             title: document.getElementById('contactTitle').value || null,
@@ -1413,6 +1417,7 @@ const app = {
         {key:'birthdate', label:'Birthday', editable:true, type:'date'},
         {key:'la', label:'LA', editable:false},
         {key:'_dsla', label:'DSLA', editable:false},
+        {key:'obligation', label:'Obligation', editable:true, type:'text'},
         {key:'notes', label:'Notes', editable:true, type:'text'},
         {key:'general_notes', label:'*Notes', editable:true, type:'text'},
     ],
@@ -1638,6 +1643,12 @@ const app = {
             const sel = el.querySelector('select');
             sel.focus();
             sel.click();
+        } else if (type === 'multi-obligation') {
+            const opts = ['Colleague','Client','Service Provider','Family','Friend'];
+            const selected = currentVal.split(',').map(s=>s.trim()).filter(Boolean);
+            el.innerHTML = `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:4px 0;">
+                ${opts.map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="ob-inline-cb" value="${o}" ${selected.includes(o)?'checked':''} onchange="app.saveObligationFromCheckboxes('${contactId}')" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+            </div>`;
         } else if (type === 'textarea') {
             el.innerHTML = `<textarea onblur="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
             el.querySelector('textarea').focus();
@@ -1675,6 +1686,12 @@ const app = {
         if (!contact) return;
         contact.general_notes = value || null;
         this.persist();
+    },
+
+    saveObligationFromCheckboxes(contactId) {
+        const vals = [...document.querySelectorAll('.ob-inline-cb:checked')].map(cb => cb.value).join(', ');
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (contact) { contact.obligation = vals || null; this.persist(); }
     },
 
     saveDetailField(contactId, field, value) {
@@ -3281,6 +3298,7 @@ const app = {
         });
         document.getElementById('contactTier').value = '3';
         document.getElementById('contactVip').value = '';
+        document.querySelectorAll('.obligation-cb').forEach(cb => cb.checked = false);
         document.getElementById('contactLeadSource').value = '';
     },
     openContactForm() {
@@ -3308,6 +3326,8 @@ const app = {
         document.getElementById('contactCompany').value = c.accountId || c.account_id || '';
         document.getElementById('contactTier').value = c.tier || '3';
         document.getElementById('contactVip').value = c.vip ? 'true' : '';
+        const obVals = (c.obligation||'').split(',').map(s=>s.trim());
+        document.querySelectorAll('.obligation-cb').forEach(cb => cb.checked = obVals.includes(cb.value));
         document.getElementById('contactLA').value = c.la || c.last_activity_display || '';
         document.getElementById('contactBirthdate').value = c.birthdate || '';
         document.getElementById('contactTitle').value = c.title || '';
@@ -3467,6 +3487,7 @@ const app = {
                             ${sfField('Other Phone', c.other_phone, 'other_phone', 'tel')}
                             ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null, 'birthdate', 'date')}
                             ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null, 'tier', 'select-tier')}
+                            ${sfField('Obligation', c.obligation ? c.obligation.split(',').map(o => o.trim()).filter(Boolean).map(o => `<span class="tag-pill">${o}</span>`).join(' ') : null, 'obligation', 'multi-obligation')}
                         </div>
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address</h3>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
