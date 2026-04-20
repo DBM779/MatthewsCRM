@@ -1916,16 +1916,62 @@ const app = {
         return emailRecord;
     },
 
+    _acctFilter: {type: '', text: ''},
+
     renderAccounts() {
+        const af = this._acctFilter;
+        const types = [...new Set(this.data.accounts.map(a => a.type).filter(Boolean))].sort();
+        const clientCount = this.data.accounts.filter(a => a.type === 'Client').length;
+        const prospectCount = this.data.accounts.filter(a => a.type === 'Prospect').length;
+        const partnerCount = this.data.accounts.filter(a => a.type === 'Partner').length;
+
+        let filtered = [...this.data.accounts];
+        if (af.type) filtered = filtered.filter(a => a.type === af.type);
+        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => (a.name||'').toLowerCase().includes(lt) || (a.industry||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt) || (a.address||'').toLowerCase().includes(lt)); }
+
+        const sorted = this._applySortToList(filtered.map(a => {
+            const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
+            const dealCount = this.data.deals.filter(d => (d.accountId || d.account_id) === a.id).length;
+            const dealVal = this.data.deals.filter(d => (d.accountId || d.account_id) === a.id).reduce((s,d) => s + (d.value||0), 0);
+            return {...a, _conCount: conCount, _dealCount: dealCount, _dealVal: dealVal};
+        }), 'accounts');
+
         const html = `
             <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
                 <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
                 <button class="btn-small btn-primary" onclick="app.openBulkUpdate('accounts')">Bulk Update</button>
                 <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderAccounts();">Deselect All</button>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h2 style="margin: 0;">Accounts</h2>
-                <button class="btn-primary" onclick="app.openAccountForm()">New Account</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h2 style="margin:0;">Accounts</h2>
+                <button class="btn-primary" onclick="app.openAccountForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Account</button>
+            </div>
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(5, 1fr);">
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${!af.type?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._acctFilter.type=''; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Total</div>
+                    <div class="value" style="font-size:18px;">${this.fmt(this.data.accounts.length)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Client'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._acctFilter.type='${af.type==='Client'?'':'Client'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Client</div>
+                    <div class="value" style="font-size:18px; color:var(--sf-success);">${clientCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Prospect'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._acctFilter.type='${af.type==='Prospect'?'':'Prospect'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Prospect</div>
+                    <div class="value" style="font-size:18px; color:var(--sf-brand);">${prospectCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Partner'?'border-bottom:3px solid #8b5cf6;':''}" onclick="app._acctFilter.type='${af.type==='Partner'?'':'Partner'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Partner</div>
+                    <div class="value" style="font-size:18px; color:#8b5cf6;">${partnerCount}</div>
+                </div>
+                <div class="stat-card" style="padding:8px;">
+                    <div class="label" style="font-size:9px;">Pipeline</div>
+                    <div class="value" style="font-size:18px;">$${this.data.deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <input type="text" placeholder="Search accounts…" value="${af.text}" oninput="app._acctFilter.text=this.value; app.renderAccounts();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                ${af.text||af.type ? `<button class="btn-small" onclick="app._acctFilter={type:'',text:''}; app.renderAccounts();">Clear</button>` : ''}
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card" style="overflow:hidden;">
                 <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
@@ -1934,31 +1980,25 @@ const app = {
                             <tr>
                                 <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('accounts')" style="width:10px;height:10px;cursor:pointer;"></th>
                                 <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
-                                <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
                                 <th onclick="app.sortBy('accounts','type')" style="cursor:pointer;">Type${this._sortIndicator('accounts','type')}</th>
-                                <th>Website</th>
-                                <th>Address</th>
+                                <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
                                 <th onclick="app.sortBy('accounts','_conCount')" style="cursor:pointer;">Contacts${this._sortIndicator('accounts','_conCount')}</th>
-                                <th>Actions</th>
+                                <th onclick="app.sortBy('accounts','_dealCount')" style="cursor:pointer;">Processes${this._sortIndicator('accounts','_dealCount')}</th>
+                                <th>Address</th>
+                                <th style="width:30px;"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${this._applySortToList(this.data.accounts.map(a => {
-                                const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
-                                return {...a, _conCount: conCount};
-                            }), 'accounts').map(a => `<tr>
-                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:10px;height:10px;cursor:pointer;"></td>
-                                    <td><a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: var(--sf-brand);">${a.name}</a></td>
-                                    <td>${a.industry || ''}</td>
-                                    <td>${a.type || ''}</td>
-                                    <td>${a.website || ''}</td>
-                                    <td>${a.address || ''}</td>
-                                    <td><a onclick="app.contactFilters.company='${a.id}'; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${a._conCount}</a></td>
-                                    <td>
-                                        <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
-                                        <button class="btn-small" onclick="app.deleteAccount('${a.id}')">Delete</button>
-                                    </td>
-                                </tr>`).join('')}
+                            ${sorted.map(a => `<tr>
+                                <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></td>
+                                <td><a onclick="app.viewAccount('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.name}</a></td>
+                                <td>${a.type||''}</td>
+                                <td>${a.industry||''}</td>
+                                <td><a onclick="app.contactFilters.company='${a.id}'; app.contactFilters._ob=''; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${a._conCount}</a></td>
+                                <td>${a._dealCount}</td>
+                                <td>${a.address||''}</td>
+                                <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('acct_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_acct_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
+                            </tr>`).join('')}
                         </tbody>
                     </table>
                 </div>
