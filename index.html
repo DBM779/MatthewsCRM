@@ -389,7 +389,11 @@
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
                 <div class="form-group"><label>Name *</label><input type="text" id="contactName" required></div>
                 <div class="form-group"><label>Obligation</label><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
-                    ${['Colleague','Client','Service Provider','Family','Friend'].map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="${o}" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="Colleague" style="width:auto; min-height:auto;"> Colleague</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="Client" style="width:auto; min-height:auto;"> Client</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="Service Provider" style="width:auto; min-height:auto;"> Service Provider</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="Family" style="width:auto; min-height:auto;"> Family</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="obligation-cb" value="Friend" style="width:auto; min-height:auto;"> Friend</label>
                 </div></div>
                 <div class="form-group"><label>Account</label><select id="contactCompany"></select></div>
                 <div class="form-group"><label>Birthdate</label><input type="date" id="contactBirthdate"></div>
