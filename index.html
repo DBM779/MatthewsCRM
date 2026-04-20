@@ -2271,11 +2271,31 @@ const app = {
                             <textarea onblur="app.saveEventNotes('${e.id}', this.value)" style="width:100%; min-height:120px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(e.notes || '').replace(/</g,'&lt;')}</textarea>
                         </div>
                     </div>
+                    ${e.address ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Map</div>
+                        <div id="eventMapContainer" style="height:250px; border-radius:0 0 4px 4px;"></div>
+                    </div>` : ''}
                 </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
         document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (e.name || '(no name)');
+        if (e.address) this._initEventMap(e.address);
+    },
+
+    async _initEventMap(address) {
+        const container = document.getElementById('eventMapContainer');
+        if (!container) return;
+        const coords = await this.geocodeAddress(address);
+        if (!coords) {
+            container.innerHTML = `<iframe src="https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed" style="width:100%;height:100%;border:none;border-radius:0 0 4px 4px;"></iframe>`;
+            return;
+        }
+        const map = L.map(container).setView([coords.lat, coords.lng], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap', maxZoom: 19}).addTo(map);
+        const icon = L.divIcon({className:'', html:'<div style="width:30px;height:30px;border-radius:50%;background:#e6853d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📅</div>', iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-18]});
+        L.marker([coords.lat, coords.lng], {icon}).addTo(map).bindPopup(`<div style="font-weight:600;">${address}</div><div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="font-size:12px; color:var(--sf-brand);">Open in Google Maps ↗</a></div>`).openPopup();
     },
 
     inlineEventEdit(eventId, field, type, el) {
