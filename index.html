@@ -3085,11 +3085,12 @@ const app = {
         if (!container || !window.google?.maps?.Map) return;
         const coords = await this.geocodeAddress(address);
         if (!coords) { container.innerHTML = `<iframe src="https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed" style="width:100%;height:100%;border:none;"></iframe>`; return; }
-        const map = new google.maps.Map(container, {center: coords, zoom: 15, mapId: 'DEMO_MAP_ID', gestureHandling: 'greedy'});
+        const map = new google.maps.Map(container, {center: coords, zoom: 15, gestureHandling: 'greedy'});
         const pin = document.createElement('div');
         pin.innerHTML = '<div style="width:30px;height:30px;border-radius:50%;background:#e6853d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📅</div>';
-        const marker = new google.maps.marker.AdvancedMarkerElement({position: coords, map, content: pin.firstElementChild, title: address});
+        const marker = new google.maps.Marker({position: coords, map, title: address});
         const iw = new google.maps.InfoWindow({content: `<div style="font-weight:600;">${address}</div><div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="color:#0176d3;">Directions ↗</a></div>`});
+        marker.addListener('click', () => iw.open({anchor: marker, map}));
         iw.open({anchor: marker, map});
     },
 
@@ -3516,11 +3517,11 @@ const app = {
         const bounds = new google.maps.LatLngBounds();
         this.mapMarkers.forEach(m => {
             if (this._itemPassesFilter(m.item)) {
-                m.marker.map = this.mapInstance;
+                m.marker.setMap(this.mapInstance);
                 bounds.extend(m.coords);
                 visibleCount++;
             } else {
-                m.marker.map = null;
+                m.marker.setMap(null);
             }
         });
         const countEl = document.getElementById('mapPinCount');
@@ -3534,7 +3535,7 @@ const app = {
         const color = item._type === 'contact' ? '#a094ed' : '#7f8de1';
         const pin = document.createElement('div');
         pin.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;">${item._initials}</div>`;
-        const marker = new google.maps.marker.AdvancedMarkerElement({position: coords, map: map, content: pin.firstElementChild, title: item.name});
+        const marker = new google.maps.Marker({position: coords, map: map, title: item.name, icon: {url: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="' + color + '" stroke="white" stroke-width="2"/><text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial">' + item._initials + '</text></svg>'), scaledSize: new google.maps.Size(28,28)}});
         const isContact = item._type === 'contact';
         const viewFn = isContact ? 'viewContact' : 'viewAccount';
         let detail = '';
@@ -3545,7 +3546,7 @@ const app = {
             if (item.type) detail += `<div>${item.type}</div>`;
             if (item.industry) detail += `<div>${item.industry}</div>`;
         }
-        marker.addEventListener('gmp-click', () => {
+        marker.addListener('click', () => {
             if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
             this._infoWindow.setContent(`<div style="font-size:13px; max-width:250px;">
                 <div style="font-size:10px; text-transform:uppercase; color:#888;">${isContact?'Contact':'Account'}</div>
@@ -3564,7 +3565,7 @@ const app = {
         if (!window.google?.maps?.Map) { const el = document.getElementById('mapLoadingMsg'); if (el) el.textContent = 'Loading Google Maps...'; setTimeout(() => this.initMapWithMarkers(items), 1000); return; }
         const mapEl = document.getElementById('crmMap');
         if (!mapEl) return;
-        const map = new google.maps.Map(mapEl, {center: {lat: 39.8283, lng: -98.5795}, zoom: 4, mapId: 'DEMO_MAP_ID', gestureHandling: 'greedy'});
+        const map = new google.maps.Map(mapEl, {center: {lat: 39.8283, lng: -98.5795}, zoom: 4, gestureHandling: 'greedy'});
         this.mapInstance = map;
 
         const loadingEl = document.getElementById('mapLoadingMsg');
@@ -3601,7 +3602,7 @@ const app = {
                     const idx = items.indexOf(item);
                     const marker = this._createGoogleMarker(item, coords, this.mapInstance);
                     this.mapMarkers.push({marker, coords, item, idx});
-                    if (!this._itemPassesFilter(item)) marker.map = null;
+                    if (!this._itemPassesFilter(item)) marker.setMap(null);
                 }
                 if (countEl) countEl.textContent = `${this.mapMarkers.length} pins` + (remaining > 0 ? ` (geocoding ${remaining} more…)` : '');
             }
@@ -3659,7 +3660,7 @@ const app = {
         this.mapMarkers.forEach(m => { m.marker.map = (m === entry) ? this.mapInstance : null; });
         this.mapInstance.setCenter(entry.coords);
         this.mapInstance.setZoom(15);
-        google.maps.event.trigger(entry.marker, 'gmp-click');
+        google.maps.event.trigger(entry.marker, 'click');
 
         // Update pin count and show "Show All" button
         const countEl = document.getElementById('mapPinCount');
