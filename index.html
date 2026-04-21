@@ -3835,6 +3835,7 @@ Tone: Professional but personal, not overly formal`;
         if (clone.contactStatuses) Object.keys(clone.contactStatuses).forEach(k => clone.contactStatuses[k] = 'Invited');
         delete clone._recap;
         this.data.events.push(clone);
+        firestoreUpsert('events', clone);
         this.persist();
         this.viewEvent(clone.id);
     },
@@ -4358,7 +4359,7 @@ Tone: Professional but personal, not overly formal`;
         const linked = evt ? (evt.activityIds || []) : [];
         const matches = this.data.activities.filter(a => !linked.includes(a.id) && ((a.subject||'').toLowerCase().includes(term) || (a.type||'').toLowerCase().includes(term))).slice(0, 8);
         const actIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
-        dd.innerHTML = matches.map(a => `<div onclick="app.linkActivityToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${actIcons[a.type]||''} ${a.subject||'(no subject)'}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkActivityToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${actIcons[a.type]||''} ${esc(a.subject||'(no subject)')}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
         dd.style.display = 'block';
     },
 
@@ -4376,7 +4377,7 @@ Tone: Professional but personal, not overly formal`;
         const term = input.value.toLowerCase().trim();
         if (!term) { dd.style.display = 'none'; return; }
         const matches = this.data.contacts.filter(c => (c.name||'').toLowerCase().includes(term)).slice(0, 8);
-        dd.innerHTML = matches.map(c => `<div onclick="app.linkContactToEvent('${eventId}','${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${c.name}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.innerHTML = matches.map(c => `<div onclick="app.linkContactToEvent('${eventId}','${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${esc(c.name)}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
         dd.style.display = 'block';
     },
 
@@ -4401,7 +4402,7 @@ Tone: Professional but personal, not overly formal`;
         const term = input.value.toLowerCase().trim();
         if (!term) { dd.style.display = 'none'; return; }
         const matches = this.data.accounts.filter(a => (a.name||'').toLowerCase().includes(term)).slice(0, 8);
-        dd.innerHTML = matches.map(a => `<div onclick="app.linkAccountToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${a.name}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkAccountToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${esc(a.name)}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
         dd.style.display = 'block';
     },
 
@@ -6862,7 +6863,7 @@ Tone: Professional but personal, not overly formal`;
             </div>
         `;
         document.getElementById('content').innerHTML = html;
-        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'contacts\'; app.render();">Contacts</a> / ' + c.name;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'contacts\'; app.render();">Contacts</a> / ' + esc(c.name);
         // Load Gmail emails async (non-blocking)
         if (this.isGmailConnected()) {
             this.fetchGmailForContact(c).then(emails => {
@@ -7104,7 +7105,7 @@ Tone: Professional but personal, not overly formal`;
             </div>
         `;
         document.getElementById('content').innerHTML = html;
-        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'accounts\'; app.render();">Accounts</a> / ' + a.name;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'accounts\'; app.render();">Accounts</a> / ' + esc(a.name);
     },
 
     openDealForm() {
