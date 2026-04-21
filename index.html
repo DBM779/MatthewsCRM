@@ -992,7 +992,7 @@ const app = {
     fmt(n) { return Number(n).toLocaleString(); },
 
     contactCompleteness(c) {
-        const fields = ['name','pc_number','wc_number','pe_email','we_email','address','title','tier','obligation','birthdate','instagram','linkedin','general_notes'];
+        const fields = ['name','pc_number','wc_number','pe_email','we_email','address','title','tier','obligation','birthdate','instagram','facebook','linkedin','general_notes'];
         const filled = fields.filter(f => c[f] && String(c[f]).trim()).length;
         return Math.round((filled / fields.length) * 100);
     },
@@ -6689,7 +6689,7 @@ Tone: Professional but personal, not overly formal`;
     },
 
     _clearContactForm() {
-        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactPlaybook','contactTags','contactNotes'].forEach(id => {
+        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactFacebook','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactPlaybook','contactTags','contactNotes'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
