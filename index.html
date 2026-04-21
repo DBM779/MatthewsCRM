@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2316325c'/><text x='16' y='23' font-size='20' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>M</text></svg>">
     <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='30' fill='%2316325c'/><text x='90' y='125' font-size='110' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>M</text></svg>">
     <link rel="preconnect" href="https://tmc-crm-f3728-default-rtdb.firebaseio.com">
@@ -331,7 +331,7 @@
         /* Mobile responsive */
         @media (max-width: 768px) {
             body {flex-direction: column;}
-            .sf-global-header {padding: 0 10px; height: 44px;}
+            .sf-global-header {padding: 0 10px; padding-top: env(safe-area-inset-top, 0); height: calc(44px + env(safe-area-inset-top, 0));}
             .sf-app-title {font-size: 14px;}
             .sf-app-title .sub, .sf-app-title .sep {display: none;}
             .sf-global-search {display: none;}
@@ -341,7 +341,7 @@
             .mobile-header {display: none !important;}
             .sidebar {display: none !important;}
             .main {width: 100%;}
-            .content {padding: 8px;}
+            .content {padding: 8px; padding-bottom: calc(80px + env(safe-area-inset-bottom, 0));}
             /* Stat cards */
             .stat-cards {grid-template-columns: repeat(4, 1fr) !important; gap: 4px !important;}
             .stat-card {padding: 5px 4px !important; border-radius: 3px !important;}
@@ -401,7 +401,7 @@
             .compact-table {display: table !important; font-size: 10px !important;}
             .compact-table th, .compact-table td {padding: 3px 4px !important; font-size: 10px !important;}
             /* FAB */
-            #fabMenu {bottom: 16px !important; right: 16px !important;}
+            #fabMenu {bottom: calc(16px + env(safe-area-inset-bottom, 0)) !important; right: 16px !important;}
             #fabMenu > button {width: 48px !important; height: 48px !important; min-width: 48px !important; min-height: 48px !important; font-size: 24px !important; line-height: 48px !important; padding: 0 !important; border-radius: 50% !important;}
             /* Kanban */
             .kanban-board {flex-direction: column;}
@@ -412,11 +412,14 @@
         @media (max-width: 480px) {
             .stat-cards {grid-template-columns: repeat(3, 1fr) !important;}
             .sf-app-tab span.obj-icon {display: none;}
+            .sf-app-tab {padding: 0 6px !important; font-size: 10px !important; white-space: nowrap;}
             .sf-hl-fields {grid-template-columns: 1fr !important;}
             .pipeline-stats {grid-template-columns: repeat(2, 1fr) !important;}
             .deal-metrics {grid-template-columns: 1fr !important;}
             .kanban-board {flex-direction: column !important;}
             .kanban-column {flex: none !important; width: 100% !important;}
+            .cal-view-tabs {flex-wrap: wrap;}
+            .pipeline-bar {height: 16px !important;}
         }
         /* Map v2: full-screen with floating controls */
         .map-v2 {position:relative; height:calc(100vh - 120px); border-radius:4px; overflow:hidden;}
@@ -431,7 +434,7 @@
         .map-btn {width:40px; height:40px; border-radius:50%; border:none; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.2); cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center;}
         .map-btn:active {background:var(--sf-bg);}
         /* Bottom card (mobile pin tap) */
-        .map-card {position:absolute; bottom:0; left:0; right:0; background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -4px 20px rgba(0,0,0,0.15); padding:16px 20px; transform:translateY(100%); transition:transform 0.3s ease; z-index:20; max-height:50vh; overflow-y:auto;}
+        .map-card {position:absolute; bottom:0; left:0; right:0; background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -4px 20px rgba(0,0,0,0.15); padding:16px 20px; padding-bottom:calc(16px + env(safe-area-inset-bottom, 0)); transform:translateY(100%); transition:transform 0.3s ease; z-index:20; max-height:50vh; overflow-y:auto;}
         .map-card.show {transform:translateY(0);}
         .map-card-handle {width:36px; height:4px; background:#d1d5db; border-radius:2px; margin:0 auto 12px;}
         .map-card-name {font-size:18px; font-weight:700; margin-bottom:4px;}
@@ -982,7 +985,7 @@ const app = {
     currentView: 'dashboard',
     currentRecord: null,
     isLoading: true,
-    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: [], events: []},
+    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: [], events: [], investors: [], _connections: [], _auditLog: []},
 
     fmt(n) { return Number(n).toLocaleString(); },
 
@@ -2043,7 +2046,7 @@ Tone: Professional but personal, not overly formal`;
                     <!-- My Tasks -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
-                            <span style="font-weight:700; font-size:14px;">My Tasks</span>
+                            <span style="font-weight:700; font-size:14px; cursor:pointer;" onclick="app.navigate('tasks')">My Tasks</span>
                             <button class="btn-small" onclick="app.openActivityForm();">New Task</button>
                         </div>
                         <div style="padding:0 16px;">
@@ -2098,7 +2101,7 @@ Tone: Professional but personal, not overly formal`;
 
                     <!-- Contacts Needing Attention -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days since last activity)</span></div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; cursor:pointer;" onclick="app.contactFilters.dsla='cold';app.navigate('contacts');">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days) →</span></div>
                         <div style="padding:0 16px;">
                             ${stale.length ? stale.map(c => {
                                 const dsla = this.calculateDSLA(c.la || c.last_activity_display);
@@ -2112,7 +2115,7 @@ Tone: Professional but personal, not overly formal`;
 
                     <!-- Pipeline by Stage -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Pipeline by Stage</div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; cursor:pointer;" onclick="app.navigate('deals')">Pipeline by Stage →</div>
                         <div style="padding:16px;">
                             ${stages.map((s, i) => {
                                 const count = activeDeals.filter(d => d.stage === s).length;
@@ -2137,7 +2140,7 @@ Tone: Professional but personal, not overly formal`;
                     <!-- Upcoming Events -->
                     ${(() => { const upcoming = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start >= todayStr).sort((a,b) => (a.start||'').localeCompare(b.start||'')).slice(0,5); return upcoming.length ? `
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📅 Upcoming Events</div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; display:flex;justify-content:space-between;align-items:center;">📅 Upcoming Events <a onclick="app.navigate('activities')" style="font-size:11px;font-weight:400;color:var(--sf-brand);cursor:pointer;">View all →</a></div>
                         <div style="padding:8px 16px;">
                             ${upcoming.map(e => { const con = this.data.contacts.find(c => c.id === e.contactId); return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
                                 <div><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${e.name}</a>${con ? `<br><span style="font-size:11px; color:var(--sf-text-weak);">${con.name}</span>` : ''}</div>
@@ -6437,7 +6440,9 @@ Tone: Professional but personal, not overly formal`;
         const accounts = this.data.accounts.filter(a => s(a) > 0).sort((a,b) => s(b) - s(a));
         const events = this.data.events.filter(e => s(e) > 0).sort((a,b) => s(b) - s(a));
         const deals = this.data.deals.filter(d => s(d) > 0).sort((a,b) => s(b) - s(a));
-        const total = contacts.length + accounts.length + events.length + deals.length;
+        const acts = this.data.activities.filter(a => s({...a, name:a.subject||a.type}) > 0).sort((a,b) => s({...b,name:b.subject||b.type}) - s({...a,name:a.subject||a.type}));
+        const invs = (this.data.investors||[]).filter(i => s(i) > 0).sort((a,b) => s(b) - s(a));
+        const total = contacts.length + accounts.length + events.length + deals.length + acts.length + invs.length;
         const html = `
             <h2>Search Results for "${term}" <span style="font-size:14px; font-weight:400; color:var(--sf-text-weak);">(${total} results)</span></h2>
             ${contacts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-contact" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">C</span> Contacts (${contacts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Tier</th><th>Obligation</th></tr></thead><tbody>
@@ -6450,7 +6455,13 @@ Tone: Professional but personal, not overly formal`;
                 ${events.map(e => `<tr style="cursor:pointer;" onclick="app.viewEvent('${e.id}')"><td style="color:var(--sf-brand);font-weight:600;">${e.name||''}</td><td>${e.type||''}</td><td>${e.start ? new Date(e.start).toLocaleDateString() : ''}</td><td>${e.status||''}</td></tr>`).join('')}
             </tbody></table></div></div>` : ''}
             ${deals.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-deal" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">P</span> Processes (${deals.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Stage</th><th>Value</th></tr></thead><tbody>
-                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')"><td style="color:var(--sf-brand);font-weight:600;">${d.name}</td><td>${d.stage||''}</td><td>$${(d.value||0).toFixed(1)}M</td></tr>`).join('')}
+                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td style="color:var(--sf-brand);font-weight:600;">${d.name}</td><td>${d.stage||''}</td><td>$${(d.value||0).toFixed(1)}M</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${acts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;background:#48c3cc;">T</span> Activities (${acts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Type</th><th>Subject</th><th>Due</th><th>Status</th></tr></thead><tbody>
+                ${acts.slice(0,15).map(a => `<tr style="cursor:pointer;" onclick="app.editActivity('${a.id}')"><td>${a.type||''}</td><td style="color:var(--sf-brand);font-weight:600;">${a.subject||''}</td><td>${a.dueDate||''}</td><td>${a.status||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${invs.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;background:#0ea5e9;">$</span> Investors (${invs.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Type</th><th>Committed</th><th>Status</th></tr></thead><tbody>
+                ${invs.map(i => `<tr style="cursor:pointer;" onclick="app.navigate('investors')"><td style="color:var(--sf-brand);font-weight:600;">${i.name||''}</td><td>${i.type||''}</td><td>$${(i.committed||0).toFixed(1)}M</td><td>${i.status||''}</td></tr>`).join('')}
             </tbody></table></div></div>` : ''}
             ${!total ? '<div style="text-align:center; padding:40px; color:var(--sf-text-weak); font-size:14px;">No results found for "'+term+'"</div>' : ''}
         `;
@@ -6598,7 +6609,7 @@ Tone: Professional but personal, not overly formal`;
                             </div>
                             <div class="card-body-flush">
                             ${deals.length ? `<table><thead><tr><th>Process Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
-                                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')">
+                                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')">
                                     <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
                                     <td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td>
                                     <td>$${(d.value||0).toFixed(1)}M</td>
@@ -6987,7 +6998,7 @@ Tone: Professional but personal, not overly formal`;
                     </div>
                     <div id="adDeals" style="display:none;">
                         ${deals.length ? `<table><thead><tr><th>Deal</th><th>Stage</th><th>Value</th><th>Close Date</th></tr></thead><tbody>
-                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
+                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
                         </tbody></table>` : '<p class="text-muted">No deals for this account</p>'}
                     </div>
                     <div id="adActivities" style="display:none;">
