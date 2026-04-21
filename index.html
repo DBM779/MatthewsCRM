@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="preconnect" href="https://tmc-crm-f3728-default-rtdb.firebaseio.com">
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -718,7 +721,7 @@ const cloudSync = {
 
     debouncedPush(data) {
         if (this._pendingSync) clearTimeout(this._pendingSync);
-        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 2000);
+        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 5000);
     }
 };
 
@@ -931,11 +934,14 @@ const app = {
         this.isLoading = false;
     },
 
+    _persistTimer: null,
     persist() {
         this.data._lastModified = new Date().toISOString();
         db.save(this.data);
-        this.updateStatus('Syncing...', true);
-        setTimeout(() => this.updateStatus('Ready', true), 2500);
+        if (!this._persistTimer) {
+            this.updateStatus('Syncing...', true);
+            this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 3000);
+        }
     },
 
     importJsonData(jsonData) {
@@ -1292,12 +1298,25 @@ const app = {
         this.render();
     },
 
+    _renderCache: {},
+    _lastDataHash: '',
+
+    _dataHash() {
+        return this.data.contacts.length + '|' + this.data.accounts.length + '|' + this.data.events.length + '|' + this.data.activities.length + '|' + (this.data._lastModified||'');
+    },
+
+    invalidateCache() { this._renderCache = {}; },
+
     render() {
         if (this.isLoading) {
             document.getElementById('content').innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading data...</p></div>';
             return;
         }
-        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Tasks', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
+        // Invalidate cache if data changed
+        const hash = this._dataHash();
+        if (hash !== this._lastDataHash) { this._renderCache = {}; this._lastDataHash = hash; }
+
+        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Events', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
         document.getElementById('breadcrumb').textContent = labels[this.currentView] || this.currentView;
         // sync tab active state in case of programmatic nav
         const tabMap = {dashboard:'dashboard', contacts:'contacts', contactDetail:'contacts', accounts:'accounts', accountDetail:'accounts', deals:'deals', activities:'activities', map:'map', emails:'emails', referrals:'referrals', reports:'reports', settings:'settings'};
