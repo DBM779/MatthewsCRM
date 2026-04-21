@@ -847,6 +847,26 @@ const app = {
         } catch { return []; }
     },
 
+    logCallFromTap(contactId, phone) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const today = new Date().toISOString().split('T')[0];
+        contact.la = today;
+        this.data.activities.push({
+            id: 'act-' + Date.now(),
+            type: 'Call',
+            subject: 'Call — ' + (contact.name || ''),
+            contactId: contactId,
+            accountId: contact.accountId || contact.account_id || null,
+            dueDate: today,
+            status: 'Completed',
+            notes: 'Auto-logged from phone tap: ' + phone,
+            createdAt: new Date().toISOString()
+        });
+        this.persist();
+        window.location.href = 'tel:' + phone;
+    },
+
     fmtPhone(p) {
         if (!p) return p;
         const d = p.replace(/\D/g, '');
@@ -2214,7 +2234,7 @@ const app = {
                             <div class="ml-name">${c.pinned?'⭐ ':''}${c.name}</div>
                             <div class="ml-sub">${c._company||''} ${c.obligation ? '· '+c.obligation.split(',')[0].trim() : ''}</div>
                             <div class="ml-actions">
-                                ${phone ? `<a href="tel:${phone}" class="ml-action ml-action-call" onclick="event.stopPropagation();">📞</a>` : ''}
+                                ${phone ? `<a href="#" class="ml-action ml-action-call" onclick="event.stopPropagation(); event.preventDefault(); app.logCallFromTap('${c.id}','${phone}');">📞</a>` : ''}
                                 ${phone ? `<a href="sms:${phone}" class="ml-action ml-action-text" onclick="event.stopPropagation();">💬</a>` : ''}
                                 ${email ? `<a href="mailto:${email}" class="ml-action ml-action-email" onclick="event.stopPropagation();">📧</a>` : ''}
                                 ${c.instagram ? `<a href="https://instagram.com/${c.instagram.replace('@','')}" target="_blank" class="ml-action ml-action-ig" onclick="event.stopPropagation();">📷</a>` : ''}
@@ -3990,8 +4010,8 @@ const app = {
                     </div>
                 </div>
                 <div class="sf-hl-fields">
-                    <div><div class="sf-hl-field-label">PC#</div><div class="sf-hl-field-value">${c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : '—'}</div></div>
-                    <div><div class="sf-hl-field-label">WC#</div><div class="sf-hl-field-value">${c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">PC#</div><div class="sf-hl-field-value">${c.pc_number ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${c.pc_number}');" style="color:var(--sf-brand);">${c.pc_number}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">WC#</div><div class="sf-hl-field-value">${c.wc_number ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${c.wc_number}');" style="color:var(--sf-brand);">${c.wc_number}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">PE@</div><div class="sf-hl-field-value">${c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">WE@</div><div class="sf-hl-field-value">${c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
