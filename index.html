@@ -1716,16 +1716,17 @@ Tone: Professional but personal, not overly formal`;
             const text = await file.text();
             const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
             if (lines.length < 2) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV has no data rows.</div>'; return; }
-            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-            const nameIdx = headers.findIndex(h => h.includes('name'));
-            const igIdx = headers.findIndex(h => h.includes('instagram') || h.includes('ig') || h.includes('handle'));
+            const delim = lines[0].includes('\t') ? '\t' : ',';
+            const headers = lines[0].split(delim).map(h => h.trim().toLowerCase());
+            const nameIdx = headers.findIndex(h => h.includes('full_name') || h.includes('name'));
+            const igIdx = headers.findIndex(h => h.includes('username') || h.includes('instagram') || h.includes('ig') || h.includes('handle'));
             const emailIdx = headers.findIndex(h => h.includes('email'));
             const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('number'));
             if (nameIdx < 0) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV must have a Name column.</div>'; return; }
 
             const results = {matched: [], created: []};
             for (let i = 1; i < lines.length; i++) {
-                const cols = lines[i].split(',').map(s => s.trim());
+                const cols = lines[i].split(delim).map(s => s.trim());
                 const name = cols[nameIdx] || '';
                 const ig = igIdx >= 0 ? (cols[igIdx] || '').replace('@','') : '';
                 const email = emailIdx >= 0 ? cols[emailIdx] || '' : '';
