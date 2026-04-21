@@ -867,7 +867,7 @@ const firebaseAuth = firebase.auth();
 const firestore = firebase.firestore();
 firestore.enablePersistence({synchronizeTabs: true}).catch(() => {});
 
-const COLLECTIONS = ['contacts','accounts','activities','events','deals'];
+const COLLECTIONS = ['contacts','accounts','activities','events','deals','dealContacts','referrals','emails'];
 
 const cloudSync = {
     _pendingSync: false,
@@ -2749,6 +2749,7 @@ Tone: Professional but personal, not overly formal`;
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
         contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
         this.persist();
         if (field === 'address' && value) this.geocodeAddress(value);
         this.renderContactDetail();
@@ -3264,6 +3265,7 @@ Tone: Professional but personal, not overly formal`;
         this.logChange('deal', id, deal.name, [{field:'stage', from: deal.stage, to: newStage}]);
         deal.stage = newStage;
         deal._stageDate = new Date().toISOString().slice(0,10);
+        firestoreUpsert('deals', deal);
         this.persist();
         this.renderDeals();
     },
@@ -3426,6 +3428,7 @@ Tone: Professional but personal, not overly formal`;
         if (!d._icVotes) d._icVotes = [];
         d._icVotes.push({member, vote, notes, date: new Date().toISOString()});
         this.logChange('deal', dealId, d.name, [{field:'IC Vote', from:'', to: member + ': ' + vote}]);
+        firestoreUpsert('deals', d);
         this.persist();
         this._renderDealDetail();
     },
@@ -3435,6 +3438,7 @@ Tone: Professional but personal, not overly formal`;
         if (!d) return;
         if (!d._ddStatus) d._ddStatus = {};
         d._ddStatus[key] = checked;
+        firestoreUpsert('deals', d);
         this.persist();
     },
 
@@ -3443,6 +3447,7 @@ Tone: Professional but personal, not overly formal`;
         if (!d) return;
         if (!d._checklist) d._checklist = {};
         d._checklist[key] = checked;
+        firestoreUpsert('deals', d);
         this.persist();
     },
 
@@ -3453,7 +3458,9 @@ Tone: Professional but personal, not overly formal`;
         if (!c) { alert('Contact not found.'); return; }
         const role = prompt('Role (e.g. Buyer, Seller, Counsel, Lender):', 'Buyer');
         if (!this.data.dealContacts) this.data.dealContacts = [];
-        this.data.dealContacts.push({deal_id: dealId, contact_id: c.id, role: role||''});
+        const dc = {id: 'dc-' + Date.now(), deal_id: dealId, contact_id: c.id, role: role||''};
+        this.data.dealContacts.push(dc);
+        firestoreUpsert('dealContacts', dc);
         this.persist();
         this._renderDealDetail();
     },
@@ -3976,10 +3983,11 @@ Tone: Professional but personal, not overly formal`;
                 e.contactStatuses[g.id] = 'Attended';
                 const today = new Date().toISOString().split('T')[0];
                 const contact = this.data.contacts.find(c => c.id === g.id);
-                if (contact) { contact.la = today; contact.updated_at = new Date().toISOString(); }
+                if (contact) { contact.la = today; contact.updated_at = new Date().toISOString(); firestoreUpsert('contacts', contact); }
             }
         });
         e.status = 'Completed';
+        firestoreUpsert('events', e);
         this.persist(); this.renderEventDetail();
     },
 
@@ -4298,6 +4306,7 @@ Tone: Professional but personal, not overly formal`;
         const evt = this.data.events.find(x => x.id === eventId);
         if (!evt) return;
         evt.notes = value || null;
+        firestoreUpsert('events', evt);
         this.persist();
     },
 
@@ -4324,6 +4333,7 @@ Tone: Professional but personal, not overly formal`;
         if (!evt) return;
         if (!evt.contactStatuses) evt.contactStatuses = {};
         evt.contactStatuses[contactId] = status;
+        firestoreUpsert('events', evt);
         this.persist();
     },
 
@@ -5493,8 +5503,9 @@ Tone: Professional but personal, not overly formal`;
         act.status = newStatus;
         if (newStatus === 'Completed' && act.contactId) {
             const con = this.data.contacts.find(c => c.id === act.contactId);
-            if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) con.la = today; }
+            if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) { con.la = today; firestoreUpsert('contacts', con); } }
         }
+        firestoreUpsert('activities', act);
         this.persist();
         this.renderTaskBoard();
     },
@@ -6876,9 +6887,10 @@ Tone: Professional but personal, not overly formal`;
         const act = this.data.activities.find(a => a.id === id);
         if (act) {
             act.status = 'Completed';
+            firestoreUpsert('activities', act);
             if (act.contactId || act.contact_id) {
                 const con = this.data.contacts.find(c => c.id === (act.contactId || act.contact_id));
-                if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) con.la = today; }
+                if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) { con.la = today; firestoreUpsert('contacts', con); } }
             }
             this.persist();
             this.render();
