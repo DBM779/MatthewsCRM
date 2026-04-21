@@ -634,43 +634,32 @@
     </div>
 
     <script>
-// === Data layer: localStorage + Supabase cloud sync ===
+// === Data layer: localStorage + Firebase cloud sync ===
 const STORAGE_KEY = 'matthewsCRM';
-const SYNC_TS_KEY = 'matthewsCRM_syncTs';
 
-// Supabase config — update these if you create a new project
-const SUPABASE_URL = 'https://fqvpiqzeazbponkvrhoq.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_PqqNSw0b2TSfsD7y5HE4Jg_Ykk_zd3D';
-const SYNC_TABLE = 'crm_sync';
+const FIREBASE_DB_URL = 'https://tmc-crm-f3728-default-rtdb.firebaseio.com';
+const FIREBASE_API_KEY = 'AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ';
 
 const cloudSync = {
-    _headers() {
-        return {'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal'};
-    },
     _pendingSync: false,
-    _syncQueue: [],
 
     async push(data) {
-        const payload = {id: 1, data: data, updated_at: new Date().toISOString()};
         try {
-            const res = await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}?id=eq.1`, {method: 'PATCH', headers: {...this._headers(), 'Prefer': 'return=minimal'}, body: JSON.stringify(payload)});
-            if (res.status === 404 || res.status === 406) {
-                await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}`, {method: 'POST', headers: {...this._headers(), 'Prefer': 'resolution=merge-duplicates,return=minimal'}, body: JSON.stringify(payload)});
-            }
-            localStorage.setItem(SYNC_TS_KEY, payload.updated_at);
-            return true;
+            const res = await fetch(`${FIREBASE_DB_URL}/crm.json?auth=${FIREBASE_API_KEY}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({data: data, updated_at: new Date().toISOString()})
+            });
+            return res.ok;
         } catch { return false; }
     },
 
     async pull() {
         try {
-            const res = await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}?id=eq.1&select=data,updated_at`, {headers: this._headers()});
+            const res = await fetch(`${FIREBASE_DB_URL}/crm.json?auth=${FIREBASE_API_KEY}`);
             if (!res.ok) return null;
-            const rows = await res.json();
-            if (rows && rows.length > 0 && rows[0].data) {
-                localStorage.setItem(SYNC_TS_KEY, rows[0].updated_at || '');
-                return rows[0].data;
-            }
+            const result = await res.json();
+            if (result && result.data) return result.data;
         } catch {}
         return null;
     },
