@@ -1654,6 +1654,39 @@ const app = {
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
             </div>
 
+            <!-- TODAY'S ACTION PLAN (top position) -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-brand);">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📋 Today's Action Plan</div>
+                <div style="padding:10px 16px;">
+                    ${(() => {
+                        const gd = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                        const ro = this.data.contacts.filter(c => c.tier === '1-VIP' && gd(c) >= 14 && gd(c) < 90).sort((a,b) => gd(b)-gd(a)).slice(0,5);
+                        const te = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start.slice(0,10) === todayStr);
+                        const bd = this.data.contacts.filter(c => { if (!c.birthdate) return false; const b = new Date(c.birthdate); const ty = new Date(today.getFullYear(), b.getMonth(), b.getDate()); if (ty < today) ty.setFullYear(ty.getFullYear()+1); return (ty-today)/86400000 <= 7 && (ty-today)/86400000 >= 0; });
+                        let a = [];
+                        if (te.length) a.push(`<div style="margin-bottom:8px;"><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-brand); margin-bottom:4px;">📅 TODAY</div>${te.map(e => `<div style="padding:3px 0; font-size:13px;"><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${e.name}</a> <span style="color:var(--sf-text-weak); font-size:11px;">${e.start?new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):''}</span></div>`).join('')}</div>`);
+                        if (ro.length) a.push(`<div style="margin-bottom:8px;"><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:4px;">📞 REACH OUT</div>${ro.map(c => { const p=c.pc_number||c.mobile||c.wc_number||''; return `<div style="display:flex; align-items:center; justify-content:space-between; padding:3px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><div style="display:flex; gap:4px; align-items:center;"><span style="font-size:10px; color:var(--sf-error);">${gd(c)}D</span>${p?`<a href="#" onclick="event.preventDefault();app.logCallFromTap('${c.id}','${p}');" style="font-size:13px;text-decoration:none;">📞</a><a href="#" onclick="event.preventDefault();app.logTextFromTap('${c.id}','${p}');" style="font-size:13px;text-decoration:none;">💬</a>`:''}</div></div>`; }).join('')}</div>`);
+                        if (bd.length) a.push(`<div><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:4px;">🎂 BIRTHDAYS</div>${bd.map(c => `<div style="padding:3px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer;">${c.name}</a> <span style="font-size:11px; color:var(--sf-text-weak);">${new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></div>`).join('')}</div>`);
+                        if (!a.length) a.push('<div style="text-align:center; padding:8px; color:var(--sf-text-weak); font-size:13px;">✅ All caught up!</div>');
+                        return a.join('');
+                    })()}
+                </div>
+            </div>
+
+            <!-- Relationship Health -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px;">
+                ${(() => {
+                    const gd2 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                    const ac = this.data.contacts.filter(c => gd2(c) <= 30).length;
+                    const wm = this.data.contacts.filter(c => gd2(c) > 30 && gd2(c) <= 90).length;
+                    const co = this.data.contacts.filter(c => gd2(c) > 90).length;
+                    const tt = this.data.contacts.length || 1;
+                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-success);">Active ≤30D</div><div style="font-size:18px; font-weight:300; color:var(--sf-success);">${ac}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(ac/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-warning);">Cooling 30-90D</div><div style="font-size:18px; font-weight:300; color:var(--sf-warning);">${wm}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(wm/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-error);">Cold 90D+</div><div style="font-size:18px; font-weight:300; color:var(--sf-error);">${co}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(co/tt*100)}%</div></div>`;
+                })()}
+            </div>
+
             <!-- Main layout: left + right like SF home -->
             <div style="display:flex; gap:12px; align-items:flex-start;">
                 <!-- LEFT COLUMN -->
@@ -2890,8 +2923,6 @@ const app = {
             if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
             return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineEventEdit('${e.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
         };
-
-
         const html = `
             <div class="detail-back" onclick="history.back();">&#8592; Back</div>
             <div class="sf-highlight">
