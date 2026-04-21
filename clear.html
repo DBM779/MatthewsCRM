@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head><title>Clearing CRM Cache...</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;background:#f3f3f3;">
+<div style="text-align:center;">
+<h2>Clearing cache...</h2>
+<p id="status">Removing old service worker...</p>
+<script>
+async function clearAll() {
+  const s = document.getElementById('status');
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); }
+    s.textContent = 'Clearing caches...';
+    const keys = await caches.keys();
+    for (const k of keys) { await caches.delete(k); }
+    s.textContent = 'Done! Redirecting to CRM...';
+    setTimeout(() => { window.location.href = '/index.html?t=' + Date.now(); }, 1000);
+  } catch(e) {
+    s.textContent = 'Error: ' + e.message + '. Redirecting anyway...';
+    setTimeout(() => { window.location.href = '/index.html?t=' + Date.now(); }, 2000);
+  }
+}
+clearAll();
+</script>
+</div>
+</body>
+</html>
