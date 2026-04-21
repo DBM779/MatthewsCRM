@@ -14,6 +14,10 @@
     ],
     "rewrites": [
       {
+        "source": "/clear.html",
+        "destination": "/clear.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
