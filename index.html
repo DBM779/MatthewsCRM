@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
@@ -80,7 +80,7 @@
         .breadcrumb a {color: var(--sf-brand); text-decoration: none; cursor: pointer;}
         .breadcrumb a:hover {text-decoration: underline;}
         .search-box {display: none;}
-        .content {flex: 1; overflow-y: auto; padding: 16px 16px 32px 16px; background: var(--sf-bg);}
+        .content {flex: 1; overflow-y: auto; padding: 16px 16px 32px 16px; background: var(--sf-bg); will-change: contents; contain: layout style;}
         .loading-state {display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #6b7280;}
         .loading-spinner {width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;}
         @keyframes spin {to {transform: rotate(360deg);}}
@@ -757,46 +757,52 @@ const app = {
         return p;
     },
 
+    _migrated: false,
+
     async init() {
+        // 1. Load data from localStorage (instant)
         this.loadData();
-        // Try cloud sync on startup
-        this.cloudPull();
-        // Migrate email → we_email
-        let migrated = false;
-        for (const c of this.data.contacts) {
-            if (c.email && !c.we_email) { c.we_email = c.email; migrated = true; }
-            if (c.email) { delete c.email; migrated = true; }
-            if (c.department) { delete c.department; migrated = true; }
-            if (!c.tier) { c.tier = '5'; migrated = true; }
-        }
-        if (migrated) this.persist();
-        // Clean stale columns from saved preferences
-        const validCols = this._allContactCols.map(c => c.key);
-        try { const saved = JSON.parse(localStorage.getItem('matthewsCRM_contactCols')); if (saved) { const cleaned = saved.filter(k => validCols.includes(k)); if (cleaned.length !== saved.length) { this._contactCols = cleaned; localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cleaned)); } } } catch {}
+
+        // 2. Restore UI state (instant)
         try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
         try { const ss = JSON.parse(localStorage.getItem('matthewsCRM_sortState')); if (ss) this._sortState = ss; } catch {}
-        this.setupEventListeners();
         const savedHash = location.hash.replace('#','');
         if (savedHash && savedHash !== 'sync') {
-            if (savedHash.startsWith('contactDetail:')) {
-                const cid = savedHash.split(':')[1];
-                this.currentRecord = this.data.contacts.find(c => c.id === cid);
-                if (this.currentRecord) this.currentView = 'contactDetail';
-            } else if (savedHash.startsWith('activityDetail:')) {
-                const actId = savedHash.split(':')[1];
-                this.currentRecord = this.data.events.find(a => a.id === actId);
-                if (this.currentRecord) this.currentView = 'activityDetail';
-            } else if (savedHash.startsWith('accountDetail:')) {
-                const aid = savedHash.split(':')[1];
-                this.currentRecord = this.data.accounts.find(a => a.id === aid);
-                if (this.currentRecord) this.currentView = 'accountDetail';
-            } else if (['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedHash)) {
-                this.currentView = savedHash;
-            }
+            if (savedHash.startsWith('contactDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.contacts.find(c => c.id === id); if (this.currentRecord) this.currentView = 'contactDetail'; }
+            else if (savedHash.startsWith('activityDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.events.find(a => a.id === id); if (this.currentRecord) this.currentView = 'activityDetail'; }
+            else if (savedHash.startsWith('accountDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.accounts.find(a => a.id === id); if (this.currentRecord) this.currentView = 'accountDetail'; }
+            else if (['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedHash)) this.currentView = savedHash;
         }
+
+        // 3. RENDER IMMEDIATELY — user sees the app now
+        this.setupEventListeners();
         this.render();
         this.updateSelectOptions();
-        setTimeout(() => this.bgGeocodeAll(), 3000);
+
+        // 4. Background tasks (non-blocking, after render)
+        setTimeout(() => {
+            // Migrations (run once)
+            if (!this._migrated) {
+                let m = false;
+                for (const c of this.data.contacts) {
+                    if (c.email && !c.we_email) { c.we_email = c.email; m = true; }
+                    if (c.email) { delete c.email; m = true; }
+                    if (c.department) { delete c.department; m = true; }
+                    if (!c.tier) { c.tier = '5'; m = true; }
+                }
+                if (m) this.persist();
+                this._migrated = true;
+                // Clean stale columns
+                const validCols = this._allContactCols.map(c => c.key);
+                try { const saved = JSON.parse(localStorage.getItem('matthewsCRM_contactCols')); if (saved) { const cleaned = saved.filter(k => validCols.includes(k)); if (cleaned.length !== saved.length) { this._contactCols = cleaned; localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cleaned)); } } } catch {}
+            }
+        }, 100);
+
+        // 5. Cloud sync in background (doesn't block UI)
+        setTimeout(() => this.cloudPull(), 500);
+
+        // 6. Geocoding much later
+        setTimeout(() => this.bgGeocodeAll(), 10000);
     },
 
     deduplicateData() {
@@ -2041,7 +2047,7 @@ const app = {
                             </tr>
                         </thead>
                         <tbody>
-                            ${sorted.map(c => {
+                            ${sorted.slice(0, this._contactPageSize || 100).map(c => {
                                 const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
                                 const asClass = 'as-' + this.calculateAS(dsla);
                                 return `<tr><td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:10px;height:10px;cursor:pointer;"></td>${cols.map(col => {
@@ -2071,7 +2077,7 @@ const app = {
             </div>
             <!-- Mobile card list (hidden on desktop) -->
             <div class="mobile-list">
-                ${sorted.map(c => {
+                ${sorted.slice(0, this._contactPageSize || 100).map(c => {
                     const initials = (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
                     const tierColor = c.tier === '1-VIP' ? '#166534' : c.tier === '2' ? '#1e40af' : '#94a3b8';
                     const phone = c.pc_number||c.mobile||c.wc_number||c.phone||'';
@@ -2093,6 +2099,7 @@ const app = {
                         </div>
                     </div>`;
                 }).join('')}
+                ${sorted.length > (this._contactPageSize || 100) ? `<div style="padding:12px; text-align:center;"><button onclick="app._contactPageSize=(app._contactPageSize||100)+100; app.renderContacts();" style="padding:8px 24px; font-size:13px; border-radius:20px;">Show More (${sorted.length - (this._contactPageSize||100)} remaining)</button></div>` : ''}
             </div>
         `;
         document.getElementById('content').innerHTML = html;
