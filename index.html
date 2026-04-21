@@ -5865,7 +5865,9 @@ Tone: Professional but personal, not overly formal`;
                     const evt = this.data.events.find(e => (e.activityIds||[]).includes(a.id));
                     const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
                     const pColor = priorityColors[a.priority] || '#3b82f6';
-                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.openTaskDetail(\'' + a.id + '\')">';
+                    const ageDays = a.createdAt ? Math.floor((Date.now() - new Date(a.createdAt).getTime()) / 86400000) : 0;
+                    const aging = (status !== 'Completed' && ageDays > 14) ? 'opacity:0.5;' : (status !== 'Completed' && ageDays > 7) ? 'opacity:0.7;' : '';
+                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';' + aging + '" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.openTaskDetail(\'' + a.id + '\')">';
                     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
                     html += '<div class="kanban-card-title">' + (typeIcons[a.type]||'') + ' ' + (a.subject||a.type||'') + '</div>';
                     if (isOverdue) html += '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:700;">OVERDUE</span>';
@@ -5877,9 +5879,13 @@ Tone: Professional but personal, not overly formal`;
                     if (deal) tags.push('<a onclick="event.stopPropagation();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">💼 ' + (deal.name||'').slice(0,15) + '</a>');
                     if (evt) tags.push('<span style="color:#e6853d;">📅 ' + (evt.name||'').slice(0,15) + '</span>');
                     if (a.accountId) { const acc = this.data.accounts.find(x => x.id === a.accountId); if (acc) tags.push('<span style="color:#7f8de1;">🏢 ' + acc.name.split(' ')[0] + '</span>'); }
+                    if ((a._labels||[]).length) html += '<div style="display:flex;gap:2px;margin-top:3px;">' + a._labels.map(l => '<span style="width:20px;height:6px;border-radius:3px;background:'+l+';display:inline-block;"></span>').join('') + '</div>';
+                    if ((a._checklist||[]).length) { const cd = a._checklist.filter(c=>c.done).length; html += '<div style="font-size:9px;color:var(--sf-text-weak);margin-top:2px;">☑ ' + cd + '/' + a._checklist.length + '</div>'; }
                     if (tags.length) html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:10px;">' + tags.join('') + '</div>';
                     html += '</div>';
                 });
+                // Quick add
+                html += '<div style="margin-top:6px;"><input type="text" placeholder="+ Add card…" style="width:100%;padding:6px 8px;font-size:12px;border:1px dashed var(--sf-border);border-radius:4px;background:transparent;" onkeydown="if(event.key===\'Enter\'&&this.value){app.quickAddTask(this.value,\'' + status + '\');this.value=\'\';}"></div>';
                 html += '</div>';
             });
             html += '</div>';
@@ -5906,6 +5912,13 @@ Tone: Professional but personal, not overly formal`;
         }
 
         document.getElementById('content').innerHTML = html;
+    },
+
+    quickAddTask(subject, status) {
+        const newAct = {id: 'act-' + Date.now(), type: 'Task', subject, status, priority: 'Normal', dueDate: null, notes: null, createdAt: new Date().toISOString()};
+        this.data.activities.push(newAct);
+        firestoreUpsert('activities', newAct); this.persist();
+        this.renderTaskBoard();
     },
 
     dragActivity(e, id) { e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); },
