@@ -970,8 +970,45 @@ const cloudSync = {
 };
 
 // Shorthand helpers used throughout the app
-async function firestoreUpsert(collection, record) { return cloudSync.upsert(collection, record); }
-async function firestoreDelete(collection, id) { return cloudSync.remove(collection, id); }
+const SQL_API = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/api';
+const SQL_BULK = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/bulk';
+
+async function getAuthToken() {
+    const user = firebaseAuth.currentUser;
+    if (!user) return null;
+    return user.getIdToken();
+}
+
+async function firestoreUpsert(collection, record) {
+    const token = await getAuthToken();
+    if (!token || !record.id) return record;
+    const clean = {...record};
+    Object.keys(clean).forEach(k => { if (clean[k] === undefined || clean[k] === null) delete clean[k]; });
+    try {
+        await fetch(SQL_API + '/' + collection + '/' + record.id, {
+            method: 'PUT', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify(clean)
+        }).then(async r => {
+            if (r.status === 404) {
+                await fetch(SQL_API + '/' + collection, {
+                    method: 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    body: JSON.stringify(clean)
+                });
+            }
+        });
+    } catch (e) { console.log('SQL sync error:', e.message); }
+    return record;
+}
+
+async function firestoreDelete(collection, id) {
+    const token = await getAuthToken();
+    if (!token) return;
+    try {
+        await fetch(SQL_API + '/' + collection + '/' + id, {
+            method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}
+        });
+    } catch (e) { console.log('SQL delete error:', e.message); }
+}
 
 const db = {
     load() {
@@ -1433,11 +1470,14 @@ Tone: Professional but personal, not overly formal`;
     async cloudPull() {
         if (!cloudSync.isSignedIn()) return;
         try {
-            const cloud = await cloudSync.pullAll();
-            if (!cloud) return;
+            const token = await getAuthToken();
+            if (!token) return;
+            this.updateStatus('Syncing with SQL...', true);
+            const res = await fetch(SQL_BULK, {headers: {'Authorization': 'Bearer ' + token}});
+            if (!res.ok) { this.updateStatus('Sync failed', false); return; }
+            const cloud = await res.json();
             const cloudCount = (cloud.contacts||[]).length + (cloud.accounts||[]).length;
             const localCount = this.data.contacts.length + this.data.accounts.length;
-            // Use cloud data if it has records, merge with local
             if (cloudCount > 0) {
                 for (const col of COLLECTIONS) {
                     if (cloud[col] && cloud[col].length) this.data[col] = cloud[col];
@@ -1445,37 +1485,20 @@ Tone: Professional but personal, not overly formal`;
                 db.save(this.data);
                 this.updateSelectOptions();
                 this.render();
-                this.updateStatus('Synced', true);
+                this.updateStatus('Synced with SQL', true);
             } else if (localCount > 0) {
-                // First time: push local data to Firestore
-                this.updateStatus('Uploading to cloud...', true);
-                await cloudSync.pushAll(this.data);
-                this.updateStatus('Synced', true);
+                this.updateStatus('Migrating to SQL...', true);
+                const migrationData = {};
+                for (const col of COLLECTIONS) {
+                    if (this.data[col] && this.data[col].length) migrationData[col] = this.data[col];
+                }
+                await fetch(SQL_BULK, {
+                    method: 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    body: JSON.stringify(migrationData)
+                });
+                this.updateStatus('Migrated to SQL', true);
             }
-            // Load meta data (investors, fund, connections, audit log)
-            try {
-                const metaCol = cloudSync.col('meta');
-                if (metaCol) {
-                    const metaDoc = await metaCol.doc('appMeta').get();
-                    if (metaDoc.exists) {
-                        const m = metaDoc.data();
-                        if (m.investors?.length && !this.data.investors?.length) this.data.investors = m.investors;
-                        if (m._fund && !this.data._fund) this.data._fund = m._fund;
-                        if (m._connections?.length && !this.data._connections?.length) this.data._connections = m._connections;
-                        if (m._auditLog?.length && !this.data._auditLog?.length) this.data._auditLog = m._auditLog;
-                        db.save(this.data);
-                    }
-                }
-            } catch {}
-            // Start real-time listeners for live sync between devices
-            cloudSync.startListening((colName, items) => {
-                if (items.length && JSON.stringify(this.data[colName]) !== JSON.stringify(items)) {
-                    this.data[colName] = items;
-                    db.save(this.data);
-                    this.render();
-                }
-            });
-        } catch { /* offline — Firestore persistence handles it */ }
+        } catch (e) { console.log('SQL sync error:', e.message); this.updateStatus('Offline mode', false); }
     },
 
     loadData() {
