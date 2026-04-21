@@ -625,6 +625,8 @@
                 <div class="form-group"><label>Value (M)</label><input type="number" id="dealValue" step="0.1"></div>
                 <div class="form-group"><label>Stage</label><select id="dealStage"><option value="Prospect">Prospect</option><option value="Pitch">Pitch</option><option value="Mandate">Mandate</option><option value="Due Diligence">Due Diligence</option><option value="Negotiation">Negotiation</option><option value="Closed Won">Closed Won</option><option value="Closed Lost">Closed Lost</option></select></div>
                 <div class="form-group"><label>Sector</label><input type="text" id="dealSector"></div>
+                <div class="form-group"><label>Deal Source</label><select id="dealSource"><option value="">Select…</option><option value="Referral">Referral</option><option value="Cold Outreach">Cold Outreach</option><option value="Banker Intro">Banker Intro</option><option value="Conference">Conference</option><option value="Existing Relationship">Existing Relationship</option><option value="Inbound">Inbound</option><option value="Co-Investor">Co-Investor</option><option value="Advisor Network">Advisor Network</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Source Contact</label><input type="text" id="dealSourceContact" placeholder="Who referred this deal?"></div>
                 <div class="form-group"><label>Probability (%)</label><input type="number" id="dealProbability" min="0" max="100"></div>
                 <div class="form-group"><label>Close Date</label><input type="date" id="dealCloseDate"></div>
                 <div class="form-group"><label>Drive Link</label><input type="url" id="dealDriveLink" placeholder="Google Drive URL for deal folder/model"></div>
@@ -1393,6 +1395,8 @@ const app = {
             value: parseFloat(document.getElementById('dealValue').value) || 0,
             stage: document.getElementById('dealStage').value,
             sector: document.getElementById('dealSector').value || null,
+            source: document.getElementById('dealSource').value || null,
+            sourceContact: document.getElementById('dealSourceContact').value || null,
             probability: parseInt(document.getElementById('dealProbability').value) || 0,
             closeDate: document.getElementById('dealCloseDate').value || null,
             driveLink: document.getElementById('dealDriveLink').value || null,
@@ -2882,6 +2886,7 @@ const app = {
             + (d.feeStructure ? '<div class="deal-metric"><div class="deal-metric-label">Fee Structure</div><div class="deal-metric-value" style="font-size:13px;">' + d.feeStructure + '</div></div>' : '')
             + (d.sector ? '<div class="deal-metric"><div class="deal-metric-label">Sector</div><div class="deal-metric-value" style="font-size:13px;">' + d.sector + '</div></div>' : '')
             + (d.continuationVehicle ? '<div class="deal-metric"><div class="deal-metric-label">Continuation Vehicle</div><div class="deal-metric-value" style="font-size:13px;">' + d.continuationVehicle + '</div></div>' : '')
+            + (d.source ? '<div class="deal-metric"><div class="deal-metric-label">Deal Source</div><div class="deal-metric-value" style="font-size:13px;">' + d.source + (d.sourceContact ? ' <span style="color:var(--sf-text-weak);font-size:11px;">via ' + d.sourceContact + '</span>' : '') + '</div></div>' : '')
             + '</div>';
 
         html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
@@ -2985,6 +2990,29 @@ const app = {
                 html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--sf-border-weak);cursor:pointer;" onclick="app.viewDealDetail(\'' + d.id + '\')">'
                     + '<div><div style="font-weight:600;font-size:13px;">' + d.name + '</div><div style="font-size:11px;color:var(--sf-text-weak);">' + d.stage + ' · $' + (d.value||0) + 'M</div></div>'
                     + '<button class="btn-small" onclick="event.stopPropagation();app.openActivityForm();setTimeout(()=>{document.getElementById(\'activityDeal\').value=\'' + d.id + '\';},100);">Log Activity</button></div>';
+            });
+            html += '</div></div>';
+        }
+
+        // Deal Source Analytics
+        const sources = {};
+        this.data.deals.forEach(d => {
+            const s = d.source || 'Unknown';
+            if (!sources[s]) sources[s] = {count: 0, value: 0, won: 0, wonValue: 0};
+            sources[s].count++;
+            sources[s].value += (d.value||0);
+            if (d.stage === 'Closed Won') { sources[s].won++; sources[s].wonValue += (d.value||0); }
+        });
+        const srcEntries = Object.entries(sources).sort((a,b) => b[1].value - a[1].value);
+        if (srcEntries.length) {
+            const maxSrcVal = Math.max(...srcEntries.map(([,v]) => v.value), 1);
+            html += '<div class="card"><div class="card-header">Deal Source Attribution</div><div style="padding:16px;">';
+            srcEntries.forEach(([name, data]) => {
+                const convRate = data.count > 0 ? Math.round(data.won / data.count * 100) : 0;
+                html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+                    + '<div style="width:120px;font-size:12px;font-weight:600;text-align:right;">' + name + '</div>'
+                    + '<div style="flex:1;background:var(--sf-bg);border-radius:4px;height:24px;"><div style="width:' + (data.value/maxSrcVal*100) + '%;background:var(--sf-brand);height:100%;border-radius:4px;min-width:' + (data.value>0?'2px':'0') + ';"></div></div>'
+                    + '<div style="width:160px;font-size:11px;color:var(--sf-text-weak);">' + data.count + ' deals · $' + data.value.toFixed(0) + 'M · <span style="color:' + (convRate >= 50 ? 'var(--sf-success)' : convRate >= 25 ? 'var(--sf-warning)' : 'var(--sf-text-weak)') + ';font-weight:600;">' + convRate + '% won</span></div></div>';
             });
             html += '</div></div>';
         }
@@ -5893,6 +5921,8 @@ const app = {
         document.getElementById('dealValue').value = '';
         document.getElementById('dealStage').value = 'Prospect';
         document.getElementById('dealSector').value = '';
+        document.getElementById('dealSource').value = '';
+        document.getElementById('dealSourceContact').value = '';
         document.getElementById('dealProbability').value = '';
         document.getElementById('dealCloseDate').value = '';
         document.getElementById('dealDriveLink').value = '';
@@ -5913,6 +5943,8 @@ const app = {
         document.getElementById('dealValue').value = deal.value || '';
         document.getElementById('dealStage').value = deal.stage || 'Prospect';
         document.getElementById('dealSector').value = deal.sector || '';
+        document.getElementById('dealSource').value = deal.source || '';
+        document.getElementById('dealSourceContact').value = deal.sourceContact || '';
         document.getElementById('dealProbability').value = deal.probability || '';
         document.getElementById('dealCloseDate').value = deal.closeDate || '';
         document.getElementById('dealDriveLink').value = deal.driveLink || '';
