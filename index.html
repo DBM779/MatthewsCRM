@@ -352,7 +352,7 @@
             button, .btn-small, .btn-primary {font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 28px !important;}
             /* FAB */
             #fabMenu {bottom: 16px !important; right: 16px !important;}
-            #fabMenu button {width: 48px !important; height: 48px !important; font-size: 24px !important; line-height: 48px !important;}
+            #fabMenu > button {width: 48px !important; height: 48px !important; min-width: 48px !important; min-height: 48px !important; font-size: 24px !important; line-height: 48px !important; padding: 0 !important; border-radius: 50% !important;}
             /* Kanban */
             .kanban-board {flex-direction: column;}
             .kanban-column {flex: none; width: 100%;}
@@ -490,7 +490,7 @@
             <div onclick="app.openEventForm(); document.getElementById('fabOptions').style.display='none';" style="background:#e6853d; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Event</div>
             <div onclick="app.openActivityForm(); document.getElementById('fabOptions').style.display='none';" style="background:#48c3cc; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Activity</div>
         </div>
-        <button onclick="const o=document.getElementById('fabOptions'); o.style.display=o.style.display==='none'?'':'none';" style="width:56px; height:56px; border-radius:50%; background:var(--sf-brand); color:#fff; border:none; font-size:28px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3); line-height:56px;">+</button>
+        <button onclick="const o=document.getElementById('fabOptions'); o.style.display=o.style.display==='none'?'':'none';" style="width:56px; height:56px; min-width:56px; min-height:56px; border-radius:50%; background:var(--sf-brand); color:#fff; border:none; font-size:28px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3); line-height:56px; padding:0; text-align:center; display:flex; align-items:center; justify-content:center;">+</button>
     </div>
 
     <div class="modal" id="modalContact">
