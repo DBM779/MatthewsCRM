@@ -2777,6 +2777,7 @@ Tone: Professional but personal, not overly formal`;
         const oldVal = contact[field] || '';
         if (oldVal !== (value||'')) this.logChange('contact', contactId, contact.name, [{field, from: oldVal||'(empty)', to: value||'(empty)'}]);
         contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
         this.persist();
         if (field === 'address' && value) this.geocodeAddress(value);
         this.renderContacts();
@@ -5769,7 +5770,7 @@ Tone: Professional but personal, not overly formal`;
                         + '<span style="width:8px;height:8px;border-radius:50%;background:' + (statuses[d.status]||'#ef4444') + ';"></span>'
                         + (d.url ? '<a href="' + d.url + '" target="_blank" style="color:var(--sf-brand);font-weight:600;">' + d.name + '</a>' : '<span>' + d.name + '</span>')
                         + '</div><div style="display:flex;gap:4px;">'
-                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
+                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app._syncMeta();app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
                         + '</div></div>';
                 });
             } else { html += '<div style="font-size:11px;color:var(--sf-text-weak);padding:4px 0;">No documents yet.</div>'; }
@@ -6142,8 +6143,8 @@ Tone: Professional but personal, not overly formal`;
     },
 
     updateEmailSelects() {
-        document.getElementById('emailContact').innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-        document.getElementById('emailDeal').innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        document.getElementById('emailContact').innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        document.getElementById('emailDeal').innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
     },
 
     async saveEmail(e) {
@@ -7221,15 +7222,15 @@ Tone: Professional but personal, not overly formal`;
         const activityAccountSelect = document.getElementById('activityAccount');
         const activityDealSelect = document.getElementById('activityDeal');
 
-        accountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-        dealAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-        activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-        activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-        activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        accountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        dealAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
         const eventAccountSelect = document.getElementById('eventAccount');
         const eventContactSelect = document.getElementById('eventContact');
-        if (eventAccountSelect) eventAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-        if (eventContactSelect) eventContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        if (eventAccountSelect) eventAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        if (eventContactSelect) eventContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
     },
 
     openModal(id) {
