@@ -3070,12 +3070,14 @@ const app = {
         return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2);
     },
 
+    _evtViewMode: 'cards',
+
     renderEvents() {
         const ef = this._evtFilter;
         const scheduled = this.data.events.filter(e => e.status === 'Scheduled').length;
         const completed = this.data.events.filter(e => e.status === 'Completed').length;
         const cancelled = this.data.events.filter(e => e.status === 'Cancelled').length;
-        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', 'Birthday Party':'🎂', 'Happy Hour':'🍻', Other:'📋'};
 
         let filtered = [...this.data.events];
         if (ef.type) filtered = filtered.filter(e => e.type === ef.type);
@@ -3098,100 +3100,260 @@ const app = {
             sorted.sort((a,b) => (b._start||'').localeCompare(a._start||''));
         }
 
+        const upcoming = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start >= new Date().toISOString().slice(0,10)).sort((a,b) => (a.start||'').localeCompare(b.start||''));
+        const bdaySuggestions = this.data.contacts.filter(c => {
+            if (!c.birthdate) return false;
+            const now = new Date(), bd = new Date(c.birthdate);
+            bd.setFullYear(now.getFullYear());
+            if (bd < now) bd.setFullYear(now.getFullYear() + 1);
+            const diff = Math.floor((bd - now) / 86400000);
+            return diff >= 0 && diff <= 30;
+        });
+        const neglected = this.data.contacts.filter(c => {
+            const attended = (this.data.events||[]).some(ev => (ev.attendees||'').toLowerCase().includes((c.name||'').toLowerCase()) || ev.contactId === c.id);
+            return !attended && c.tier === '1-VIP';
+        }).slice(0, 5);
+        const vm = this._evtViewMode || 'cards';
+
         const html = `
-            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
-                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
-                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('events')">Bulk Update</button>
-                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderEvents();">Deselect All</button>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <h2 style="margin:0;">Events</h2>
-                <button class="btn-primary" onclick="app.openEventForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <div class="cal-view-tabs">
+                        <button class="cal-view-tab ${vm==='cards'?'active':''}" onclick="app._evtViewMode='cards'; app.renderEvents();">Cards</button>
+                        <button class="cal-view-tab ${vm==='list'?'active':''}" onclick="app._evtViewMode='list'; app.renderEvents();">List</button>
+                        <button class="cal-view-tab ${vm==='timeline'?'active':''}" onclick="app._evtViewMode='timeline'; app.renderEvents();">Timeline</button>
+                    </div>
+                    <button class="btn-primary" onclick="app.openEventForm()" style="padding:2px 10px; font-size:12px; height:26px;">+ New Event</button>
+                </div>
             </div>
+            <!-- Upcoming nudges -->
+            ${bdaySuggestions.length ? '<div style="background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;"><span style="font-weight:700;">🎂 Upcoming birthdays:</span> ' + bdaySuggestions.map(c => { const bd = new Date(c.birthdate); bd.setFullYear(new Date().getFullYear()); if(bd<new Date()) bd.setFullYear(new Date().getFullYear()+1); const diff = Math.floor((bd-new Date())/86400000); return '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name.split(' ')[0] + '</a> (' + diff + 'd)'; }).join(', ') + ' — <a href="#" onclick="event.preventDefault();app.openEventForm();" style="color:var(--sf-brand);">Plan a party?</a></div>' : ''}
+            ${neglected.length ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;"><span style="font-weight:700;">💡 VIPs never invited to an event:</span> ' + neglected.map(c => '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name + '</a>').join(', ') + '</div>' : ''}
             <div class="stat-cards" style="margin-bottom:8px;">
                 <div class="stat-card" style="cursor:pointer; ${!ef.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status=''; app.renderEvents();">
-                    <div class="label">Total</div>
-                    <div class="value">${this.fmt(this.data.events.length)}</div>
+                    <div class="label">Total</div><div class="value">${this.fmt(this.data.events.length)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${ef.status==='scheduled'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status='${ef.status==='scheduled'?'':'scheduled'}'; app.renderEvents();">
-                    <div class="label">Scheduled</div>
-                    <div class="value" style="color:var(--sf-brand);">${this.fmt(scheduled)}</div>
+                    <div class="label">Upcoming</div><div class="value" style="color:var(--sf-brand);">${this.fmt(scheduled)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${ef.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._evtFilter.status='${ef.status==='completed'?'':'completed'}'; app.renderEvents();">
-                    <div class="label">Completed</div>
-                    <div class="value" style="color:var(--sf-success);">${this.fmt(completed)}</div>
+                    <div class="label">Past</div><div class="value" style="color:var(--sf-success);">${this.fmt(completed)}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; ${ef.status==='cancelled'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app._evtFilter.status='${ef.status==='cancelled'?'':'cancelled'}'; app.renderEvents();">
-                    <div class="label">Cancelled</div>
-                    <div class="value" style="color:var(--sf-text-weakest);">${this.fmt(cancelled)}</div>
+                    <div class="label">Cancelled</div><div class="value" style="color:var(--sf-text-weakest);">${this.fmt(cancelled)}</div>
                 </div>
             </div>
-            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:10px;">
                 <input type="text" placeholder="Search events…" value="${ef.text}" oninput="app._evtFilter.text=this.value; app.renderEvents();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
                 <select onchange="app._evtFilter.type=this.value; app.renderEvents();" style="min-height:32px; padding:4px; font-size:12px;">
                     <option value="" ${!ef.type?'selected':''}>All Types</option>
                     ${Object.keys(typeIcons).map(t => `<option value="${t}" ${ef.type===t?'selected':''}>${typeIcons[t]} ${t}</option>`).join('')}
                 </select>
                 ${ef.text||ef.type||ef.status ? `<button class="btn-small" onclick="app._evtFilter={type:'',status:'',text:''}; app.renderEvents();">Clear</button>` : ''}
-                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
-            <div class="card" style="overflow:hidden;">
-                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
-                    <table class="compact-table">
-                        <thead>
-                            <tr>
-                                <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('events')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></th>
-                                <th onclick="app.sortBy('events','name')" style="cursor:pointer;">Event Name${this._sortIndicator('events','name')}</th>
-                                <th onclick="app.sortBy('events','type')" style="cursor:pointer;">Type${this._sortIndicator('events','type')}</th>
-                                <th onclick="app.sortBy('events','_start')" style="cursor:pointer;">Date${this._sortIndicator('events','_start')}</th>
-                                <th>Address</th>
-                                <th onclick="app.sortBy('events','_contactCount')" style="cursor:pointer;">Contacts${this._sortIndicator('events','_contactCount')}</th>
-                                <th onclick="app.sortBy('events','_accountCount')" style="cursor:pointer;">Accounts${this._sortIndicator('events','_accountCount')}</th>
-                                <th onclick="app.sortBy('events','status')" style="cursor:pointer;">Status${this._sortIndicator('events','status')}</th>
-                                <th style="width:30px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${sorted.map(e => {
-                                const con = this.data.contacts.find(c => c.id === e.contactId);
-                                const acct = this.data.accounts.find(a => a.id === e.accountId);
-                                const startDisplay = e.start ? new Date(e.start).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '';
-                                return `<tr>
-                                    <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(e.id)?'checked':''} onclick="app.toggleBulkSelect('${e.id}')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></td>
-                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${e.name||'(no name)'}</a></td>
-                                    <td>${typeIcons[e.type]||''} ${e.type||''}</td>
-                                    <td>${startDisplay}</td>
-                                    <td>${e.address||''}</td>
-                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand);">${e._contactCount||0}</a></td>
-                                    <td><a onclick="app.viewEvent('${e.id}')" style="cursor:pointer; color:var(--sf-brand);">${e._accountCount||0}</a></td>
-                                    <td>${e.status||''}</td>
-                                    <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('evt_${e.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_evt_${e.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteEvent('${e.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <!-- Mobile event list -->
-            <div class="mobile-list">
-                ${sorted.map(e => {
-                    const ti = {Meeting:'📅',Conference:'🏛️',Lunch:'🍽️',Dinner:'🍷',Call:'📞',Presentation:'📊',Networking:'🤝',Other:'📋'};
-                    const startStr = e.start ? new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-                    return `<div class="mobile-list-item" onclick="app.viewEvent('${e.id}')">
-                        <div class="ml-avatar" style="background:#fff3e0; color:#e65100; font-size:18px;">${ti[e.type]||'📋'}</div>
-                        <div class="ml-info">
-                            <div class="ml-name">${e.name||'(no name)'}</div>
-                            <div class="ml-sub">${startStr} ${e.address ? '· '+e.address : ''}</div>
-                        </div>
-                        <div class="ml-right">
-                            <div style="font-size:11px; color:${e.status==='Scheduled'?'var(--sf-brand)':'var(--sf-success)'}; font-weight:600;">${e.status||''}</div>
-                            <div style="font-size:10px; color:var(--sf-text-weakest);">${e._contactCount||0} 👤</div>
-                        </div>
-                    </div>`;
-                }).join('')}
-            </div>
+            ${vm === 'cards' ? this._renderEventCards(sorted, typeIcons) : vm === 'timeline' ? this._renderEventTimeline(sorted, typeIcons) : this._renderEventList(sorted, typeIcons)}
         `;
         document.getElementById('content').innerHTML = html;
+    },
+
+    _renderEventCards(sorted, ti) {
+        const now = new Date();
+        return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">' + sorted.map(e => {
+            const guests = this._getEventGuests(e);
+            const rsvp = this._getEventRSVP(e, guests);
+            const startD = e.start ? new Date(e.start) : null;
+            const diff = startD ? Math.ceil((startD - now) / 86400000) : null;
+            const countdown = diff !== null ? (diff > 0 ? diff + 'd away' : diff === 0 ? 'Today!' : Math.abs(diff) + 'd ago') : '';
+            const cdColor = diff > 0 ? (diff <= 3 ? 'var(--sf-warning)' : 'var(--sf-brand)') : diff === 0 ? 'var(--sf-success)' : 'var(--sf-text-weak)';
+            const statusColor = e.status==='Scheduled' ? '#3b82f6' : e.status==='Completed' ? '#22c55e' : '#9ca3af';
+            return '<div style="background:#fff;border:1px solid var(--sf-border-weak);border-radius:8px;overflow:hidden;cursor:pointer;transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,0.1)\'" onmouseout="this.style.boxShadow=\'\'" onclick="app.viewEvent(\'' + e.id + '\')">'
+                + '<div style="background:linear-gradient(135deg,' + statusColor + '22,' + statusColor + '08);padding:14px 16px 10px;border-bottom:1px solid var(--sf-border-weak);">'
+                + '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
+                + '<div><div style="font-size:10px;text-transform:uppercase;font-weight:700;color:' + statusColor + ';">' + (ti[e.type]||'📋') + ' ' + (e.type||'Event') + '</div>'
+                + '<div style="font-size:16px;font-weight:700;margin:4px 0;">' + (e.name||'') + '</div></div>'
+                + (countdown ? '<div style="font-size:11px;font-weight:700;color:' + cdColor + ';background:#fff;padding:2px 8px;border-radius:4px;">' + countdown + '</div>' : '')
+                + '</div>'
+                + '<div style="font-size:12px;color:var(--sf-text-weak);">' + (startD ? startD.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '') + '</div>'
+                + (e.address ? '<div style="font-size:11px;color:var(--sf-text-weak);margin-top:2px;">📍 ' + e.address + '</div>' : '')
+                + '</div>'
+                + '<div style="padding:10px 16px;">'
+                + '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:6px;">'
+                + '<span style="color:var(--sf-success);font-weight:600;">✓ ' + rsvp.yes + ' Yes</span>'
+                + '<span style="color:var(--sf-warning);font-weight:600;">? ' + rsvp.maybe + ' Maybe</span>'
+                + '<span style="color:var(--sf-error);font-weight:600;">✕ ' + rsvp.no + ' No</span>'
+                + '<span style="color:var(--sf-text-weak);">⏳ ' + rsvp.pending + ' Pending</span>'
+                + '</div>'
+                + (guests.length ? '<div style="display:flex;gap:-4px;">' + guests.slice(0,6).map((g,i) => '<div style="width:24px;height:24px;border-radius:50%;background:' + ['#a094ed','#7f8de1','#e6853d','#48c3cc','#f472b6','#22c55e'][i%6] + ';color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:' + (i>0?'-6px':'0') + ';">' + (g.name||'').split(' ').map(s=>s[0]).join('').slice(0,2) + '</div>').join('') + (guests.length > 6 ? '<div style="width:24px;height:24px;border-radius:50%;background:var(--sf-bg);color:var(--sf-text-weak);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px;">+' + (guests.length-6) + '</div>' : '') + '</div>' : '')
+                + '</div></div>';
+        }).join('') + '</div>';
+    },
+
+    _renderEventTimeline(sorted, ti) {
+        const grouped = {};
+        sorted.forEach(e => { const m = (e.start||'').slice(0,7) || 'No date'; if (!grouped[m]) grouped[m] = []; grouped[m].push(e); });
+        let html = '<div style="padding-left:20px;">';
+        Object.keys(grouped).sort().reverse().forEach(m => {
+            const label = m === 'No date' ? 'No Date' : new Date(m+'-15').toLocaleDateString('en-US',{month:'long',year:'numeric'});
+            html += '<div style="font-size:13px;font-weight:700;color:var(--sf-text-weak);margin:16px 0 8px -20px;">' + label + '</div>';
+            grouped[m].forEach(e => {
+                const guests = this._getEventGuests(e);
+                html += '<div class="deal-timeline-item" style="cursor:pointer;" onclick="app.viewEvent(\'' + e.id + '\')">'
+                    + '<div class="deal-timeline-dot" style="background:' + (e.status==='Completed'?'#22c55e':'#3b82f6') + ';"></div>'
+                    + '<div style="flex:1;"><div style="font-weight:600;">' + (ti[e.type]||'') + ' ' + (e.name||'') + '</div>'
+                    + '<div style="font-size:11px;color:var(--sf-text-weak);">' + (e.start ? new Date(e.start).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '') + (e.address ? ' · ' + e.address : '') + ' · ' + guests.length + ' guests</div></div></div>';
+            });
+        });
+        return html + '</div>';
+    },
+
+    _renderEventList(sorted, ti) {
+        return '<div class="card" style="overflow:hidden;"><div class="table-container" style="max-height:calc(100vh - 300px);overflow-y:auto;"><table class="compact-table"><thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Location</th><th>Guests</th><th>RSVP</th><th>Status</th></tr></thead><tbody>'
+            + sorted.map(e => {
+                const guests = this._getEventGuests(e);
+                const rsvp = this._getEventRSVP(e, guests);
+                return '<tr style="cursor:pointer;" onclick="app.viewEvent(\'' + e.id + '\')"><td style="color:var(--sf-brand);font-weight:600;">' + (e.name||'') + '</td><td>' + (ti[e.type]||'') + ' ' + (e.type||'') + '</td><td>' + (e.start ? new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '') + '</td><td>' + (e.address||'') + '</td><td>' + guests.length + '</td><td style="font-size:11px;"><span style="color:var(--sf-success);">' + rsvp.yes + '✓</span> <span style="color:var(--sf-warning);">' + rsvp.maybe + '?</span> <span style="color:var(--sf-error);">' + rsvp.no + '✕</span></td><td>' + (e.status||'') + '</td></tr>';
+            }).join('') + '</tbody></table></div></div>';
+    },
+
+    _getEventGuests(e) {
+        const guests = [];
+        if (e.contactId) { const c = this.data.contacts.find(x => x.id === e.contactId); if (c) guests.push(c); }
+        if (e.attendees) {
+            e.attendees.split(',').map(s=>s.trim()).filter(Boolean).forEach(name => {
+                const c = this.data.contacts.find(x => (x.name||'').toLowerCase() === name.toLowerCase());
+                if (c && !guests.find(g => g.id === c.id)) guests.push(c);
+                else if (!c) guests.push({id: null, name: name});
+            });
+        }
+        if (e._guests) e._guests.forEach(g => { if (!guests.find(x => x.id === g.id)) guests.push(g); });
+        return guests;
+    },
+
+    _getEventRSVP(e, guests) {
+        const statuses = e.contactStatuses || {};
+        let yes=0, no=0, maybe=0, pending=0;
+        guests.forEach(g => {
+            const s = statuses[g.id] || 'Invited';
+            if (s === 'Attending' || s === 'Attended') yes++;
+            else if (s === 'Declined') no++;
+            else if (s === 'Maybe') maybe++;
+            else pending++;
+        });
+        return {yes, no, maybe, pending, total: guests.length};
+    },
+
+    evtSendUpdate(eventId) {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        const emails = guests.map(g => g.pe_email || g.we_email || g.email).filter(Boolean);
+        if (!emails.length) { alert('No guest emails found.'); return; }
+        const subject = prompt('Email subject:', 'Update: ' + e.name);
+        if (!subject) return;
+        const body = prompt('Message:');
+        if (!body) return;
+        const mailto = 'mailto:' + emails.join(',') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+        window.open(mailto);
+    },
+
+    evtAddGuests(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const name = prompt('Contact name to add as guest:');
+        if (!name) return;
+        const c = this.data.contacts.find(x => (x.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!c) { alert('Contact not found. Try a different name.'); return; }
+        const current = (e.attendees||'').split(',').map(s=>s.trim()).filter(Boolean);
+        if (!current.includes(c.name)) { current.push(c.name); e.attendees = current.join(', '); }
+        if (!e.contactStatuses) e.contactStatuses = {};
+        e.contactStatuses[c.id] = 'Invited';
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    evtAddBudgetItem(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('Budget item (e.g. Venue, Catering, Decor):');
+        if (!item) return;
+        const amount = parseFloat(prompt('Amount ($):','0')) || 0;
+        if (!e._budget) e._budget = [];
+        e._budget.push({item, amount, paid: false});
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtToggleBudgetPaid(eventId, idx) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e || !e._budget) return;
+        e._budget[idx].paid = !e._budget[idx].paid;
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtAddChecklist(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('Checklist item:');
+        if (!item) return;
+        if (!e._checklist) e._checklist = [];
+        e._checklist.push({text: item, done: false});
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtToggleCheck(eventId, idx) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e || !e._checklist) return;
+        e._checklist[idx].done = !e._checklist[idx].done;
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtAddPotluck(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('What to bring (e.g. Appetizer, Wine, Dessert):');
+        if (!item) return;
+        const who = prompt('Who is bringing it? (leave blank for unclaimed):','');
+        if (!e._potluck) e._potluck = [];
+        e._potluck.push({item, who: who||'', claimed: !!who});
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtMarkAttendance(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        if (!e.contactStatuses) e.contactStatuses = {};
+        guests.forEach(g => {
+            if (g.id && e.contactStatuses[g.id] === 'Attending') {
+                e.contactStatuses[g.id] = 'Attended';
+                const today = new Date().toISOString().split('T')[0];
+                const contact = this.data.contacts.find(c => c.id === g.id);
+                if (contact) { contact.la = today; contact.updated_at = new Date().toISOString(); }
+            }
+        });
+        e.status = 'Completed';
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtSendThankYou(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        const attended = guests.filter(g => g.id && (e.contactStatuses||{})[g.id] === 'Attended');
+        const emails = attended.map(g => g.pe_email || g.we_email || g.email).filter(Boolean);
+        if (!emails.length) { alert('No attendee emails found.'); return; }
+        const mailto = 'mailto:' + emails.join(',') + '?subject=' + encodeURIComponent('Thank you for coming to ' + e.name) + '&body=' + encodeURIComponent('Hi everyone,\n\nThank you so much for coming to ' + e.name + '! It was great seeing you.\n\nBest regards');
+        window.open(mailto);
+    },
+
+    evtSaveRecap(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const recap = prompt('Event recap notes:', e._recap || '');
+        if (recap === null) return;
+        e._recap = recap;
+        this.persist(); this.renderEventDetail();
     },
 
     renderEventDetail() {
@@ -3203,7 +3365,9 @@ const app = {
         const relatedAccounts = acct ? [acct] : [];
         const actTypeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
         const relatedActivities = this.data.activities.filter(a => (e.activityIds || []).includes(a.id));
-        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', Other:'📋'};
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', 'Birthday Party':'🎂', 'Happy Hour':'🍻', Other:'📋'};
+        const guests = this._getEventGuests(e);
+        const rsvp = this._getEventRSVP(e, guests);
         const sfField = (label, value, fieldKey, type) => {
             if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
             return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineEventEdit('${e.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
@@ -3301,7 +3465,7 @@ const app = {
                                 <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pe_email','email',this)">${c.pe_email||c.email||''}</td>
                                 <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','instagram','text',this)">${c.instagram||''}</td>
                                 <td>${cAcct ? cAcct.name : ''}</td>
-                                <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>Attending</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>Attended</option></select></td>
+                                <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>⏳ Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>✓ Attending</option><option value="Maybe" ${evtStatus==='Maybe'?'selected':''}>? Maybe</option><option value="Declined" ${evtStatus==='Declined'?'selected':''}>✕ Declined</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>✓ Attended</option></select></td>
                             </tr>`; }).join('')}
                         </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
                         </div>
@@ -3344,18 +3508,87 @@ const app = {
                     </div>
                 </div>
 
-                <!-- RIGHT COLUMN — Notes -->
+                <!-- RIGHT COLUMN — Planning & Post-Event -->
                 <div style="width:380px; flex-shrink:0; position:sticky; top:0;">
+                    <!-- RSVP Summary & Actions -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">*Notes</div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Guest Management</div>
                         <div style="padding:12px 16px;">
-                            <textarea onblur="app.saveEventNotes('${e.id}', this.value)" style="width:100%; min-height:120px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(e.notes || '').replace(/</g,'&lt;')}</textarea>
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-success);">${rsvp.yes}</div><div style="font-size:9px;color:var(--sf-text-weak);">YES</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-warning);">${rsvp.maybe}</div><div style="font-size:9px;color:var(--sf-text-weak);">MAYBE</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-error);">${rsvp.no}</div><div style="font-size:9px;color:var(--sf-text-weak);">NO</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-text-weak);">${rsvp.pending}</div><div style="font-size:9px;color:var(--sf-text-weak);">PENDING</div></div>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:4px;">
+                                <button class="btn-small" onclick="app.evtAddGuests('${e.id}')" style="width:100%;">+ Add Guests from CRM</button>
+                                <button class="btn-small" onclick="app.evtSendUpdate('${e.id}')" style="width:100%;">📧 Send Update to Guests</button>
+                                ${e.status !== 'Completed' ? '<button class="btn-small" onclick="app.evtMarkAttendance(\'' + e.id + '\')" style="width:100%;">✓ Mark Attendance & Complete</button>' : '<button class="btn-small" onclick="app.evtSendThankYou(\'' + e.id + '\')" style="width:100%;">💌 Send Thank You</button>'}
+                            </div>
                         </div>
                     </div>
+
+                    <!-- Budget -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">💰 Budget</span>
+                            <button class="btn-small" onclick="app.evtAddBudgetItem('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._budget||[]).length ? (e._budget||[]).map((b,i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ${b.paid?'checked':''} onchange="app.evtToggleBudgetPaid('${e.id}',${i})"><span style="${b.paid?'text-decoration:line-through;color:var(--sf-text-weak);':''}">${b.item}</span></label>
+                                <span style="font-weight:600;">$${b.amount.toFixed(0)}</span>
+                            </div>`).join('') + '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;font-weight:700;"><span>Total</span><span>$' + (e._budget||[]).reduce((s,b)=>s+b.amount,0).toFixed(0) + '</span></div>' : '<div style="font-size:12px;color:var(--sf-text-weak);">No budget items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Checklist -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">☑ Planning Checklist</span>
+                            <button class="btn-small" onclick="app.evtAddChecklist('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._checklist||[]).length ? (e._checklist||[]).map((c,i) => `<div style="padding:3px 0;font-size:12px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ${c.done?'checked':''} onchange="app.evtToggleCheck('${e.id}',${i})"><span style="${c.done?'text-decoration:line-through;color:var(--sf-text-weak);':''}">${c.text}</span></label>
+                            </div>`).join('') : '<div style="font-size:12px;color:var(--sf-text-weak);">No checklist items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Potluck -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">🍽 Potluck / Contributions</span>
+                            <button class="btn-small" onclick="app.evtAddPotluck('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._potluck||[]).length ? (e._potluck||[]).map(p => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid var(--sf-border-weak);">
+                                <span>${p.item}</span><span style="color:${p.claimed?'var(--sf-success)':'var(--sf-warning)'}; font-weight:600;">${p.who || 'Unclaimed'}</span>
+                            </div>`).join('') : '<div style="font-size:12px;color:var(--sf-text-weak);">No items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Post-Event Recap -->
+                    ${e.status === 'Completed' ? `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">📝 Event Recap</span>
+                            <button class="btn-small" onclick="app.evtSaveRecap('${e.id}')">Edit</button>
+                        </div>
+                        <div style="padding:12px 16px;font-size:12px;white-space:pre-wrap;color:var(--sf-text-weak);">${e._recap || 'No recap yet. Click Edit to add notes about what went well.'}</div>
+                    </div>` : ''}
+
+                    <!-- Notes -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Notes</div>
+                        <div style="padding:12px 16px;">
+                            <textarea onblur="app.saveEventNotes('${e.id}', this.value)" style="width:100%; min-height:80px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(e.notes || '').replace(/</g,'&lt;')}</textarea>
+                        </div>
+                    </div>
+
                     ${e.address ? `
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Map</div>
-                        <div id="eventMapContainer" style="height:250px; border-radius:0 0 4px 4px;"></div>
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">📍 Map</div>
+                        <div id="eventMapContainer" style="height:200px; border-radius:0 0 4px 4px;"></div>
                     </div>` : ''}
                 </div>
             </div>
