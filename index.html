@@ -2904,6 +2904,22 @@ const app = {
         'Closed Lost': ['Post-mortem notes']
     },
 
+    _dealScore(d) {
+        let score = 0;
+        const stageWeights = {'Prospect':10,'Pitch':25,'Mandate':45,'Due Diligence':65,'Negotiation':80,'Closed Won':100,'Closed Lost':0};
+        score += stageWeights[d.stage] || 0;
+        score += Math.min((d.probability||0) * 0.3, 30);
+        const health = this._dealHealth(d);
+        score += health === 'green' ? 15 : health === 'yellow' ? 5 : -10;
+        if (d.value >= 50) score += 10;
+        else if (d.value >= 10) score += 5;
+        const ddDone = d._ddStatus ? Object.values(d._ddStatus).filter(Boolean).length : 0;
+        score += Math.min(ddDone * 2, 15);
+        const icApprovals = (d._icVotes||[]).filter(v => v.vote === 'Approve').length;
+        score += icApprovals * 5;
+        return Math.min(Math.max(Math.round(score), 0), 100);
+    },
+
     _dealHealth(d) {
         const lastAct = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).sort((a,b)=>(b.date||b.dueDate||'').localeCompare(a.date||a.dueDate||'')).shift();
         const days = lastAct ? Math.floor((new Date() - new Date(lastAct.date || lastAct.dueDate)) / 86400000) : 999;
@@ -2957,7 +2973,7 @@ const app = {
                     const daysInStage = d._stageDate ? Math.floor((new Date()-new Date(d._stageDate))/86400000) : '';
                     return '<div class="kanban-card health-' + health + '" draggable="true" ondragstart="app.dragDeal(event,\'' + d.id + '\')" onclick="app.viewDealDetail(\'' + d.id + '\')">'
                         + '<div class="kanban-card-title">' + (d.name||'') + '</div>'
-                        + '<div class="kanban-card-meta">' + (acct ? acct.name + ' · ' : '') + '$' + (d.value||0) + 'M · ' + (d.probability||0) + '%</div>'
+                        + '<div class="kanban-card-meta">' + (acct ? acct.name + ' · ' : '') + '$' + (d.value||0) + 'M · ' + (d.probability||0) + '% · <span style="font-weight:700;color:' + (this._dealScore(d) >= 70 ? '#22c55e' : this._dealScore(d) >= 40 ? '#f59e0b' : '#9ca3af') + ';">Score: ' + this._dealScore(d) + '</span></div>'
                         + '<div class="kanban-card-tags">'
                         + (d.sector ? '<span class="kanban-card-tag" style="background:#e0e7ff;color:#3730a3;">' + d.sector + '</span>' : '')
                         + (d.closeDate ? '<span class="kanban-card-tag" style="background:#fef3c7;color:#92400e;">Close ' + d.closeDate.slice(5) + '</span>' : '')
@@ -3023,6 +3039,7 @@ const app = {
             + '<div class="deal-metric"><div class="deal-metric-label">Probability</div><div class="deal-metric-value">' + (d.probability||0) + '%</div></div>'
             + '<div class="deal-metric"><div class="deal-metric-label">Weighted Value</div><div class="deal-metric-value">$' + ((d.value||0)*(d.probability||0)/100).toFixed(1) + 'M</div></div>'
             + '<div class="deal-metric"><div class="deal-metric-label">Close Date</div><div class="deal-metric-value">' + (d.closeDate||'TBD') + '</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Deal Score</div><div class="deal-metric-value" style="color:' + (this._dealScore(d) >= 70 ? '#22c55e' : this._dealScore(d) >= 40 ? '#f59e0b' : '#9ca3af') + ';">' + this._dealScore(d) + '/100</div></div>'
             + (d.feeStructure ? '<div class="deal-metric"><div class="deal-metric-label">Fee Structure</div><div class="deal-metric-value" style="font-size:13px;">' + d.feeStructure + '</div></div>' : '')
             + (d.sector ? '<div class="deal-metric"><div class="deal-metric-label">Sector</div><div class="deal-metric-value" style="font-size:13px;">' + d.sector + '</div></div>' : '')
             + (d.continuationVehicle ? '<div class="deal-metric"><div class="deal-metric-label">Continuation Vehicle</div><div class="deal-metric-value" style="font-size:13px;">' + d.continuationVehicle + '</div></div>' : '')
