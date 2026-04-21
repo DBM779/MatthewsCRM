@@ -607,9 +607,23 @@
                 <div class="form-group"><label>Industry</label><input type="text" id="accountIndustry"></div>
                 <div class="form-group"><label>Website</label><input type="url" id="accountWebsite"></div>
                 <div class="form-group"><label>Address</label><input type="text" id="accountAddress"></div>
-                <div class="form-group"><label>Type</label><select id="accountType"><option value="Client">Client</option><option value="Prospect">Prospect</option><option value="Partner">Partner</option><option value="Own Company">Own Company</option><option value="Vendor">Vendor</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Type</label><select id="accountType"><option value="Client">Client</option><option value="Prospect">Prospect</option><option value="Partner">Partner</option><option value="Portfolio Company">Portfolio Company</option><option value="Own Company">Own Company</option><option value="Vendor">Vendor</option><option value="Other">Other</option></select></div>
+                <div id="portfolioFields" style="display:none;border:1px solid var(--sf-border-weak);border-radius:4px;padding:10px;margin-bottom:10px;background:var(--sf-bg);">
+                    <div style="font-size:11px;font-weight:700;color:var(--sf-text-weak);margin-bottom:8px;">PORTFOLIO COMPANY DETAILS</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div class="form-group" style="margin:0;"><label>Ownership %</label><input type="number" id="accountOwnership" min="0" max="100" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>Acquisition Date</label><input type="date" id="accountAcqDate"></div>
+                        <div class="form-group" style="margin:0;"><label>Entry Valuation ($M)</label><input type="number" id="accountEntryVal" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>Current Valuation ($M)</label><input type="number" id="accountCurrentVal" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>Invested Capital ($M)</label><input type="number" id="accountInvested" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>Revenue ($M)</label><input type="number" id="accountRevenue" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>EBITDA ($M)</label><input type="number" id="accountEBITDA" step="0.1"></div>
+                        <div class="form-group" style="margin:0;"><label>Status</label><select id="accountPortStatus"><option value="Active">Active</option><option value="Exited">Exited</option><option value="Written Off">Written Off</option></select></div>
+                    </div>
+                </div>
                 <div class="form-group"><label>Drive Link</label><input type="url" id="accountDriveLink" placeholder="Google Drive URL for account folder"></div>
                 <div class="form-group"><label>Notes</label><textarea id="accountNotes"></textarea></div>
+                <script>document.getElementById('accountType').addEventListener('change', function(){document.getElementById('portfolioFields').style.display=this.value==='Portfolio Company'?'':'none';});</script>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalAccount')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
         </div>
@@ -1392,14 +1406,30 @@ const app = {
             address: document.getElementById('accountAddress').value || null,
             type: document.getElementById('accountType').value,
             driveLink: document.getElementById('accountDriveLink').value || null,
-            notes: document.getElementById('accountNotes').value || null
+            notes: document.getElementById('accountNotes').value || null,
+            ownership: parseFloat(document.getElementById('accountOwnership').value) || null,
+            acqDate: document.getElementById('accountAcqDate').value || null,
+            entryVal: parseFloat(document.getElementById('accountEntryVal').value) || null,
+            currentVal: parseFloat(document.getElementById('accountCurrentVal').value) || null,
+            invested: parseFloat(document.getElementById('accountInvested').value) || null,
+            revenue: parseFloat(document.getElementById('accountRevenue').value) || null,
+            ebitda: parseFloat(document.getElementById('accountEBITDA').value) || null,
+            portStatus: document.getElementById('accountPortStatus').value || null
         };
 
         if (id) {
             const idx = this.data.accounts.findIndex(a => a.id === id);
-            if (idx >= 0) this.data.accounts[idx] = {...this.data.accounts[idx], ...account}; firestoreUpsert("accounts", this.data.accounts[idx]);
+            if (idx >= 0) {
+                const old = this.data.accounts[idx];
+                const changes = this._diffRecord(old, account, ['name','type','industry','ownership','entryVal','currentVal','invested','portStatus']);
+                if (changes.length) this.logChange('account', id, account.name, changes);
+                this.data.accounts[idx] = {...old, ...account};
+                firestoreUpsert("accounts", this.data.accounts[idx]);
+            }
         } else {
-            const newAcct = {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()}; this.data.accounts.push(newAcct); firestoreUpsert('accounts', newAcct);
+            const newAcct = {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.accounts.push(newAcct); firestoreUpsert('accounts', newAcct);
+            this.logChange('account', newAcct.id, account.name, [{field:'created', from:'', to:'New account'}]);
         }
         this.persist();
         if (account.address) this.geocodeAddress(account.address);
@@ -2684,7 +2714,10 @@ const app = {
 
     _acctFilter: {type: '', text: ''},
 
+    _acctViewMode: 'list',
+
     renderAccounts() {
+        if (this._acctViewMode === 'portfolio') { this._renderPortfolioDashboard(); return; }
         const af = this._acctFilter;
         const types = [...new Set(this.data.accounts.map(a => a.type).filter(Boolean))].sort();
         const clientCount = this.data.accounts.filter(a => a.type === 'Client').length;
@@ -2708,9 +2741,15 @@ const app = {
                 <button class="btn-small btn-primary" onclick="app.openBulkUpdate('accounts')">Bulk Update</button>
                 <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderAccounts();">Deselect All</button>
             </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <h2 style="margin:0;">Accounts</h2>
-                <button class="btn-primary" onclick="app.openAccountForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Account</button>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <div class="cal-view-tabs">
+                        <button class="cal-view-tab active" onclick="app._acctViewMode='list';app.renderAccounts();">All Accounts</button>
+                        <button class="cal-view-tab" onclick="app._acctViewMode='portfolio';app.renderAccounts();">Portfolio</button>
+                    </div>
+                    <button class="btn-primary" onclick="app.openAccountForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Account</button>
+                </div>
             </div>
             <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(5, 1fr);">
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${!af.type?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._acctFilter.type=''; app.renderAccounts();">
@@ -2782,6 +2821,73 @@ const app = {
             </div>
         </div>`).join('')}</div>`;
         document.getElementById('content').innerHTML = html + mobileAccts;
+    },
+
+    _renderPortfolioDashboard() {
+        const portfolio = this.data.accounts.filter(a => a.type === 'Portfolio Company');
+        const active = portfolio.filter(a => a.portStatus !== 'Exited' && a.portStatus !== 'Written Off');
+        const exited = portfolio.filter(a => a.portStatus === 'Exited');
+        const totalInvested = portfolio.reduce((s,a) => s + (a.invested||0), 0);
+        const totalCurrent = active.reduce((s,a) => s + (a.currentVal||0), 0);
+        const totalRevenue = active.reduce((s,a) => s + (a.revenue||0), 0);
+        const totalEBITDA = active.reduce((s,a) => s + (a.ebitda||0), 0);
+        const grossMOIC = totalInvested > 0 ? (totalCurrent / totalInvested) : 0;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<h2 style="margin:0;">Portfolio Dashboard</h2>'
+            + '<div style="display:flex;gap:6px;align-items:center;"><div class="cal-view-tabs">'
+            + '<button class="cal-view-tab" onclick="app._acctViewMode=\'list\';app.renderAccounts();">All Accounts</button>'
+            + '<button class="cal-view-tab active" onclick="app._acctViewMode=\'portfolio\';app.renderAccounts();">Portfolio</button>'
+            + '</div><button class="btn-primary" onclick="app.openAccountForm();setTimeout(()=>{document.getElementById(\'accountType\').value=\'Portfolio Company\';document.getElementById(\'portfolioFields\').style.display=\'\';},100);" style="padding:2px 10px;font-size:12px;height:26px;">+ Portfolio Co</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Companies</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalInvested.toFixed(0) + 'M</div><div class="ps-label">Total Invested</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCurrent.toFixed(0) + 'M</div><div class="ps-label">Current Value</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + grossMOIC.toFixed(1) + 'x</div><div class="ps-label">Gross MOIC</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalRevenue.toFixed(0) + 'M</div><div class="ps-label">Portfolio Revenue</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalEBITDA.toFixed(0) + 'M</div><div class="ps-label">Portfolio EBITDA</div></div>'
+            + '</div>';
+
+        if (active.length) {
+            html += '<div class="card"><div class="card-header">Active Portfolio Companies</div><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Company</th><th>Industry</th><th>Ownership</th><th>Invested</th><th>Current Val</th><th>MOIC</th><th>Revenue</th><th>EBITDA</th><th>Acquired</th></tr></thead><tbody>';
+            active.forEach(a => {
+                const moic = a.invested ? ((a.currentVal||0) / a.invested).toFixed(1) : '—';
+                const moicColor = parseFloat(moic) >= 2 ? 'var(--sf-success)' : parseFloat(moic) >= 1 ? 'var(--sf-warning)' : 'var(--sf-error)';
+                html += '<tr style="cursor:pointer;" onclick="app.viewAccount(\'' + a.id + '\')">'
+                    + '<td style="font-weight:600;color:var(--sf-brand);">' + a.name + '</td>'
+                    + '<td>' + (a.industry||'') + '</td>'
+                    + '<td>' + (a.ownership ? a.ownership + '%' : '—') + '</td>'
+                    + '<td>$' + (a.invested||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.currentVal||0).toFixed(1) + 'M</td>'
+                    + '<td style="font-weight:700;color:' + moicColor + ';">' + moic + 'x</td>'
+                    + '<td>$' + (a.revenue||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.ebitda||0).toFixed(1) + 'M</td>'
+                    + '<td>' + (a.acqDate||'—') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        if (exited.length) {
+            html += '<div class="card" style="margin-top:12px;"><div class="card-header">Exited Investments</div><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Company</th><th>Industry</th><th>Invested</th><th>Exit Val</th><th>MOIC</th><th>Acquired</th></tr></thead><tbody>';
+            exited.forEach(a => {
+                const moic = a.invested ? ((a.currentVal||0) / a.invested).toFixed(1) : '—';
+                html += '<tr style="cursor:pointer;" onclick="app.viewAccount(\'' + a.id + '\')">'
+                    + '<td style="font-weight:600;color:var(--sf-brand);">' + a.name + '</td>'
+                    + '<td>' + (a.industry||'') + '</td>'
+                    + '<td>$' + (a.invested||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.currentVal||0).toFixed(1) + 'M</td>'
+                    + '<td style="font-weight:700;">' + moic + 'x</td>'
+                    + '<td>' + (a.acqDate||'—') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        if (!portfolio.length) html += '<div style="text-align:center;padding:40px;color:var(--sf-text-weak);">No portfolio companies yet. Create an account with type "Portfolio Company" to get started.</div>';
+
+        document.getElementById('content').innerHTML = html;
     },
 
     _dealView: 'pipeline',
@@ -5841,6 +5947,15 @@ const app = {
         document.getElementById('accountType').value = 'Prospect';
         document.getElementById('accountDriveLink').value = '';
         document.getElementById('accountNotes').value = '';
+        document.getElementById('accountOwnership').value = '';
+        document.getElementById('accountAcqDate').value = '';
+        document.getElementById('accountEntryVal').value = '';
+        document.getElementById('accountCurrentVal').value = '';
+        document.getElementById('accountInvested').value = '';
+        document.getElementById('accountRevenue').value = '';
+        document.getElementById('accountEBITDA').value = '';
+        document.getElementById('accountPortStatus').value = 'Active';
+        document.getElementById('portfolioFields').style.display = 'none';
         this.openModal('modalAccount');
     },
 
@@ -5855,6 +5970,15 @@ const app = {
         document.getElementById('accountType').value = account.type || 'Prospect';
         document.getElementById('accountDriveLink').value = account.driveLink || '';
         document.getElementById('accountNotes').value = account.notes || '';
+        document.getElementById('accountOwnership').value = account.ownership || '';
+        document.getElementById('accountAcqDate').value = account.acqDate || '';
+        document.getElementById('accountEntryVal').value = account.entryVal || '';
+        document.getElementById('accountCurrentVal').value = account.currentVal || '';
+        document.getElementById('accountInvested').value = account.invested || '';
+        document.getElementById('accountRevenue').value = account.revenue || '';
+        document.getElementById('accountEBITDA').value = account.ebitda || '';
+        document.getElementById('accountPortStatus').value = account.portStatus || 'Active';
+        document.getElementById('portfolioFields').style.display = account.type === 'Portfolio Company' ? '' : 'none';
         this.openModal('modalAccount');
     },
 
