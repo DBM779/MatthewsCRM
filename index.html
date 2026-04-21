@@ -1014,6 +1014,133 @@ const app = {
             + '</div>';
     },
 
+    async aiAnalyzeDeal(dealId) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        const el = document.getElementById('aiDealPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Analyzing deal...</div>';
+        const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+        const acts = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).length;
+        const ddDone = d._ddStatus ? Object.values(d._ddStatus).filter(Boolean).length : 0;
+        const icVotes = (d._icVotes||[]);
+        const prompt = `You are a senior investment banking advisor. Analyze this deal and provide: 1) Risk assessment (2-3 key risks), 2) Suggested next steps (3-4 specific actions), 3) What's missing or needs attention. Be concise and actionable.
+
+Deal: ${d.name}
+Stage: ${d.stage} | Value: $${d.value}M | Probability: ${d.probability}%
+Sector: ${d.sector || 'Not specified'} | Close Date: ${d.closeDate || 'TBD'}
+Account: ${acct ? acct.name : 'Unknown'} | Industry: ${acct?.industry || 'Unknown'}
+Fee Structure: ${d.feeStructure || 'Not set'}
+Source: ${d.source || 'Unknown'} | Source Contact: ${d.sourceContact || 'None'}
+Activities logged: ${acts} | DD items completed: ${ddDone}/25
+IC Votes: ${icVotes.length ? icVotes.map(v=>v.member+':'+v.vote).join(', ') : 'None yet'}
+Counterparties: ${d.counterparties || 'None listed'}
+Technical Notes: ${d.techNotes || 'None'}`;
+        const result = await this.askGemini(prompt, 'deal_' + dealId);
+        this._showAIPanel('aiDealPanel', result);
+    },
+
+    async aiContactSuggest(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        const el = document.getElementById('aiContactPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Generating suggestions...</div>';
+        const la = c.la || c.last_activity_display;
+        const dsla = la ? Math.floor((new Date() - new Date(la)) / 86400000) : 999;
+        const acts = (this.data.activities||[]).filter(a => (a.contactId||a.contact_id) === c.id).slice(0,5);
+        const deals = this.data.deals.filter(d => (this.data.dealContacts||[]).some(dc => dc.deal_id === d.id && dc.contact_id === c.id));
+        const conns = (this.data._connections||[]).filter(cn => cn.from === c.id || cn.to === c.id);
+        const prompt = `You are a relationship-focused CRM advisor for an investment banker in Dallas. Generate: 1) A 3-sentence relationship summary, 2) Suggested outreach message (casual but professional), 3) Talking points for next conversation. Be specific and personal.
+
+Contact: ${c.name}
+Title: ${c.title || 'Unknown'} | Company: ${c.account_name || ''}
+Tier: ${c.tier || 'Untiered'} | Obligation: ${c.obligation || 'Unknown'}
+Days since last activity: ${dsla === 999 ? 'Never contacted' : dsla + ' days'}
+Recent activities: ${acts.map(a => a.type + ': ' + (a.subject||'')).join(', ') || 'None'}
+Active deals together: ${deals.map(d => d.name).join(', ') || 'None'}
+Connections: knows ${conns.length} other contacts
+Birthdate: ${c.birthdate || 'Unknown'} | City: ${c.mailing_city||c.MailingCity||'Unknown'}
+Tags: ${c.tags || 'None'} | Lead Source: ${c.lead_source || 'Unknown'}`;
+        const result = await this.askGemini(prompt, 'contact_' + contactId);
+        this._showAIPanel('aiContactPanel', result);
+    },
+
+    async aiMeetingPrep(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const el = document.getElementById('aiMeetingPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Preparing brief...</div>';
+        const guests = this._getEventGuests(e);
+        const guestInfo = guests.slice(0,5).map(g => {
+            const acts = (this.data.activities||[]).filter(a => (a.contactId||a.contact_id) === g.id).slice(0,3);
+            const deals = this.data.deals.filter(d => (this.data.dealContacts||[]).some(dc => dc.deal_id === d.id && dc.contact_id === g.id));
+            return `${g.name} (${g.title||''}): ${acts.length} recent activities, ${deals.length} deals`;
+        }).join('\n');
+        const prompt = `You are preparing a meeting brief for an investment banker. Create: 1) Meeting overview, 2) Key attendee profiles (what to know about each), 3) Suggested agenda/talking points, 4) Follow-up actions to prepare.
+
+Event: ${e.name}
+Type: ${e.type || 'Meeting'} | Date: ${e.start || 'TBD'}
+Location: ${e.address || 'TBD'}
+Description: ${e.description || 'None'}
+Attendees:
+${guestInfo || 'No attendees linked'}`;
+        const result = await this.askGemini(prompt, 'meeting_' + eventId);
+        this._showAIPanel('aiMeetingPanel', result);
+    },
+
+    async aiDashboardInsights() {
+        const el = document.getElementById('aiDashInsights');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Generating insights...</div>';
+        const today = new Date().toISOString().slice(0,10);
+        const activeDeals = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const stalled = activeDeals.filter(d => this._dealHealth(d) === 'red');
+        const pipelineVal = activeDeals.reduce((s,d) => s + (d.value||0), 0);
+        const overdue = this.data.activities.filter(a => a.dueDate && a.dueDate < today && a.status !== 'Completed').length;
+        const gd = c => { const la = c.la||c.last_activity_display; return la ? Math.floor((new Date()-new Date(la))/86400000) : 999; };
+        const coldVIPs = this.data.contacts.filter(c => c.tier === '1-VIP' && gd(c) >= 14).slice(0,5);
+        const prompt = `You are a CRM AI assistant for an investment banker. Provide 3-4 brief, actionable insights based on this data. Be specific with names and numbers. Format as bullet points.
+
+Pipeline: $${pipelineVal.toFixed(0)}M across ${activeDeals.length} active deals
+Stalled deals (14+ days no activity): ${stalled.map(d => d.name + ' ($' + d.value + 'M, ' + d.stage + ')').join(', ') || 'None'}
+Overdue tasks: ${overdue}
+VIPs needing outreach: ${coldVIPs.map(c => c.name + ' (' + gd(c) + 'D)').join(', ') || 'None'}
+Total contacts: ${this.data.contacts.length} | Total accounts: ${this.data.accounts.length}
+Recent activity types: ${[...new Set(this.data.activities.slice(-20).map(a=>a.type))].join(', ')}`;
+        const result = await this.askGemini(prompt, 'dash_' + today);
+        this._showAIPanel('aiDashInsights', result);
+    },
+
+    async aiDraftEmail(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        const purpose = prompt('What is the email about?', 'Follow-up / check in');
+        if (!purpose) return;
+        const el = document.getElementById('aiEmailDraft');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Drafting email...</div>';
+        const la = c.la || c.last_activity_display;
+        const dsla = la ? Math.floor((new Date() - new Date(la)) / 86400000) : 999;
+        const prompt = `Draft a professional but warm email for an investment banker in Dallas. Keep it concise (3-5 sentences). Include a clear subject line on the first line prefixed with "Subject: ".
+
+To: ${c.name}
+Title: ${c.title || ''} | Relationship: ${c.obligation || 'Professional'}
+Days since last contact: ${dsla === 999 ? 'Never' : dsla}
+Purpose: ${purpose}
+Tone: Professional but personal, not overly formal`;
+        const result = await this.askGemini(prompt);
+        if (el) {
+            const subjectMatch = result.match(/Subject:\s*(.+)/i);
+            const subject = subjectMatch ? subjectMatch[1].trim() : purpose;
+            const body = result.replace(/Subject:\s*.+\n?/i, '').trim();
+            el.innerHTML = '<div style="background:linear-gradient(135deg,#f0f4ff,#e8f0fe);border:1px solid #c2d4f0;border-radius:8px;padding:14px 16px;font-size:13px;position:relative;">'
+                + '<div style="position:absolute;top:8px;right:10px;font-size:10px;color:#5f6368;font-weight:600;">✨ Gemini AI</div>'
+                + '<div style="font-weight:700;margin-bottom:6px;">Subject: ' + subject + '</div>'
+                + '<div style="white-space:pre-wrap;line-height:1.6;">' + body + '</div>'
+                + '<div style="margin-top:10px;display:flex;gap:6px;">'
+                + '<button class="btn-small btn-primary" onclick="window.open(\'mailto:' + (c.pe_email||c.we_email||c.email||'') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body) + '\')">Send via Email</button>'
+                + '<button class="btn-small" onclick="navigator.clipboard.writeText(this.closest(\'div[style*=background]\').querySelector(\'div[style*=white-space]\').textContent)">Copy</button>'
+                + '</div></div>';
+        }
+    },
+
     // === Gmail Integration ===
     GMAIL_CLIENT_ID: '952660161996-el5663ja1ns7q1mg7h90fm471am7kqgd.apps.googleusercontent.com',
     _gmailToken: null,
@@ -1852,6 +1979,17 @@ const app = {
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app._dealView='analytics';app.navigate('deals')"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('tasks')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
+            </div>
+
+            <!-- AI Insights -->
+            <div style="background:#fff; border:1px solid #c2d4f0; border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid #4285f4;">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-weight:700; font-size:14px;">✨ AI Insights</span>
+                    <button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDashboardInsights()">Generate</button>
+                </div>
+                <div id="aiDashInsights" style="padding:10px 16px;">
+                    <div style="font-size:12px;color:var(--sf-text-weak);">Click "Generate" for AI-powered insights about your pipeline, contacts, and tasks.</div>
+                </div>
             </div>
 
             <!-- TODAY'S ACTION PLAN (top position) -->
@@ -3107,8 +3245,10 @@ const app = {
             + (acct ? '<div style="font-size:13px;color:var(--sf-text-weak);"><a onclick="app.viewAccount(\'' + acct.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + acct.name + '</a></div>' : '')
             + '</div><div style="display:flex;gap:6px;">'
             + '<button class="btn-small" onclick="app.editDeal(\'' + d.id + '\')">Edit</button>'
+            + '<button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiAnalyzeDeal(\'' + d.id + '\')">✨ AI Advisor</button>'
             + '<button class="btn-small" style="color:var(--sf-error);" onclick="if(confirm(\'Delete this deal?\')){app.data.deals=app.data.deals.filter(x=>x.id!==\'' + d.id + '\');app.persist();app._dealView=\'pipeline\';app.renderDeals();}">Delete</button>'
-            + '</div></div>';
+            + '</div></div>'
+            + '<div id="aiDealPanel"></div>';
 
         html += '<div class="deal-metrics">'
             + '<div class="deal-metric"><div class="deal-metric-label">Deal Size</div><div class="deal-metric-value">$' + (d.value||0) + 'M</div></div>'
@@ -3834,6 +3974,7 @@ const app = {
                     <div class="sf-hl-actions">
                         <button onclick="app.editEvent('${e.id}')">Edit</button>
                         <button onclick="app.duplicateEvent('${e.id}')">Duplicate</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiMeetingPrep('${e.id}')">✨ Prep Me</button>
                         ${e.status === 'Scheduled' ? `<button onclick="app.data.events.find(x=>x.id==='${e.id}').status='Completed'; app.persist(); app.renderEventDetail();">Mark Complete</button>` : ''}
                         <button onclick="if(confirm('Delete this event?')){app.deleteEvent('${e.id}')}" style="color:var(--sf-error);">Delete</button>
                     </div>
@@ -3848,6 +3989,7 @@ const app = {
                 </div>
             </div>
 
+            <div id="aiMeetingPanel"></div>
             <!-- Two-column layout like contacts -->
             <div style="display:flex; gap:12px; align-items:flex-start;">
                 <!-- LEFT COLUMN — Details -->
@@ -6049,6 +6191,8 @@ const app = {
                         <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">Log a Call</button>
                         <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">New Event</button>
                         <button onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Email</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiContactSuggest('${c.id}')">✨ AI Suggest</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDraftEmail('${c.id}')">✨ Draft Email</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
@@ -6062,6 +6206,8 @@ const app = {
                 </div>
             </div>
 
+            <div id="aiContactPanel"></div>
+            <div id="aiEmailDraft"></div>
             <!-- SF two-column layout: Left (Related/Details) + Right (Activity sidebar) -->
             <div style="display:flex; gap:12px; align-items:flex-start;">
                 <!-- LEFT COLUMN — Related / Details tabs -->
