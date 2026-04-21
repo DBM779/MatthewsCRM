@@ -1240,6 +1240,27 @@ const app = {
     },
 
     _persistTimer: null,
+    logChange(recordType, recordId, recordName, changes) {
+        if (!this.data._auditLog) this.data._auditLog = [];
+        this.data._auditLog.unshift({
+            ts: new Date().toISOString(),
+            type: recordType,
+            id: recordId,
+            name: recordName,
+            changes: changes
+        });
+        if (this.data._auditLog.length > 500) this.data._auditLog.length = 500;
+    },
+
+    _diffRecord(oldRec, newRec, fields) {
+        const changes = [];
+        fields.forEach(f => {
+            const o = (oldRec[f]||'').toString(), n = (newRec[f]||'').toString();
+            if (o !== n) changes.push({field: f, from: o || '(empty)', to: n || '(empty)'});
+        });
+        return changes;
+    },
+
     persist() {
         this.data._lastModified = new Date().toISOString();
         db.save(this.data);
@@ -1409,9 +1430,17 @@ const app = {
 
         if (id) {
             const idx = this.data.deals.findIndex(d => d.id === id);
-            if (idx >= 0) this.data.deals[idx] = {...this.data.deals[idx], ...deal};
+            if (idx >= 0) {
+                const old = this.data.deals[idx];
+                const changes = this._diffRecord(old, deal, ['name','stage','value','probability','sector','source','sourceContact','closeDate','feeStructure','counterparties','continuationVehicle']);
+                if (changes.length) this.logChange('deal', id, deal.name, changes);
+                this.data.deals[idx] = {...old, ...deal};
+            }
         } else {
-            this.data.deals.push({...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()});
+            const newDeal = {...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()};
+            if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newDeal._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
+            this.data.deals.push(newDeal);
+            this.logChange('deal', newDeal.id, deal.name, [{field:'created', from:'', to:'New deal'}]);
         }
         this.persist();
         this.closeModal('modalDeal');
@@ -2450,6 +2479,8 @@ const app = {
     saveInlineEdit(contactId, field, value) {
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
+        const oldVal = contact[field] || '';
+        if (oldVal !== (value||'')) this.logChange('contact', contactId, contact.name, [{field, from: oldVal||'(empty)', to: value||'(empty)'}]);
         contact[field] = value || null;
         this.persist();
         if (field === 'address' && value) this.geocodeAddress(value);
@@ -2839,6 +2870,7 @@ const app = {
         const id = e.dataTransfer.getData('text/plain');
         const deal = this.data.deals.find(d => d.id === id);
         if (!deal || deal.stage === newStage) return;
+        this.logChange('deal', id, deal.name, [{field:'stage', from: deal.stage, to: newStage}]);
         deal.stage = newStage;
         deal._stageDate = new Date().toISOString().slice(0,10);
         this.persist();
@@ -2920,6 +2952,25 @@ const app = {
         if (d.notes) html += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + d.notes + '</div></div>';
         if (!d.techNotes && !d.counterparties && !d.notes) html += '<div style="font-size:12px;color:var(--sf-text-weak);">No notes yet. Click Edit to add.</div>';
         html += '</div></div>';
+
+        // Audit Log for this deal
+        const dealLog = (this.data._auditLog||[]).filter(l => l.id === d.id).slice(0,20);
+        if (dealLog.length) {
+            html += '<div class="card" style="grid-column:1/-1;"><div class="card-header">📋 Change Log</div><div style="padding:12px;max-height:200px;overflow-y:auto;">';
+            dealLog.forEach(l => {
+                const date = new Date(l.ts).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + new Date(l.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+                l.changes.forEach(c => {
+                    html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:11px;">'
+                        + '<span style="color:var(--sf-text-weak);min-width:110px;">' + date + '</span>'
+                        + '<span style="font-weight:600;min-width:80px;">' + c.field + '</span>'
+                        + '<span style="color:var(--sf-error);">' + c.from + '</span>'
+                        + '<span style="color:var(--sf-text-weak);">→</span>'
+                        + '<span style="color:var(--sf-success);">' + c.to + '</span>'
+                        + '</div>';
+                });
+            });
+            html += '</div></div>';
+        }
 
         html += '</div>';
         document.getElementById('content').innerHTML = html;
