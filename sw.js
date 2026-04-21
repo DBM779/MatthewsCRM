@@ -1,4 +1,4 @@
-const CACHE_NAME = 'matthews-crm-v6';
+const CACHE_NAME = 'matthews-crm-v7';
 const ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', e => {

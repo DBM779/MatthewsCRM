@@ -5046,7 +5046,7 @@ Tone: Professional but personal, not overly formal`;
             + '<button class="cal-view-tab ' + (v==='day'?'active':'') + '" onclick="app._calView=\'day\';app.renderCalendar();">Day</button>'
             + '<button class="cal-view-tab ' + (v==='agenda'?'active':'') + '" onclick="app._calView=\'agenda\';app.renderCalendar();">Agenda</button>'
             + '</div>'
-            + (this.isGmailConnected() ? '' : '<button class="btn-small" onclick="app.connectGmail()">Connect Google</button>')
+            + (this.isGmailConnected() ? '' : '<button class="btn-small" onclick="alert(&quot;Gmail sync is being reconfigured.&quot;)">Connect Google</button>')
             + '<button class="btn-small" onclick="app.searchGmailTravel();">✈ Travel</button>'
             + '<button class="btn-small" onclick="app.openCalNewEvent();">+ Event</button>'
             + '</div></div>';
@@ -7626,7 +7626,7 @@ Tone: Professional but personal, not overly formal`;
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
                             <span style="font-weight:700; font-size:13px;">📧 Emails</span>
-                            ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Connected</span>' : `<button class="btn-small" onclick="app.connectGmail()" style="font-size:11px;">Connect Gmail</button>`}
+                            ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Connected</span>' : `<button class="btn-small" onclick="alert('Gmail sync is being reconfigured. Your CRM data is safe.')" style="font-size:11px;">Connect Gmail</button>`}
                         </div>
                         <div id="gmailEmails" style="padding:8px 16px; max-height:300px; overflow-y:auto;">
                             ${this.isGmailConnected() ? '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Loading emails...</div>' : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Connect Gmail to see email history</div>'}
