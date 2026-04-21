@@ -6416,7 +6416,7 @@ Tone: Professional but personal, not overly formal`;
         this._searchIdx = -1;
 
         if (!this._searchResults.length) {
-            dd.innerHTML = '<div style="padding:16px; text-align:center; color:var(--sf-text-weak); font-size:13px;">No results for "' + term + '"</div>';
+            dd.innerHTML = '<div style="padding:16px; text-align:center; color:var(--sf-text-weak); font-size:13px;">No results for "' + esc(term) + '"</div>';
             dd.style.display = 'block';
             return;
         }
@@ -6463,7 +6463,7 @@ Tone: Professional but personal, not overly formal`;
             html += `<div onclick="app.fullSearch('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; text-align:center; cursor:pointer; font-size:12px; color:var(--sf-brand); font-weight:600; background:var(--sf-bg);">View all ${totalCount} results →</div>`;
         }
         html += `<div onclick="app.searchGoogleDrive('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--sf-border-weak); background:var(--sf-bg-alt);">
-            <span style="font-size:16px;">🔍</span> <span style="color:var(--sf-brand); font-weight:500;">Search Google Drive for "${term}"</span>
+            <span style="font-size:16px;">🔍</span> <span style="color:var(--sf-brand); font-weight:500;">Search Google Drive for "${esc(term)}"</span>
         </div>`;
         if (false) {
         }
