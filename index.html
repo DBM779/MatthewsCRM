@@ -2741,19 +2741,20 @@ Tone: Professional but personal, not overly formal`;
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
         contact.general_notes = value || null;
+        firestoreUpsert('contacts', contact);
         this.persist();
     },
 
     saveObligationFromTable(contactId) {
         const vals = [...document.querySelectorAll(`.ob-tbl-cb[data-cid="${contactId}"]:checked`)].map(cb => cb.value).join(', ');
         const contact = this.data.contacts.find(c => c.id === contactId);
-        if (contact) { contact.obligation = vals || null; this.persist(); }
+        if (contact) { contact.obligation = vals || null; firestoreUpsert('contacts', contact); this.persist(); }
     },
 
     saveObligationFromCheckboxes(contactId) {
         const vals = [...document.querySelectorAll('.ob-inline-cb:checked')].map(cb => cb.value).join(', ');
         const contact = this.data.contacts.find(c => c.id === contactId);
-        if (contact) { contact.obligation = vals || null; this.persist(); }
+        if (contact) { contact.obligation = vals || null; firestoreUpsert('contacts', contact); this.persist(); }
     },
 
     saveDetailField(contactId, field, value) {
@@ -4263,7 +4264,7 @@ Tone: Professional but personal, not overly formal`;
             </div>
         `;
         document.getElementById('content').innerHTML = html;
-        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + (e.name || '(no name)');
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + esc(e.name || '(no name)');
         if (e.address) this._initEventMap(e.address);
     },
 
@@ -5333,7 +5334,7 @@ Tone: Professional but personal, not overly formal`;
         if (!list) return;
         const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
         if (views.length === 0) { list.innerHTML = '<div style="font-size:11px; color:var(--sf-text-weak); padding:8px 0;">No saved views yet.</div>'; return; }
-        list.innerHTML = views.map((v, i) => '<div class="saved-item" onclick="app.mapLoadView(' + i + ')"><span>' + v.name + '</span><span class="del-sv" onclick="event.stopPropagation();app.mapDeleteView(' + i + ');">✕</span></div>').join('');
+        list.innerHTML = views.map((v, i) => '<div class="saved-item" onclick="app.mapLoadView(' + i + ')"><span>' + esc(v.name) + '</span><span class="del-sv" onclick="event.stopPropagation();app.mapDeleteView(' + i + ');">✕</span></div>').join('');
     },
 
     mapSaveCurrentView() {
