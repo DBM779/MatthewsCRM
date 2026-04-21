@@ -2569,6 +2569,8 @@ Tone: Professional but personal, not overly formal`;
             items.forEach(item => {
                 if (this._bulkSelected.has(item.id)) {
                     item[field] = val;
+                    const col = type === 'contacts' ? 'contacts' : type === 'accounts' ? 'accounts' : 'activities';
+                    firestoreUpsert(col, item);
                     updated++;
                 }
             });
