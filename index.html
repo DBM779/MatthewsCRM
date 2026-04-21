@@ -5601,13 +5601,15 @@ Tone: Professional but personal, not overly formal`;
 
     toggleFundItem(phase, idx, checked) {
         const fund = this.data._fund;
-        if (fund.phases[phase] && fund.phases[phase][idx]) {
+        if (!fund || !fund.phases || !fund.phases[phase] || !fund.phases[phase][idx]) return;
+        if (fund.phases[phase][idx]) {
             fund.phases[phase][idx].done = checked;
             this.persist();
         }
     },
 
     addFundItem(phase) {
+        if (!this.data._fund || !this.data._fund.phases || !this.data._fund.phases[phase]) return;
         const text = prompt('New task:');
         if (!text) return;
         const deadline = prompt('Deadline (YYYY-MM-DD, or leave blank):', '') || '';
