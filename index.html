@@ -1708,6 +1708,69 @@ Tone: Professional but personal, not overly formal`;
         }
     },
 
+    async importSocialCsv(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading CSV...</div>';
+        try {
+            const text = await file.text();
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length < 2) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV has no data rows.</div>'; return; }
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+            const nameIdx = headers.findIndex(h => h.includes('name'));
+            const igIdx = headers.findIndex(h => h.includes('instagram') || h.includes('ig') || h.includes('handle'));
+            const emailIdx = headers.findIndex(h => h.includes('email'));
+            const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('number'));
+            if (nameIdx < 0) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV must have a Name column.</div>'; return; }
+
+            const results = {matched: [], created: []};
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(s => s.trim());
+                const name = cols[nameIdx] || '';
+                const ig = igIdx >= 0 ? (cols[igIdx] || '').replace('@','') : '';
+                const email = emailIdx >= 0 ? cols[emailIdx] || '' : '';
+                const phone = phoneIdx >= 0 ? cols[phoneIdx] || '' : '';
+                if (!name || name === '—') continue;
+                const cleanEmail = (email && email !== '—') ? email : '';
+                const cleanPhone = (phone && phone !== '—') ? phone : '';
+                const cleanIg = (ig && ig !== '—') ? ig : '';
+
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name) || (cleanIg && c.instagram && c.instagram.replace('@','').toLowerCase() === cleanIg.toLowerCase()) || (cleanPhone && (c.pc_number === cleanPhone || c.mobile === cleanPhone)));
+                if (existing) {
+                    const enriched = [];
+                    if (cleanIg && !existing.instagram) { existing.instagram = cleanIg; enriched.push('instagram'); }
+                    if (cleanEmail && !existing.pe_email && !existing.we_email) { existing.pe_email = cleanEmail; enriched.push('email'); }
+                    if (cleanPhone && !existing.pc_number && !existing.mobile) { existing.mobile = cleanPhone; enriched.push('phone'); }
+                    results.matched.push({name: existing.name, enriched});
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-csv-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, instagram: cleanIg || null, pe_email: cleanEmail || null, mobile: cleanPhone || null, tier: '5', tags: 'Social Import', createdAt: new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    results.created.push({name, ig: cleanIg, phone: cleanPhone, email: cleanEmail});
+                }
+            }
+            this.persist();
+            this.updateSelectOptions();
+            let rhtml = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+            rhtml += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--sf-success);">✓ CSV Import: ' + results.matched.length + ' matched, ' + results.created.length + ' new contacts</div>';
+            if (results.matched.length) {
+                rhtml += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-brand);margin-bottom:4px;">MATCHED (' + results.matched.length + ')</div><div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.matched.forEach(m => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(m.name) + (m.enriched.length ? ' <span style="color:var(--sf-success);">+ ' + m.enriched.join(', ') + '</span>' : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            if (results.created.length) {
+                rhtml += '<div><div style="font-size:11px;font-weight:700;color:#7e22ce;margin-bottom:4px;">NEW (' + results.created.length + ')</div><div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.created.forEach(c => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(c.name) + (c.ig ? ' @' + esc(c.ig) : '') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            rhtml += '</div>';
+            if (status) status.innerHTML = rhtml;
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '</div>';
+        }
+    },
+
     bulkIgHandles() {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
@@ -6612,6 +6675,8 @@ Tone: Professional but personal, not overly formal`;
                     <button class="btn-primary" onclick="document.getElementById('fbImportFile').click();">📘 Import Facebook Data</button>
                     <input type="file" id="fbImportFile" accept=".json,.zip" style="display:none;" onchange="app.importFacebookData(this.files[0])">
                     <button onclick="app.bulkIgHandles();">📷 Bulk Add IG Handles</button>
+                    <button onclick="document.getElementById('socialCsvFile').click();">📋 Import Social CSV</button>
+                    <input type="file" id="socialCsvFile" accept=".csv,.txt" style="display:none;" onchange="app.importSocialCsv(this.files[0])">
                 </div>
                 <div id="socialImportStatus"></div>
 
