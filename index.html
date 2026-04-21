@@ -528,7 +528,7 @@
         </div>
         <div class="sf-app-title">Matthews CRM<span class="sep">|</span><span class="sub" id="breadcrumb">Dashboard</span></div>
         <div class="sf-global-search" style="position:relative;">
-            <input type="text" id="globalSearch" placeholder="Search contacts, accounts, events…" autocomplete="off" oninput="app.liveSearch(this.value)" onkeydown="app.searchKeydown(event)" onfocus="if(this.value) app.liveSearch(this.value)" onblur="setTimeout(()=>app.closeLiveSearch(),200)">
+            <input type="text" id="globalSearch" placeholder="Search everything…" autocomplete="off" oninput="app.liveSearch(this.value)" onkeydown="app.searchKeydown(event)" onfocus="if(this.value) app.liveSearch(this.value)" onblur="setTimeout(()=>app.closeLiveSearch(),200)">
             <div id="liveSearchResults" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--sf-border); border-radius:0 0 8px 8px; box-shadow:0 8px 24px rgba(0,0,0,0.15); max-height:400px; overflow-y:auto; z-index:600;"></div>
         </div>
         <div class="sf-global-right">
@@ -6323,8 +6323,13 @@ Tone: Professional but personal, not overly formal`;
         const accounts = this.data.accounts.map(a => ({...a, _score: s(a), _type:'account'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
         const events = this.data.events.map(e => ({...e, _score: s(e), _type:'event'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
         const deals = this.data.deals.map(d => ({...d, _score: s(d), _type:'deal'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const activities = this.data.activities.map(a => ({...a, name: a.subject||a.type, _score: s({...a, name: a.subject||a.type}), _type:'activity'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const investors = (this.data.investors||[]).map(i => ({...i, _score: s(i), _type:'investor'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const fundItems = [];
+        if (this.data._fund?.phases) { Object.entries(this.data._fund.phases).forEach(([phase, items]) => { items.forEach(item => { const fi = {name: item.text, phase, _type:'funditem'}; fi._score = s(fi); if (fi._score > 0) fundItems.push(fi); }); }); }
+        const providers = (this.data._fund?.serviceProviders||[]).map(sp => ({...sp, _score: s({...sp, name: sp.name||sp.role}), _type:'provider'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
 
-        this._searchResults = [...contacts, ...accounts, ...events, ...deals];
+        this._searchResults = [...contacts, ...accounts, ...events, ...deals, ...activities.slice(0,3), ...investors, ...fundItems.slice(0,3), ...providers];
         this._searchIdx = -1;
 
         if (!this._searchResults.length) {
@@ -6340,11 +6345,11 @@ Tone: Professional but personal, not overly formal`;
             return result;
         };
 
-        const icons = {contact:'👤', account:'🏢', event:'📅', deal:'📊'};
-        const colors = {contact:'#a094ed', account:'#7f8de1', event:'#e6853d', deal:'#fcb95b'};
+        const icons = {contact:'👤', account:'🏢', event:'📅', deal:'📊', activity:'☑️', investor:'💰', funditem:'🚀', provider:'🤝'};
+        const colors = {contact:'#a094ed', account:'#7f8de1', event:'#e6853d', deal:'#fcb95b', activity:'#48c3cc', investor:'#0ea5e9', funditem:'#7e22ce', provider:'#22c55e'};
 
         let html = '';
-        const sections = [{type:'contact',label:'Contacts',items:contacts},{type:'account',label:'Accounts',items:accounts},{type:'event',label:'Events',items:events},{type:'deal',label:'Processes',items:deals}];
+        const sections = [{type:'contact',label:'Contacts',items:contacts},{type:'account',label:'Accounts',items:accounts},{type:'event',label:'Events',items:events},{type:'deal',label:'Processes',items:deals},{type:'activity',label:'Activities',items:activities.slice(0,3)},{type:'investor',label:'Investors',items:investors},{type:'funditem',label:'Fund Launch',items:fundItems.slice(0,3)},{type:'provider',label:'Advisors',items:providers}];
 
         for (const sec of sections) {
             if (!sec.items.length) continue;
@@ -6354,7 +6359,12 @@ Tone: Professional but personal, not overly formal`;
                 const sub = sec.type === 'contact' ? [item.pc_number||item.mobile, item.pe_email||item.we_email, item.obligation].filter(Boolean).join(' · ')
                     : sec.type === 'account' ? [item.type, item.industry].filter(Boolean).join(' · ')
                     : sec.type === 'event' ? [item.type, item.address, item.status].filter(Boolean).join(' · ')
-                    : [item.stage, item.value ? '$'+item.value+'M' : ''].filter(Boolean).join(' · ');
+                    : sec.type === 'deal' ? [item.stage, item.value ? '$'+item.value+'M' : '', item.sde ? 'SDE $'+item.sde+'K' : ''].filter(Boolean).join(' · ')
+                    : sec.type === 'activity' ? [item.type, item.status, item.dueDate].filter(Boolean).join(' · ')
+                    : sec.type === 'investor' ? [item.type, item.committed ? '$'+item.committed+'M committed' : ''].filter(Boolean).join(' · ')
+                    : sec.type === 'funditem' ? [item.phase].filter(Boolean).join(' · ')
+                    : sec.type === 'provider' ? [item.role, item.firm].filter(Boolean).join(' · ')
+                    : '';
                 html += `<div class="live-search-item" data-idx="${globalIdx}" onclick="app.selectSearchResult(${globalIdx})" onmouseenter="app._searchIdx=${globalIdx};app._highlightSearchItem();" style="padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--sf-border-weak);">
                     <div style="width:28px; height:28px; border-radius:50%; background:${colors[sec.type]}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${icons[sec.type]}</div>
                     <div style="flex:1; min-width:0;">
@@ -6365,7 +6375,7 @@ Tone: Professional but personal, not overly formal`;
             }
         }
 
-        const totalCount = this.data.contacts.filter(c => s(c) > 0).length + this.data.accounts.filter(a => s(a) > 0).length + this.data.events.filter(e => s(e) > 0).length + this.data.deals.filter(d => s(d) > 0).length;
+        const totalCount = this.data.contacts.filter(c => s(c) > 0).length + this.data.accounts.filter(a => s(a) > 0).length + this.data.events.filter(e => s(e) > 0).length + this.data.deals.filter(d => s(d) > 0).length + this.data.activities.filter(a => s({...a, name:a.subject||a.type}) > 0).length + (this.data.investors||[]).filter(i => s(i) > 0).length;
         if (totalCount > this._searchResults.length) {
             html += `<div onclick="app.fullSearch('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; text-align:center; cursor:pointer; font-size:12px; color:var(--sf-brand); font-weight:600; background:var(--sf-bg);">View all ${totalCount} results →</div>`;
         }
@@ -6405,7 +6415,11 @@ Tone: Professional but personal, not overly formal`;
         if (item._type === 'contact') this.viewContact(item.id);
         else if (item._type === 'account') this.viewAccount(item.id);
         else if (item._type === 'event') this.viewEvent(item.id);
-        else if (item._type === 'deal') this.editDeal(item.id);
+        else if (item._type === 'deal') this.viewDealDetail(item.id);
+        else if (item._type === 'activity') this.editActivity(item.id);
+        else if (item._type === 'investor') this.navigate('investors');
+        else if (item._type === 'funditem') this.navigate('fundlaunch');
+        else if (item._type === 'provider') { this._fundView = 'providers'; this.navigate('fundlaunch'); }
     },
 
     closeLiveSearch() {
