@@ -1708,6 +1708,49 @@ Tone: Professional but personal, not overly formal`;
         }
     },
 
+    bulkIgHandles() {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = '<div style="background:#fff;border-radius:8px;padding:20px;width:500px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">'
+            + '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">Bulk Add Instagram Handles</div>'
+            + '<div style="font-size:12px;color:var(--sf-text-weak);margin-bottom:12px;">One per line: <code>Contact Name, @handle</code></div>'
+            + '<textarea id="bulkIgInput" style="flex:1;min-height:250px;padding:10px;font-size:13px;font-family:monospace;border:1px solid var(--sf-border);border-radius:4px;resize:vertical;" placeholder="Adam Kaiser, @adamkaiser18\nJake Builder, @jakebuilds\nJacob Goetz, @jacobgoetz"></textarea>'
+            + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">'
+            + '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="padding:6px 14px;font-size:13px;">Cancel</button>'
+            + '<button class="btn-primary" onclick="app._processBulkIg();" style="padding:6px 14px;font-size:13px;">Apply</button>'
+            + '</div></div>';
+        document.body.appendChild(overlay);
+    },
+
+    _processBulkIg() {
+        const input = document.getElementById('bulkIgInput');
+        if (!input) return;
+        const lines = input.value.split('\n').filter(l => l.trim());
+        let matched = 0, notFound = [];
+        lines.forEach(line => {
+            const parts = line.split(',').map(s => s.trim());
+            if (parts.length < 2) return;
+            const name = parts[0];
+            const handle = parts[1].replace('@', '');
+            const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, name));
+            if (contact) {
+                contact.instagram = handle;
+                firestoreUpsert('contacts', contact);
+                matched++;
+            } else {
+                notFound.push(name);
+            }
+        });
+        this.persist();
+        const overlay = document.querySelector('[style*="fixed"][style*="z-index:1000"]');
+        if (overlay) overlay.remove();
+        const status = document.getElementById('socialImportStatus');
+        let msg = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Updated ' + matched + ' contacts with IG handles.</div>';
+        if (notFound.length) msg += '<div style="padding:4px 8px;font-size:11px;color:var(--sf-error);">Not found: ' + notFound.map(n => esc(n)).join(', ') + '</div>';
+        if (status) status.innerHTML = msg;
+    },
+
     async importFacebookData(file) {
         if (!file) return;
         const status = document.getElementById('socialImportStatus');
@@ -6555,12 +6598,20 @@ Tone: Professional but personal, not overly formal`;
                 </div>
 
                 <h3 style="margin-top:24px;">Social Media Import</h3>
-                <div style="font-size:12px; color:var(--sf-text-weak); margin-bottom:8px;">Import your Instagram and Facebook data exports (JSON format). Go to Settings → Download Your Information on each platform.</div>
+                <div style="font-size:12px; color:var(--sf-text-weak); margin-bottom:8px;">
+                    <strong>Instagram files to import:</strong><br>
+                    • <code>followers_and_following/followers_1.json</code> — your followers (has IG usernames)<br>
+                    • <code>followers_and_following/following.json</code> — who you follow<br>
+                    • <code>contacts/synced_contacts.json</code> — phone contacts (has phone numbers)<br>
+                    • <code>messages/inbox/[person]/message_1.json</code> — DM threads<br>
+                    Import each file separately.
+                </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
                     <button class="btn-primary" onclick="document.getElementById('igImportFile').click();">📷 Import Instagram Data</button>
                     <input type="file" id="igImportFile" accept=".json,.zip" style="display:none;" onchange="app.importInstagramData(this.files[0])">
                     <button class="btn-primary" onclick="document.getElementById('fbImportFile').click();">📘 Import Facebook Data</button>
                     <input type="file" id="fbImportFile" accept=".json,.zip" style="display:none;" onchange="app.importFacebookData(this.files[0])">
+                    <button onclick="app.bulkIgHandles();">📷 Bulk Add IG Handles</button>
                 </div>
                 <div id="socialImportStatus"></div>
 
