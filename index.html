@@ -3940,6 +3940,7 @@ Tone: Professional but personal, not overly formal`;
         if (!current.includes(c.name)) { current.push(c.name); e.attendees = current.join(', '); }
         if (!e.contactStatuses) e.contactStatuses = {};
         e.contactStatuses[c.id] = 'Invited';
+        firestoreUpsert('events', e);
         this.persist();
         this.renderEventDetail();
     },
@@ -3952,14 +3953,14 @@ Tone: Professional but personal, not overly formal`;
         const amount = parseFloat(prompt('Amount ($):','0')) || 0;
         if (!e._budget) e._budget = [];
         e._budget.push({item, amount, paid: false});
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     evtToggleBudgetPaid(eventId, idx) {
         const e = this.data.events.find(x => x.id === eventId);
         if (!e || !e._budget) return;
         e._budget[idx].paid = !e._budget[idx].paid;
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     evtAddChecklist(eventId) {
@@ -3969,14 +3970,14 @@ Tone: Professional but personal, not overly formal`;
         if (!item) return;
         if (!e._checklist) e._checklist = [];
         e._checklist.push({text: item, done: false});
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     evtToggleCheck(eventId, idx) {
         const e = this.data.events.find(x => x.id === eventId);
         if (!e || !e._checklist) return;
         e._checklist[idx].done = !e._checklist[idx].done;
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     evtAddPotluck(eventId) {
@@ -3987,7 +3988,7 @@ Tone: Professional but personal, not overly formal`;
         const who = prompt('Who is bringing it? (leave blank for unclaimed):','');
         if (!e._potluck) e._potluck = [];
         e._potluck.push({item, who: who||'', claimed: !!who});
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     evtMarkAttendance(eventId) {
@@ -4025,7 +4026,7 @@ Tone: Professional but personal, not overly formal`;
         const recap = prompt('Event recap notes:', e._recap || '');
         if (recap === null) return;
         e._recap = recap;
-        this.persist(); this.renderEventDetail();
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
     },
 
     renderEventDetail() {
@@ -5675,7 +5676,7 @@ Tone: Professional but personal, not overly formal`;
         const fund = this.data._fund;
         if (!fund || !fund.phases || !fund.phases[phase] || !fund.phases[phase][idx]) return;
         fund.phases[phase][idx].done = checked;
-        this.persist();
+        this._syncMeta(); this.persist();
     },
 
     addFundItem(phase) {
@@ -5684,7 +5685,7 @@ Tone: Professional but personal, not overly formal`;
         if (!text) return;
         const deadline = prompt('Deadline (YYYY-MM-DD, or leave blank):', '') || '';
         this.data._fund.phases[phase].push({text, done: false, deadline});
-        this.persist();
+        this._syncMeta(); this.persist();
         this.renderFundLaunch();
     },
 
@@ -5737,7 +5738,7 @@ Tone: Professional but personal, not overly formal`;
         const status = prompt('Status (Researching/Applied/In Review/Approved/Declined):', 'Researching') || 'Researching';
         if (!this.data._fund.sbaLenders) this.data._fund.sbaLenders = [];
         this.data._fund.sbaLenders.push({name, contact, status, rate:'', term:'', maxAmount:'', notes:'', created: new Date().toISOString()});
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     editSBALender(idx) {
@@ -5749,7 +5750,7 @@ Tone: Professional but personal, not overly formal`;
         l.term = prompt('Term (years):', l.term) || l.term;
         l.maxAmount = prompt('Max amount ($K):', l.maxAmount) || l.maxAmount;
         l.notes = prompt('Notes:', l.notes) || l.notes;
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     _renderFundDocs(fund) {
@@ -5782,7 +5783,7 @@ Tone: Professional but personal, not overly formal`;
         const url = prompt('Google Drive URL (optional):', '') || '';
         if (!this.data._fund.documents) this.data._fund.documents = [];
         this.data._fund.documents.push({name, category, url, status: 'needed'});
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     _renderServiceProviders(fund) {
@@ -5815,7 +5816,7 @@ Tone: Professional but personal, not overly formal`;
         const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
         if (!this.data._fund.serviceProviders) this.data._fund.serviceProviders = [];
         this.data._fund.serviceProviders.push({role, name, firm, phone, email, contactId: contact?.id||null, engaged: false, notes: ''});
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     _renderFundAccounting(fund) {
@@ -5860,7 +5861,7 @@ Tone: Professional but personal, not overly formal`;
         a.cashReserve = parseFloat(prompt('Cash reserve ($):', a.cashReserve||0)) || 0;
         a.distributions = parseFloat(prompt('Total distributions to date ($):', a.distributions||0)) || 0;
         this.data._fund.accounting = a;
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     addMonthlyReport() {
@@ -5871,7 +5872,7 @@ Tone: Professional but personal, not overly formal`;
         const notes = prompt('Notes:', '') || '';
         if (!this.data._fund.monthlyReports) this.data._fund.monthlyReports = [];
         this.data._fund.monthlyReports.push({month, revenue, expenses, cashFlow, notes});
-        this.persist(); this.renderFundLaunch();
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
     },
 
     renderInvestors() {
@@ -5955,7 +5956,7 @@ Tone: Professional but personal, not overly formal`;
         const committed = parseFloat(prompt('Committed ($M):', inv.committed)); if (isNaN(committed)) return;
         const status = prompt('Status (Active/Prospect/Exited):', inv.status) || inv.status;
         inv.name = name; inv.type = type; inv.committed = committed; inv.status = status;
-        this.persist(); this.renderInvestors();
+        this._syncMeta(); this.persist(); this.renderInvestors();
     },
 
     logCapitalCall(idx) {
@@ -5966,7 +5967,7 @@ Tone: Professional but personal, not overly formal`;
         inv.called = (inv.called||0) + amount;
         if (!this.data._investorComms) this.data._investorComms = [];
         this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Capital Call', note: '$' + amount.toFixed(1) + 'M called'});
-        this.persist(); this.renderInvestors();
+        this._syncMeta(); this.persist(); this.renderInvestors();
     },
 
     logDistribution(idx) {
@@ -5977,7 +5978,7 @@ Tone: Professional but personal, not overly formal`;
         inv.distributed = (inv.distributed||0) + amount;
         if (!this.data._investorComms) this.data._investorComms = [];
         this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Distribution', note: '$' + amount.toFixed(1) + 'M distributed'});
-        this.persist(); this.renderInvestors();
+        this._syncMeta(); this.persist(); this.renderInvestors();
     },
 
     renderReferrals() {
@@ -6933,6 +6934,7 @@ Tone: Professional but personal, not overly formal`;
         const context = prompt('Context (e.g. "Met at conference", "College roommates"):', '') || '';
         const strength = prompt('Strength (strong/medium/weak):', 'medium') || 'medium';
         this.data._connections.push({id: 'conn-' + Date.now(), from: contactId, to: other.id, type, context, strength, created: new Date().toISOString()});
+        this._syncMeta();
         this.persist();
         this.renderContactDetail();
     },
@@ -6940,6 +6942,7 @@ Tone: Professional but personal, not overly formal`;
     removeConnection(contactId, connId) {
         if (!this.data._connections) return;
         this.data._connections = this.data._connections.filter(cn => cn.id !== connId);
+        this._syncMeta();
         this.persist();
         this.renderContactDetail();
     },
