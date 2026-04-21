@@ -3176,7 +3176,8 @@ Tone: Professional but personal, not overly formal`;
         const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         let filtered = this.data.contacts;
         if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
-        if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
+        if (f._ob === 'Other') filtered = filtered.filter(c => !c.obligation || c.obligation.trim() === '');
+        else if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
         if (f.company) filtered = filtered.filter(c => (c.accountId||c.account_id) === f.company);
         if (f.text) {
             const lt = f.text.toLowerCase();
@@ -3247,6 +3248,10 @@ Tone: Professional but personal, not overly formal`;
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Friend'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Friend'?'':'Friend'}'; app.renderContacts();">
                     <div class="label" style="font-size:9px;">Friend</div>
                     <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Friend')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Other'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Other'?'':'Other'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Other</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>!c.obligation || c.obligation.trim()==='').length}</div>
                 </div>
             </div>
             ${this._showColPicker ? `<div class="card" style="padding:10px 14px; margin-bottom:8px;">
