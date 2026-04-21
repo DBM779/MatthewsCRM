@@ -1,9 +1,5 @@
-const CACHE_NAME = 'matthews-crm-v5';
-const ASSETS = ['./', './index.html', './manifest.json'];
-const CDN_ASSETS = [
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-];
+const CACHE_NAME = 'matthews-crm-v6';
+const ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -21,11 +17,23 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = e.request.url;
 
-  // Firebase API calls: network only, never cache
-  if (url.includes('firebaseio.com') || url.includes('nominatim')) return;
+  // API calls: network only
+  if (url.includes('firebaseio.com') || url.includes('googleapis.com') || url.includes('nominatim') || url.includes('accounts.google.com')) return;
+
+  // index.html and app pages: network first, fall back to cache
+  if (url.endsWith('/') || url.includes('index.html') || url.includes('.web.app')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
 
   // CDN assets: cache first (they're versioned)
-  if (url.includes('unpkg.com') || url.includes('tile.openstreetmap.org')) {
+  if (url.includes('unpkg.com') || url.includes('tile.openstreetmap.org') || url.includes('gstatic.com')) {
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(res => {
       const clone = res.clone();
       caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
@@ -34,13 +42,12 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App files: stale-while-revalidate
-  e.respondWith(caches.match(e.request).then(cached => {
-    const fetched = fetch(e.request).then(res => {
+  // Everything else: network first
+  e.respondWith(
+    fetch(e.request).then(res => {
       const clone = res.clone();
       caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
       return res;
-    }).catch(() => cached);
-    return cached || fetched;
-  }));
+    }).catch(() => caches.match(e.request))
+  );
 });
