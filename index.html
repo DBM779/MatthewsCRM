@@ -398,6 +398,16 @@
     <div class="main">
         <div class="content" id="content"></div>
     </div>
+    <!-- Floating quick-add button -->
+    <div id="fabMenu" style="position:fixed; bottom:24px; right:24px; z-index:500;">
+        <div id="fabOptions" style="display:none; margin-bottom:8px;">
+            <div onclick="app.openContactForm(); document.getElementById('fabOptions').style.display='none';" style="background:#a094ed; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Contact</div>
+            <div onclick="app.openAccountForm(); document.getElementById('fabOptions').style.display='none';" style="background:#7f8de1; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Account</div>
+            <div onclick="app.openEventForm(); document.getElementById('fabOptions').style.display='none';" style="background:#e6853d; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Event</div>
+            <div onclick="app.openActivityForm(); document.getElementById('fabOptions').style.display='none';" style="background:#48c3cc; color:#fff; padding:8px 16px; border-radius:20px; margin-bottom:6px; cursor:pointer; font-size:13px; font-weight:500; box-shadow:0 2px 8px rgba(0,0,0,0.2); text-align:center;">+ Activity</div>
+        </div>
+        <button onclick="const o=document.getElementById('fabOptions'); o.style.display=o.style.display==='none'?'':'none';" style="width:56px; height:56px; border-radius:50%; background:var(--sf-brand); color:#fff; border:none; font-size:28px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3); line-height:56px;">+</button>
+    </div>
 
     <div class="modal" id="modalContact">
         <div class="modal-content">
@@ -691,6 +701,14 @@ const app = {
 
     fmt(n) { return Number(n).toLocaleString(); },
 
+    fmtPhone(p) {
+        if (!p) return p;
+        const d = p.replace(/\D/g, '');
+        if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+        if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+        return p;
+    },
+
     async init() {
         this.loadData();
         // Try cloud sync on startup
@@ -860,9 +878,10 @@ const app = {
     },
 
     persist() {
+        this.data._lastModified = new Date().toISOString();
         db.save(this.data);
-        this.updateStatus('Saving...', true);
-        setTimeout(() => this.updateStatus('Ready', true), 1500);
+        this.updateStatus('Syncing...', true);
+        setTimeout(() => this.updateStatus('Ready', true), 2500);
     },
 
     importJsonData(jsonData) {
@@ -922,10 +941,10 @@ const app = {
             name: document.getElementById('contactName').value,
             pe_email: document.getElementById('contactPeEmail').value || null,
             we_email: document.getElementById('contactWeEmail').value || null,
-            pc_number: document.getElementById('contactPcNumber').value || null,
-            wc_number: document.getElementById('contactWcNumber').value || null,
-            mobile: document.getElementById('contactMobile').value,
-            phone: document.getElementById('contactPhone').value,
+            pc_number: this.fmtPhone(document.getElementById('contactPcNumber').value) || null,
+            wc_number: this.fmtPhone(document.getElementById('contactWcNumber').value) || null,
+            mobile: this.fmtPhone(document.getElementById('contactMobile').value),
+            phone: this.fmtPhone(document.getElementById('contactPhone').value),
             home_phone: document.getElementById('contactHomePhone').value || null,
             other_phone: document.getElementById('contactOtherPhone').value || null,
             fax: document.getElementById('contactFax').value || null,
@@ -3424,45 +3443,29 @@ const app = {
     },
 
     globalSearch(term) {
-        if (!term) {
-            this.render();
-            return;
-        }
-        const lowerTerm = term.toLowerCase();
-        const filtered = {
-            contacts: this.data.contacts.filter(c => c.name.toLowerCase().includes(lowerTerm) || c.email.toLowerCase().includes(lowerTerm)),
-            accounts: this.data.accounts.filter(a => a.name.toLowerCase().includes(lowerTerm)),
-            deals: this.data.deals.filter(d => d.name.toLowerCase().includes(lowerTerm))
-        };
+        if (!term) { this.render(); return; }
+        const t = term.toLowerCase();
+        const s = (v) => (v||'').toLowerCase().includes(t);
+        const contacts = this.data.contacts.filter(c => s(c.name)||s(c.pe_email)||s(c.we_email)||s(c.pc_number)||s(c.wc_number)||s(c.mobile)||s(c.title)||s(c.address)||s(c.tags)||s(c.obligation)||s(c.instagram));
+        const accounts = this.data.accounts.filter(a => s(a.name)||s(a.industry)||s(a.type)||s(a.address));
+        const events = this.data.events.filter(e => s(e.name)||s(e.type)||s(e.address)||s(e.description)||s(e.attendees));
+        const deals = this.data.deals.filter(d => s(d.name)||s(d.stage)||s(d.sector));
+        const total = contacts.length + accounts.length + events.length + deals.length;
         const html = `
-            <h2>Search Results for "${term}"</h2>
-            <h3>Contacts (${filtered.contacts.length})</h3>
-            <div class="card">
-                ${filtered.contacts.length ? filtered.contacts.map(c => `
-                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
-                        <a onclick="app.viewContact('${c.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${c.name}</a>
-                        <div style="font-size: 12px; color: #6b7280;">${c.email || ''}</div>
-                    </div>
-                `).join('') : '<p class="text-muted">No contacts found</p>'}
-            </div>
-            <h3>Accounts (${filtered.accounts.length})</h3>
-            <div class="card">
-                ${filtered.accounts.length ? filtered.accounts.map(a => `
-                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
-                        <a onclick="app.viewAccount('${a.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${a.name}</a>
-                        <div style="font-size: 12px; color: #6b7280;">${a.industry || ''}</div>
-                    </div>
-                `).join('') : '<p class="text-muted">No accounts found</p>'}
-            </div>
-            <h3>Deals (${filtered.deals.length})</h3>
-            <div class="card">
-                ${filtered.deals.length ? filtered.deals.map(d => `
-                    <div style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
-                        <a onclick="app.editDeal('${d.id}')" style="cursor: pointer; color: #3b82f6; font-weight: 500;">${d.name}</a>
-                        <div style="font-size: 12px; color: #6b7280;">$${d.value}M - ${d.stage}</div>
-                    </div>
-                `).join('') : '<p class="text-muted">No deals found</p>'}
-            </div>
+            <h2>Search Results for "${term}" <span style="font-size:14px; font-weight:400; color:var(--sf-text-weak);">(${total} results)</span></h2>
+            ${contacts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-contact" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">C</span> Contacts (${contacts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Tier</th><th>Obligation</th></tr></thead><tbody>
+                ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:var(--sf-brand);font-weight:600;">${c.name}</td><td>${c.pc_number||c.mobile||''}</td><td>${c.pe_email||''}</td><td><span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span></td><td>${(c.obligation||'').split(',').map(o=>o.trim()).filter(Boolean).map(o=>'<span class="tag-pill">'+o+'</span>').join(' ')}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${accounts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-account" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">A</span> Accounts (${accounts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Type</th><th>Industry</th></tr></thead><tbody>
+                ${accounts.map(a => `<tr style="cursor:pointer;" onclick="app.viewAccount('${a.id}')"><td style="color:var(--sf-brand);font-weight:600;">${a.name}</td><td>${a.type||''}</td><td>${a.industry||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${events.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-activity" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">E</span> Events (${events.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Status</th></tr></thead><tbody>
+                ${events.map(e => `<tr style="cursor:pointer;" onclick="app.viewEvent('${e.id}')"><td style="color:var(--sf-brand);font-weight:600;">${e.name||''}</td><td>${e.type||''}</td><td>${e.start ? new Date(e.start).toLocaleDateString() : ''}</td><td>${e.status||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${deals.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-deal" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">P</span> Processes (${deals.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Stage</th><th>Value</th></tr></thead><tbody>
+                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.editDeal('${d.id}')"><td style="color:var(--sf-brand);font-weight:600;">${d.name}</td><td>${d.stage||''}</td><td>$${(d.value||0).toFixed(1)}M</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${!total ? '<div style="text-align:center; padding:40px; color:var(--sf-text-weak); font-size:14px;">No results found for "'+term+'"</div>' : ''}
         `;
         document.getElementById('content').innerHTML = html;
     },
