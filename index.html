@@ -5865,7 +5865,7 @@ Tone: Professional but personal, not overly formal`;
                     const evt = this.data.events.find(e => (e.activityIds||[]).includes(a.id));
                     const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
                     const pColor = priorityColors[a.priority] || '#3b82f6';
-                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.editActivity(\'' + a.id + '\')">';
+                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.openTaskDetail(\'' + a.id + '\')">';
                     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
                     html += '<div class="kanban-card-title">' + (typeIcons[a.type]||'') + ' ' + (a.subject||a.type||'') + '</div>';
                     if (isOverdue) html += '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:700;">OVERDUE</span>';
@@ -5893,7 +5893,7 @@ Tone: Professional but personal, not overly formal`;
                 const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
                 const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
                 const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
-                html += '<tr style="cursor:pointer;' + (isOverdue?'background:#fef2f2;':'') + '" onclick="app.editActivity(\'' + a.id + '\')">'
+                html += '<tr style="cursor:pointer;' + (isOverdue?'background:#fef2f2;':'') + '" onclick="app.openTaskDetail(\'' + a.id + '\')">'
                     + '<td>' + (typeIcons[a.type]||'') + ' ' + (a.type||'') + '</td>'
                     + '<td style="font-weight:600;">' + (a.subject||'') + '</td>'
                     + '<td>' + (con ? '<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + con.name + '</a>' : '') + '</td>'
@@ -5925,6 +5925,80 @@ Tone: Professional but personal, not overly formal`;
         this.persist();
         this.renderTaskBoard();
     },
+
+    _taskLabels: {red:'Urgent',orange:'Follow-up',yellow:'Waiting On',green:'Money',blue:'Admin',purple:'Personal'},
+
+    openTaskDetail(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) { this.editActivity(id); return; }
+        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+        const acct = this.data.accounts.find(x => x.id === a.accountId);
+        const typeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄',Text:'💬'};
+        const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+        const labels = a._labels || [];
+        const checklist = a._checklist || [];
+        const comments = a._comments || [];
+        const attachments = a._attachments || [];
+        const checkDone = checklist.filter(c => c.done).length;
+        const pColors = {High:'#ef4444',Normal:'#3b82f6',Low:'#9ca3af'};
+        let h = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;" onclick="if(event.target===this)this.remove();">';
+        h += '<div style="background:#fff;border-radius:8px;width:700px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation();">';
+        h += '<div style="padding:16px 20px;border-bottom:1px solid var(--sf-border-weak);display:flex;justify-content:space-between;align-items:flex-start;">';
+        h += '<div><div style="font-size:11px;color:var(--sf-text-weak);">' + (typeIcons[a.type]||'') + ' ' + esc(a.type||'Activity') + '</div>';
+        h += '<div style="font-size:18px;font-weight:700;margin:4px 0;">' + esc(a.subject||'') + '</div>';
+        h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">';
+        labels.forEach(l => { h += '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:' + l + ';color:#fff;font-weight:600;">' + esc(this._taskLabels[l]||l) + '</span>'; });
+        h += '</div></div>';
+        h += '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--sf-text-weak);">✕</button></div>';
+        h += '<div style="display:flex;gap:0;">';
+        h += '<div style="flex:1;padding:16px 20px;border-right:1px solid var(--sf-border-weak);min-width:0;">';
+        h += '<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Labels</div><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+        Object.entries(this._taskLabels).forEach(([color, name]) => { const active = labels.includes(color); h += '<span style="font-size:10px;padding:3px 8px;border-radius:3px;background:' + (active?color:'#f3f4f6') + ';color:' + (active?'#fff':'#666') + ';cursor:pointer;font-weight:600;" onclick="app.toggleTaskLabel(\'' + id + '\',\'' + color + '\')">' + name + '</span>'; });
+        h += '</div></div>';
+        h += '<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Notes</div>';
+        h += '<textarea id="taskDetailNotes" style="width:100%;min-height:60px;padding:8px;font-size:13px;border:1px solid var(--sf-border);border-radius:4px;font-family:inherit;resize:vertical;" onblur="app.saveTaskNotes(\'' + id + '\',this.value)">' + esc(a.notes||'') + '</textarea></div>';
+        h += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Checklist' + (checklist.length?' ('+checkDone+'/'+checklist.length+')':'') + '</span><button class="btn-small" onclick="app.addTaskCheckItem(\'' + id + '\')">+ Add</button></div>';
+        if (checklist.length) { h += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin-bottom:6px;overflow:hidden;"><div style="width:' + (checkDone/checklist.length*100) + '%;background:#22c55e;border-radius:2px;"></div></div>'; checklist.forEach((item,i) => { h += '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;"><input type="checkbox" ' + (item.done?'checked':'') + ' onchange="app.toggleTaskCheck(\'' + id + '\','+i+',this.checked)" style="width:auto;min-height:auto;"><span style="' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + '">' + esc(item.text) + '</span></div>'; }); }
+        h += '</div>';
+        h += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Attachments ('+attachments.length+')</span><button class="btn-small" onclick="app.addTaskAttachment(\'' + id + '\')">+ Add</button></div>';
+        attachments.forEach((att,i) => { h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;"><a href="' + esc(att.url) + '" target="_blank" style="color:var(--sf-brand);">📎 ' + esc(att.name) + '</a><button class="btn-small" onclick="app.removeTaskAttachment(\'' + id + '\','+i+')" style="font-size:10px;color:var(--sf-error);">✕</button></div>'; });
+        h += '</div>';
+        h += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Comments</div>';
+        h += '<div style="display:flex;gap:6px;margin-bottom:8px;"><input type="text" id="taskCommentInput" placeholder="Add a comment…" style="flex:1;min-height:30px;padding:4px 8px;font-size:12px;" onkeydown="if(event.key===\'Enter\')app.addTaskComment(\'' + id + '\')"><button class="btn-small" onclick="app.addTaskComment(\'' + id + '\')">Post</button></div>';
+        comments.slice().reverse().forEach(c => { h += '<div style="padding:6px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;"><div style="color:var(--sf-text-weak);font-size:10px;">' + (c.date?new Date(c.date).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'') + '</div><div>' + esc(c.text) + '</div></div>'; });
+        h += '</div></div>';
+        h += '<div style="width:200px;padding:16px;flex-shrink:0;">';
+        h += '<div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:8px;">Details</div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Status:</span> ' + (a.status||'') + '</div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Priority:</span> <span style="color:' + (pColors[a.priority]||'#3b82f6') + ';font-weight:600;">' + (a.priority||'Normal') + '</span></div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Due:</span> ' + (a.dueDate||'None') + (isOverdue?' <span style="color:#ef4444;">⚠</span>':'') + '</div>';
+        if (con) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Contact:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + esc(con.name) + '</a></div>';
+        if (deal) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Deal:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">' + esc(deal.name) + '</a></div>';
+        if (acct) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Account:</span> ' + esc(acct.name) + '</div>';
+        h += '<div style="margin-top:16px;display:flex;flex-direction:column;gap:4px;">';
+        h += '<button class="btn-small" style="width:100%;" onclick="this.closest(\'[style*=fixed]\').remove();app.editActivity(\'' + id + '\')">✏ Edit</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.duplicateTask(\'' + id + '\')">📋 Duplicate</button>';
+        h += '<button class="btn-small" style="width:100%;color:var(--sf-error);" onclick="if(confirm(\'Delete?\')){this.closest(\'[style*=fixed]\').remove();app.deleteActivity(\'' + id + '\');}">🗑 Delete</button>';
+        h += '</div></div></div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+    },
+
+    saveTaskNotes(id, val) { const a = this.data.activities.find(x => x.id === id); if (!a) return; a.notes = val||null; firestoreUpsert('activities', a); this.persist(); },
+
+    toggleTaskLabel(id, color) { const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._labels) a._labels = []; const idx = a._labels.indexOf(color); if (idx >= 0) a._labels.splice(idx,1); else a._labels.push(color); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    addTaskCheckItem(id) { const text = prompt('Checklist item:'); if (!text) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._checklist) a._checklist = []; a._checklist.push({text, done:false}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    toggleTaskCheck(id, idx, checked) { const a = this.data.activities.find(x => x.id === id); if (!a||!a._checklist) return; a._checklist[idx].done = checked; firestoreUpsert('activities', a); this.persist(); },
+
+    addTaskComment(id) { const input = document.getElementById('taskCommentInput'); if (!input||!input.value.trim()) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._comments) a._comments = []; a._comments.push({text:input.value.trim(), date:new Date().toISOString()}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    addTaskAttachment(id) { const name = prompt('Name:'); if (!name) return; const url = prompt('URL:'); if (!url) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._attachments) a._attachments = []; a._attachments.push({name,url}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    removeTaskAttachment(id, idx) { const a = this.data.activities.find(x => x.id === id); if (!a||!a._attachments) return; a._attachments.splice(idx,1); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    duplicateTask(id) { const orig = this.data.activities.find(x => x.id === id); if (!orig) return; const clone = JSON.parse(JSON.stringify(orig)); clone.id = 'act-'+Date.now(); clone.subject = (clone.subject||'')+' (Copy)'; clone.status = 'Not Started'; clone.createdAt = new Date().toISOString(); if (clone._checklist) clone._checklist.forEach(c => c.done=false); clone._comments = []; this.data.activities.push(clone); firestoreUpsert('activities', clone); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(clone.id); },
 
     _fundView: 'overview',
 
