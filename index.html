@@ -3270,9 +3270,9 @@ Tone: Professional but personal, not overly formal`;
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card" style="overflow:hidden;">
-                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
+                <div class="table-container" style="overflow-y:auto;">
                     <table class="compact-table" id="contactsTable">
-                        <thead>
+                        <thead style="position:sticky;top:0;z-index:5;background:#fff;">
                             <tr>
                                 <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('contacts')" ${this._bulkSelected.size === sorted.length && sorted.length ? 'checked' : ''} style="width:10px;height:10px;cursor:pointer;"></th>
                                 ${(() => { const cw = this._getColWidths(); return cols.map(c => `<th data-colkey="${c.key}" onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;${cw[c.key] ? 'width:'+cw[c.key]+'px;' : ''}">${c.label}${this._sortIndicator('contacts',c.key)}<div class="col-resize-handle" onmousedown="event.stopPropagation();"></div></th>`).join(''); })()}
@@ -3280,7 +3280,7 @@ Tone: Professional but personal, not overly formal`;
                             </tr>
                         </thead>
                         <tbody>
-                            ${sorted.slice(0, this._contactPageSize || 100).map(c => {
+                            ${sorted.map(c => {
                                 const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
                                 const asClass = 'as-' + this.calculateAS(dsla);
                                 return `<tr><td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:10px;height:10px;cursor:pointer;"></td>${cols.map(col => {
@@ -3310,7 +3310,7 @@ Tone: Professional but personal, not overly formal`;
             </div>
             <!-- Mobile card list (hidden on desktop) -->
             <div class="mobile-list">
-                ${sorted.slice(0, this._contactPageSize || 100).map(c => {
+                ${sorted.map(c => {
                     const initials = (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
                     const tierColor = c.tier === '1-VIP' ? '#166534' : c.tier === '2' ? '#1e40af' : '#94a3b8';
                     const phone = c.pc_number||c.mobile||c.wc_number||c.phone||'';
@@ -3332,7 +3332,6 @@ Tone: Professional but personal, not overly formal`;
                         </div>
                     </div>`;
                 }).join('')}
-                ${sorted.length > (this._contactPageSize || 100) ? `<div style="padding:12px; text-align:center;"><button onclick="app._contactPageSize=(app._contactPageSize||100)+100; app.renderContacts();" style="padding:8px 24px; font-size:13px; border-radius:20px;">Show More (${sorted.length - (this._contactPageSize||100)} remaining)</button></div>` : ''}
             </div>
         `;
         document.getElementById('content').innerHTML = html;
