@@ -2725,6 +2725,7 @@ Tone: Professional but personal, not overly formal`;
         if (!contact) return;
         if (!contact.files) contact.files = [];
         contact.files.push({name, url});
+        firestoreUpsert('contacts', contact);
         this.persist();
         this.renderContactDetail();
     },
@@ -2733,6 +2734,7 @@ Tone: Professional but personal, not overly formal`;
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact || !contact.files) return;
         contact.files.splice(idx, 1);
+        firestoreUpsert('contacts', contact);
         this.persist();
         this.renderContactDetail();
     },
@@ -6877,6 +6879,7 @@ Tone: Professional but personal, not overly formal`;
                     const contact = this.data.contacts.find(x => x.id === c.id);
                     if (contact && (!contact.la || emailDate > contact.la)) {
                         contact.la = emailDate;
+                        firestoreUpsert('contacts', contact);
                         this.persist();
                     }
                 }
@@ -6886,11 +6889,11 @@ Tone: Professional but personal, not overly formal`;
                     const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${e.id}`;
                     return `<a href="${gmailLink}" target="_blank" style="display:block; padding:8px 4px; border-bottom:1px solid var(--sf-border-weak); text-decoration:none; color:inherit; border-radius:4px; transition:background 0.1s;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">
                         <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; color:var(--sf-brand);">${e.subject}</div>
+                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; color:var(--sf-brand);">${esc(e.subject)}</div>
                             <span style="font-size:10px; color:var(--sf-text-weakest); margin-left:8px; white-space:nowrap;">${dateStr}</span>
                         </div>
-                        <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${fromName}</div>
-                        <div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${e.snippet}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(fromName)}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(e.snippet)}</div>
                     </a>`;
                 }).join('');
             });
