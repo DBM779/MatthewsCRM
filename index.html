@@ -369,11 +369,11 @@
         .map-float {position:absolute; z-index:10;}
         .map-search {top:10px; left:10px; right:10px; max-width:400px;}
         .map-search input {width:100%; padding:10px 14px; border:none; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.2); font-size:14px; outline:none;}
-        .map-chips {top:54px; left:10px; display:flex; gap:4px; flex-wrap:wrap;}
+        .map-chips {top:58px; left:10px; display:flex; gap:6px; flex-wrap:wrap; max-width:calc(100% - 80px); padding-bottom:4px;}
         .map-chip {padding:5px 12px; border-radius:16px; font-size:11px; font-weight:600; cursor:pointer; border:none; box-shadow:0 1px 4px rgba(0,0,0,0.15); transition:all 0.15s;}
         .map-chip-off {background:#fff; color:var(--sf-text);}
         .map-chip-on {background:var(--sf-brand); color:#fff;}
-        .map-btns {bottom:24px; right:10px; display:flex; flex-direction:column; gap:6px;}
+        .map-btns {bottom:100px; right:10px; display:flex; flex-direction:column; gap:6px;}
         .map-btn {width:40px; height:40px; border-radius:50%; border:none; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.2); cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center;}
         .map-btn:active {background:var(--sf-bg);}
         /* Bottom card (mobile pin tap) */
@@ -405,7 +405,7 @@
         .map-nearby-list .nearby-item:last-child {border-bottom:none;}
         .map-nearby-list .nearby-item:hover {color:var(--sf-brand);}
         .map-nearby-list .nearby-dist {color:var(--sf-text-weak); font-size:10px;}
-        @media(max-width:768px){.map-v2{height:calc(100vh - 100px);} .map-search{max-width:none; right:10px;} .map-chips{top:50px;} .map-proximity-panel,.map-saved-panel,.map-nearby-list{width:calc(100% - 20px); left:10px; right:10px;}}
+        @media(max-width:768px){.map-v2{height:calc(100vh - 100px);} .map-search{max-width:none; right:10px;} .map-chips{top:56px; max-width:calc(100% - 70px);} .map-btns{bottom:90px;} .map-proximity-panel,.map-saved-panel,.map-nearby-list{width:calc(100% - 20px); left:10px; right:10px;}}
         .cal-grid {display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--sf-border-weak); border-radius:4px; overflow:hidden;}
         .cal-hdr {background:var(--sf-bg-alt); padding:6px; text-align:center; font-size:11px; font-weight:700; color:var(--sf-text-weak); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);}
         .cal-day {min-height:80px; padding:3px; border-right:1px solid var(--sf-border-weak); border-bottom:1px solid var(--sf-border-weak); background:#fff; font-size:11px; vertical-align:top; overflow:hidden;}
