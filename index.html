@@ -1164,7 +1164,6 @@ Tone: Professional but personal, not overly formal`;
             client_id: this.GMAIL_CLIENT_ID,
             scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
             ux_mode: 'popup',
-            redirect_uri: 'postmessage',
             callback: (resp) => {
                 if (resp.access_token) {
                     this._gmailToken = resp.access_token;
