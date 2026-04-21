@@ -520,6 +520,7 @@
         <div class="sf-app-tab" data-view="map" onclick="app.navigate('map')"><span class="obj-icon obj-icon-map">M</span>Map</div>
         <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">P</span>Processes</div>
         <div class="sf-app-tab" data-view="reports" onclick="app.navigate('reports')"><span class="obj-icon obj-icon-report">R</span>Reports</div>
+        <div class="sf-app-tab" data-view="investors" onclick="app.navigate('investors')"><span class="obj-icon" style="background:#0ea5e9;">$</span>Investors</div>
         <div class="sf-app-tab" data-view="settings" onclick="app.navigate('settings')"><span class="obj-icon obj-icon-setting">S</span>Setup</div>
     </div>
 
@@ -1713,6 +1714,7 @@ const app = {
             case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
             case 'reports': this.renderReports(); break;
+            case 'investors': this.renderInvestors(); break;
             case 'settings': this.renderSettings(); break;
         }
     },
@@ -5025,6 +5027,110 @@ const app = {
         });
         panel.innerHTML = html;
         panel.classList.add('show');
+    },
+
+    renderInvestors() {
+        if (!this.data.investors) this.data.investors = [];
+        const investors = this.data.investors;
+        const totalCommitted = investors.reduce((s,i) => s + (i.committed||0), 0);
+        const totalCalled = investors.reduce((s,i) => s + (i.called||0), 0);
+        const totalDistributed = investors.reduce((s,i) => s + (i.distributed||0), 0);
+        const unfunded = totalCommitted - totalCalled;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'
+            + '<h2 style="margin:0;">Investors (LPs)</h2>'
+            + '<button class="btn-primary" onclick="app.addInvestor()">+ Add Investor</button></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">' + investors.length + '</div><div class="ps-label">Total LPs</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCommitted.toFixed(1) + 'M</div><div class="ps-label">Committed</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCalled.toFixed(1) + 'M</div><div class="ps-label">Called</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + unfunded.toFixed(1) + 'M</div><div class="ps-label">Unfunded</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalDistributed.toFixed(1) + 'M</div><div class="ps-label">Distributed</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (totalCalled > 0 ? (totalDistributed / totalCalled).toFixed(2) + 'x' : '—') + '</div><div class="ps-label">DPI</div></div>'
+            + '</div>';
+
+        if (investors.length) {
+            html += '<div class="card"><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Investor</th><th>Type</th><th>Contact</th><th>Committed</th><th>Called</th><th>Unfunded</th><th>Distributed</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            investors.forEach((inv, i) => {
+                const contact = inv.contactId ? this.data.contacts.find(c => c.id === inv.contactId) : null;
+                html += '<tr>'
+                    + '<td style="font-weight:600;">' + (inv.name||'') + '</td>'
+                    + '<td>' + (inv.type||'') + '</td>'
+                    + '<td>' + (contact ? '<a onclick="app.viewContact(\'' + contact.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + contact.name + '</a>' : '—') + '</td>'
+                    + '<td>$' + (inv.committed||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (inv.called||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + ((inv.committed||0) - (inv.called||0)).toFixed(1) + 'M</td>'
+                    + '<td>$' + (inv.distributed||0).toFixed(1) + 'M</td>'
+                    + '<td><span style="padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:' + (inv.status==='Active'?'#dcfce7;color:#166534':inv.status==='Prospect'?'#dbeafe;color:#1e40af':'#f3f4f6;color:#374151') + ';">' + (inv.status||'Active') + '</span></td>'
+                    + '<td><button class="btn-small" onclick="app.editInvestor(' + i + ')">Edit</button> <button class="btn-small" onclick="app.logCapitalCall(' + i + ')">Call</button> <button class="btn-small" onclick="app.logDistribution(' + i + ')">Dist</button></td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        } else {
+            html += '<div style="text-align:center;padding:40px;color:var(--sf-text-weak);">No investors yet. Click "+ Add Investor" to start tracking LPs.</div>';
+        }
+
+        // Communication log
+        const comms = (this.data._investorComms||[]).slice(0,15);
+        if (comms.length) {
+            html += '<div class="card" style="margin-top:12px;"><div class="card-header">Recent Investor Communications</div><div style="padding:12px;">';
+            comms.forEach(cm => {
+                html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<span style="color:var(--sf-text-weak);min-width:90px;">' + (cm.date||'').slice(0,10) + '</span>'
+                    + '<span style="font-weight:600;">' + (cm.investor||'') + '</span>'
+                    + '<span>' + (cm.type||'') + ': ' + (cm.note||'') + '</span></div>';
+            });
+            html += '</div></div>';
+        }
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    addInvestor() {
+        const name = prompt('Investor/LP name:');
+        if (!name) return;
+        const type = prompt('Type (Individual, Family Office, Fund of Funds, Institution, Endowment):', 'Individual') || 'Individual';
+        const committed = parseFloat(prompt('Commitment amount ($M):', '0')) || 0;
+        const contactName = prompt('Link to CRM contact (name, or leave blank):', '');
+        const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
+        if (!this.data.investors) this.data.investors = [];
+        this.data.investors.push({id: 'inv-' + Date.now(), name, type, committed, called: 0, distributed: 0, status: 'Active', contactId: contact ? contact.id : null, created: new Date().toISOString()});
+        this.persist();
+        this.renderInvestors();
+    },
+
+    editInvestor(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const name = prompt('Name:', inv.name); if (name === null) return;
+        const type = prompt('Type:', inv.type); if (type === null) return;
+        const committed = parseFloat(prompt('Committed ($M):', inv.committed)); if (isNaN(committed)) return;
+        const status = prompt('Status (Active/Prospect/Exited):', inv.status) || inv.status;
+        inv.name = name; inv.type = type; inv.committed = committed; inv.status = status;
+        this.persist(); this.renderInvestors();
+    },
+
+    logCapitalCall(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const amount = parseFloat(prompt('Capital call amount ($M):', ''));
+        if (!amount || isNaN(amount)) return;
+        inv.called = (inv.called||0) + amount;
+        if (!this.data._investorComms) this.data._investorComms = [];
+        this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Capital Call', note: '$' + amount.toFixed(1) + 'M called'});
+        this.persist(); this.renderInvestors();
+    },
+
+    logDistribution(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const amount = parseFloat(prompt('Distribution amount ($M):', ''));
+        if (!amount || isNaN(amount)) return;
+        inv.distributed = (inv.distributed||0) + amount;
+        if (!this.data._investorComms) this.data._investorComms = [];
+        this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Distribution', note: '$' + amount.toFixed(1) + 'M distributed'});
+        this.persist(); this.renderInvestors();
     },
 
     renderReferrals() {
