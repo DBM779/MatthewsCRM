@@ -3629,7 +3629,19 @@ const app = {
     async initMapWithMarkers(items) {
         this.mapMarkers = [];
         this._eventMarkers = [];
-        if (!window.google?.maps?.Map) { const el = document.getElementById('mapLoadingMsg'); if (el) el.textContent = 'Loading Google Maps...'; setTimeout(() => this.initMapWithMarkers(items), 1000); return; }
+        this._mapRetries = (this._mapRetries || 0);
+        if (!window.google?.maps?.Map) {
+            this._mapRetries++;
+            const el = document.getElementById('mapLoadingMsg');
+            if (this._mapRetries > 10) {
+                if (el) el.innerHTML = '<div style="text-align:center;"><div style="font-size:16px;font-weight:700;margin-bottom:8px;">Google Maps failed to load</div><div style="font-size:13px;color:#666;max-width:400px;">Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#0176d3;">Google Cloud Console → Credentials</a>, click your API key, and:<br><br>1. Set <b>Application restrictions</b> to "None"<br>2. Set <b>API restrictions</b> to "Don\'t restrict key"<br>3. Make sure <b>Maps JavaScript API</b> is enabled under <a href="https://console.cloud.google.com/apis/library/maps-backend.googleapis.com" target="_blank" style="color:#0176d3;">APIs & Services</a><br><br>Changes take ~5 minutes to propagate.</div></div>';
+                return;
+            }
+            if (el) el.textContent = 'Loading Google Maps... (attempt ' + this._mapRetries + ')';
+            setTimeout(() => this.initMapWithMarkers(items), 1500);
+            return;
+        }
+        this._mapRetries = 0;
         const mapEl = document.getElementById('crmMap');
         if (!mapEl) return;
 
