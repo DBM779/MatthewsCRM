@@ -512,6 +512,7 @@
                 <div class="form-group"><label>LinkedIn Profile</label><input type="text" id="contactLinkedinProfile"></div>
                 <div class="form-group"><label>LISN Profile</label><input type="text" id="contactLisnProfile"></div>
                 <div class="form-group"><label>LinkedIn/Social Notes</label><textarea id="contactLiSnP"></textarea></div>
+                <div class="form-group"><label>Playbook (relationship scripts & context)</label><textarea id="contactPlaybook" placeholder="How to engage, shared interests, alumni connections, family context..."></textarea></div>
                 <div class="form-group"><label>Tags (comma-separated)</label><input type="text" id="contactTags" placeholder="e.g. client, warm-lead, tech"></div>
                 <div class="form-group"><label>Description</label><textarea id="contactNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalContact')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
@@ -547,6 +548,17 @@
                 <div class="form-group"><label>Sector</label><input type="text" id="dealSector"></div>
                 <div class="form-group"><label>Probability (%)</label><input type="number" id="dealProbability" min="0" max="100"></div>
                 <div class="form-group"><label>Close Date</label><input type="date" id="dealCloseDate"></div>
+                <div class="form-group"><label>Fee Structure</label><input type="text" id="dealFeeStructure" placeholder="e.g. $50K retainer + 1.5% success fee"></div>
+                <div class="form-group"><label>Counterparties</label><input type="text" id="dealCounterparties" placeholder="Potential buyers/investors, comma-separated"></div>
+                </div>
+                <div class="form-group"><label>Continuation Vehicle</label><div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="cv-cb" value="GP-Led Secondary" style="width:auto; min-height:auto;"> GP-Led Secondary</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="cv-cb" value="Strip Sale" style="width:auto; min-height:auto;"> Strip Sale</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="cv-cb" value="Tender Offer" style="width:auto; min-height:auto;"> Tender Offer</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="cv-cb" value="Stapled Secondary" style="width:auto; min-height:auto;"> Stapled Secondary</label>
+                    <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="cv-cb" value="Fund Restructuring" style="width:auto; min-height:auto;"> Fund Restructuring</label>
+                </div></div>
+                <div class="form-group"><label>Technical Notes (M&A modeling)</label><textarea id="dealTechNotes" placeholder="LBO assumptions, comp set, DCF parameters..."></textarea></div>
                 <div class="form-group"><label>Notes</label><textarea id="dealNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalDeal')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
@@ -1237,6 +1249,7 @@ const app = {
             linkedin_profile: document.getElementById('contactLinkedinProfile').value || null,
             lisn_profile: document.getElementById('contactLisnProfile').value || null,
             liSnP: document.getElementById('contactLiSnP').value || null,
+            playbook: document.getElementById('contactPlaybook').value || null,
             tags: document.getElementById('contactTags').value || null,
             notes: document.getElementById('contactNotes').value || null
         };
@@ -1301,6 +1314,10 @@ const app = {
             sector: document.getElementById('dealSector').value || null,
             probability: parseInt(document.getElementById('dealProbability').value) || 0,
             closeDate: document.getElementById('dealCloseDate').value || null,
+            feeStructure: document.getElementById('dealFeeStructure').value || null,
+            counterparties: document.getElementById('dealCounterparties').value || null,
+            continuationVehicle: [...document.querySelectorAll('.cv-cb:checked')].map(cb => cb.value).join(', ') || null,
+            techNotes: document.getElementById('dealTechNotes').value || null,
             notes: document.getElementById('dealNotes').value || null
         };
 
@@ -1743,15 +1760,22 @@ const app = {
                         </div>
                     </div>` : ''; })()}
 
-                    <!-- VIP Neglect Alert -->
-                    ${(() => { const neglected = this.data.contacts.filter(c => c.tier === '1-VIP').filter(c => { const la = c.la || c.last_activity_display; if (!la) return true; return Math.floor((today - new Date(la)) / 86400000) >= 30; }).slice(0,5); return neglected.length ? `
-                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-warning);">
-                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; color:var(--sf-warning);">⚠️ VIP Follow-up Needed</div>
+                    <!-- Nurture Dashboard -->
+                    ${(() => {
+                        const getDSLA = c => { const la = c.la || c.last_activity_display; if (!la) return 999; return Math.floor((today - new Date(la)) / 86400000); };
+                        const t1Urgent = this.data.contacts.filter(c => c.tier === '1-VIP' && getDSLA(c) >= 14).sort((a,b) => getDSLA(b) - getDSLA(a)).slice(0,8);
+                        const t2Due = this.data.contacts.filter(c => c.tier === '2' && getDSLA(c) >= 30).sort((a,b) => getDSLA(b) - getDSLA(a)).slice(0,5);
+                        const renderRow = c => { const d = getDSLA(c); const color = d >= 60 ? 'var(--sf-error)' : d >= 30 ? 'var(--sf-warning)' : 'var(--sf-brand)'; return `<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                            <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500; flex:1;">${c.name}</a>
+                            <span style="font-size:11px; color:var(--sf-text-weak);">${(c.obligation||'').split(',')[0]||''}</span>
+                            <span style="font-size:12px; color:${color}; font-weight:600; min-width:35px; text-align:right;">${d}D</span>
+                        </div>`; };
+                        return (t1Urgent.length || t2Due.length) ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-error);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">🔥 Nurture Priority</div>
                         <div style="padding:8px 16px;">
-                            ${neglected.map(c => { const dsla = this.calculateDSLA(c.la || c.last_activity_display); return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
-                                <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a>
-                                <span style="font-size:12px; color:var(--sf-error); font-weight:600;">${dsla != null ? dsla+'D' : 'Never'}</span>
-                            </div>`; }).join('')}
+                            ${t1Urgent.length ? `<div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); padding:4px 0; letter-spacing:0.5px;">VIP — 14+ days (${t1Urgent.length})</div>${t1Urgent.map(renderRow).join('')}` : ''}
+                            ${t2Due.length ? `<div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-warning); padding:8px 0 4px 0; letter-spacing:0.5px;">Tier 2 — 30+ days (${t2Due.length})</div>${t2Due.map(renderRow).join('')}` : ''}
                         </div>
                     </div>` : ''; })()}
 
@@ -1867,6 +1891,7 @@ const app = {
         {key:'obligation', label:'Obligation', editable:true, type:'multi-obligation'},
         {key:'notes', label:'Notes', editable:true, type:'text'},
         {key:'general_notes', label:'*Notes', editable:true, type:'text'},
+        {key:'playbook', label:'Playbook', editable:true, type:'text'},
         {key:'referred_by', label:'Referred By', editable:true, type:'text'},
         {key:'_completeness', label:'Profile %', editable:false},
         {key:'pinned', label:'Pinned', editable:true, type:'select', options:['','⭐']},
@@ -4050,7 +4075,7 @@ const app = {
     },
 
     _clearContactForm() {
-        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactTags','contactNotes'].forEach(id => {
+        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactPlaybook','contactTags','contactNotes'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
@@ -4100,6 +4125,7 @@ const app = {
         document.getElementById('contactLinkedinProfile').value = c.linkedin_profile || '';
         document.getElementById('contactLisnProfile').value = c.lisn_profile || '';
         document.getElementById('contactLiSnP').value = c.liSnP || '';
+        document.getElementById('contactPlaybook').value = c.playbook || '';
         document.getElementById('contactTags').value = c.tags || '';
         document.getElementById('contactNotes').value = c.notes || '';
         this.openModal('modalContact');
@@ -4323,6 +4349,11 @@ const app = {
                             }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
                         </div>
                     </div>
+                    <!-- Playbook -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;${c.playbook?' border-left:4px solid #8b5cf6;':''}">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;${c.playbook?' color:#8b5cf6;':''}">🎯 Playbook</div>
+                        <div style="padding:12px 16px; font-size:13px; white-space:pre-wrap; cursor:pointer; ${!c.playbook?'color:var(--sf-text-weak);':''}" onclick="app.inlineDetailEdit('${c.id}','playbook','textarea',this)" title="Click to edit">${c.playbook || 'Add relationship scripts, shared interests, alumni connections...'}</div>
+                    </div>
                     <!-- Gmail Emails -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
@@ -4496,6 +4527,7 @@ const app = {
                         <div class="detail-tab active" onclick="app.switchDetailTab(this, 'adContacts')">Contacts (${contacts.length})</div>
                         <div class="detail-tab" onclick="app.switchDetailTab(this, 'adDeals')">Deals (${deals.length})</div>
                         <div class="detail-tab" onclick="app.switchDetailTab(this, 'adActivities')">Activities (${activities.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adAssets')">Assets</div>
                         <div class="detail-tab" onclick="app.switchDetailTab(this, 'adEmails')">Emails (${emails.length})</div>
                     </div>
                     <div id="adContacts">
@@ -4524,6 +4556,18 @@ const app = {
                             ${emails.map(e => `<tr><td>${e.date||''}</td><td>${e.subject||''}</td><td>${e.from_addr||''}</td><td>${e.to_addr||''}</td></tr>`).join('')}
                         </tbody></table>` : '<p class="text-muted">No emails</p>'}
                     </div>
+                    <div id="adAssets" style="display:none;">
+                        <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:16px;">
+                            <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Property & Assets</h3>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px;">
+                                ${['Oncor Account #','Appliance Models','Room Dimensions','Property Notes','Insurance Policy #','HOA Contact','Mortgage Lender','Property Tax ID'].map(label => {
+                                    const key = 'asset_' + label.toLowerCase().replace(/[^a-z0-9]/g,'_');
+                                    const val = (a.assets||{})[key] || '';
+                                    return `<div><div style="font-size:11px; color:var(--sf-text-weak); margin-bottom:2px;">${label}</div><div style="font-size:13px; cursor:pointer; min-height:20px; ${!val?'color:var(--sf-text-weakest);':''}" onclick="const v=prompt('${label}:','${val.replace(/'/g,"\\'")}'); if(v!==null){const acct=app.data.accounts.find(x=>x.id==='${a.id}'); if(!acct.assets) acct.assets={}; acct.assets['${key}']=v; app.persist(); firestoreUpsert('accounts',acct); app.renderAccountDetail();}">${val || 'Click to add'}</div></div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -4540,7 +4584,11 @@ const app = {
         document.getElementById('dealSector').value = '';
         document.getElementById('dealProbability').value = '';
         document.getElementById('dealCloseDate').value = '';
+        document.getElementById('dealFeeStructure').value = '';
+        document.getElementById('dealCounterparties').value = '';
+        document.getElementById('dealTechNotes').value = '';
         document.getElementById('dealNotes').value = '';
+        document.querySelectorAll('.cv-cb').forEach(cb => cb.checked = false);
         this.openModal('modalDeal');
     },
 
@@ -4555,7 +4603,12 @@ const app = {
         document.getElementById('dealSector').value = deal.sector || '';
         document.getElementById('dealProbability').value = deal.probability || '';
         document.getElementById('dealCloseDate').value = deal.closeDate || '';
+        document.getElementById('dealFeeStructure').value = deal.feeStructure || '';
+        document.getElementById('dealCounterparties').value = deal.counterparties || '';
+        document.getElementById('dealTechNotes').value = deal.techNotes || '';
         document.getElementById('dealNotes').value = deal.notes || '';
+        const cvVals = (deal.continuationVehicle||'').split(',').map(s=>s.trim());
+        document.querySelectorAll('.cv-cb').forEach(cb => cb.checked = cvVals.includes(cb.value));
         this.openModal('modalDeal');
     },
 
