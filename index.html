@@ -156,13 +156,38 @@
         .modal-content {background: #fff; border-radius: 8px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.2);}
         .modal-header {font-size: 18px; font-weight: 700; margin-bottom: 16px;}
         .modal-footer {display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;}
-        .kanban-board {display: flex; gap: 16px; overflow-x: auto; padding-bottom: 10px;}
-        .kanban-column {flex: 0 0 280px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;}
-        .kanban-header {font-weight: 600; font-size: 13px; margin-bottom: 12px; color: #374151;}
-        .kanban-card {background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s;}
+        .kanban-board {display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; min-height:400px;}
+        .kanban-column {flex: 0 0 240px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; min-height:200px;}
+        .kanban-column.drag-over {background:#eef4fc; border-color:var(--sf-brand);}
+        .kanban-header {font-weight: 700; font-size: 12px; margin-bottom: 10px; color: #374151; display:flex; justify-content:space-between; align-items:center;}
+        .kanban-header .kh-count {background:var(--sf-bg-alt); padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; color:var(--sf-text-weak);}
+        .kanban-header .kh-value {font-weight:400; color:var(--sf-text-weak); font-size:11px;}
+        .kanban-card {background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; margin-bottom: 8px; cursor: grab; transition: all 0.2s; border-left:3px solid transparent;}
         .kanban-card:hover {box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: #3b82f6;}
-        .kanban-card-title {font-weight: 600; font-size: 13px; margin-bottom: 6px;}
-        .kanban-card-meta {font-size: 11px; color: #6b7280; margin-bottom: 6px;}
+        .kanban-card.dragging {opacity:0.4; transform:rotate(2deg);}
+        .kanban-card.health-green {border-left-color:#2e844a;}
+        .kanban-card.health-yellow {border-left-color:#fe9339;}
+        .kanban-card.health-red {border-left-color:#ba0517;}
+        .kanban-card-title {font-weight: 600; font-size: 13px; margin-bottom: 4px; color:var(--sf-text);}
+        .kanban-card-meta {font-size: 11px; color: #6b7280; margin-bottom: 4px;}
+        .kanban-card-tags {display:flex; gap:3px; flex-wrap:wrap; margin-top:4px;}
+        .kanban-card-tag {font-size:9px; padding:1px 6px; border-radius:3px; font-weight:600;}
+        .deal-detail-header {display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;}
+        .deal-stage-badge {padding:4px 12px; border-radius:4px; font-size:11px; font-weight:700; color:#fff;}
+        .deal-metrics {display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:12px; margin-bottom:16px;}
+        .deal-metric {background:var(--sf-bg); border-radius:6px; padding:10px 12px;}
+        .deal-metric-label {font-size:10px; text-transform:uppercase; font-weight:700; color:var(--sf-text-weak); margin-bottom:2px;}
+        .deal-metric-value {font-size:16px; font-weight:700;}
+        .deal-checklist {list-style:none; padding:0; margin:0;}
+        .deal-checklist li {padding:6px 0; border-bottom:1px solid var(--sf-border-weak); display:flex; align-items:center; gap:8px; font-size:12px;}
+        .deal-checklist li input[type=checkbox] {margin:0;}
+        .deal-timeline-item {display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:12px;}
+        .deal-timeline-dot {width:8px; height:8px; border-radius:50%; margin-top:4px; flex-shrink:0;}
+        .pipeline-stats {display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
+        .pipeline-stat {background:#fff; border:1px solid var(--sf-border-weak); border-radius:8px; padding:14px; text-align:center;}
+        .pipeline-stat .ps-value {font-size:22px; font-weight:700; color:var(--sf-text);}
+        .pipeline-stat .ps-label {font-size:10px; text-transform:uppercase; font-weight:600; color:var(--sf-text-weak); margin-top:2px;}
+        .pipeline-bar {display:flex; height:24px; border-radius:4px; overflow:hidden; margin-bottom:16px;}
         .timeline {position: relative; padding-left: 24px;}
         .timeline-item {margin-bottom: 16px; position: relative;}
         .timeline-item::before {content: ''; position: absolute; left: -24px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #3b82f6; border: 2px solid #fff;}
@@ -2724,39 +2749,246 @@ const app = {
         document.getElementById('content').innerHTML = html + mobileAccts;
     },
 
+    _dealView: 'pipeline',
+    _stageColors: {'Prospect':'#6b7280','Pitch':'#3b82f6','Mandate':'#8b5cf6','Due Diligence':'#f59e0b','Negotiation':'#f97316','Closed Won':'#22c55e','Closed Lost':'#ef4444'},
+    _stageChecklist: {
+        'Prospect': ['Identify target','Initial research','Qualify opportunity'],
+        'Pitch': ['Prepare pitch deck','Schedule meeting','Send CIM/teaser'],
+        'Mandate': ['Engagement letter signed','Fee structure agreed','Timeline set'],
+        'Due Diligence': ['Data room open','Financial model complete','Management meetings','Legal review'],
+        'Negotiation': ['LOI submitted','PSA draft','Financing confirmed','Board approval'],
+        'Closed Won': ['Wire confirmed','Announcement drafted'],
+        'Closed Lost': ['Post-mortem notes']
+    },
+
+    _dealHealth(d) {
+        const lastAct = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).sort((a,b)=>(b.date||b.dueDate||'').localeCompare(a.date||a.dueDate||'')).shift();
+        const days = lastAct ? Math.floor((new Date() - new Date(lastAct.date || lastAct.dueDate)) / 86400000) : 999;
+        if (d.stage === 'Closed Won' || d.stage === 'Closed Lost') return 'green';
+        if (days <= 7) return 'green';
+        if (days <= 14) return 'yellow';
+        return 'red';
+    },
+
     renderDeals() {
-        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation', 'Closed Won', 'Closed Lost'];
-        const totalByStage = {};
-        stages.forEach(s => totalByStage[s] = this.data.deals.filter(d => d.stage === s).reduce((sum, d) => sum + (d.value || 0), 0));
-        const html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <div class="obj-icon obj-icon-deal" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">P</div>
-                    <div>
-                        <div style="font-size:11px; color:var(--sf-text-weak);">Processes</div>
-                        <h2 style="margin:0;">All Processes</h2>
-                    </div>
-                </div>
-                <button class="btn-primary" onclick="app.openDealForm()">New</button>
-            </div>
-            <div class="kanban-board">
-                ${stages.map(stage => `
-                    <div class="kanban-column">
-                        <div class="kanban-header">${stage} <span style="float:right; color:var(--sf-text-weak); font-weight:400;">$${totalByStage[stage].toFixed(0)}M</span></div>
-                        ${this.data.deals.filter(d => d.stage === stage).map(d => `
-                            <div class="kanban-card" onclick="app.editDeal('${d.id}')">
-                                <div class="kanban-card-title">${d.name}</div>
-                                <div class="kanban-card-meta">$${d.value}M · ${d.probability}%${d.continuationVehicle ? ' · '+d.continuationVehicle.split(',')[0] : ''}</div>
-                                <div style="display:flex; gap:4px; margin-top:4px;">
-                                    ${d.driveLink ? `<a href="${d.driveLink}" target="_blank" onclick="event.stopPropagation();" style="font-size:10px; color:var(--sf-brand);">📁 Drive</a>` : ''}
-                                    <a href="#" onclick="event.stopPropagation(); event.preventDefault(); app.searchGoogleDrive('${(d.name||'').replace(/'/g,"\\'")}');" style="font-size:10px; color:var(--sf-brand);">🔍 Search</a>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        if (this._dealView === 'detail') { this._renderDealDetail(); return; }
+        if (this._dealView === 'analytics') { this._renderDealAnalytics(); return; }
+        const stages = ['Prospect','Pitch','Mandate','Due Diligence','Negotiation','Closed Won','Closed Lost'];
+        const active = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const totalPipeline = active.reduce((s,d) => s + (d.value||0), 0);
+        const weighted = active.reduce((s,d) => s + (d.value||0) * ((d.probability||0)/100), 0);
+        const stalled = active.filter(d => this._dealHealth(d) === 'red').length;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:10px;">'
+            + '<div class="obj-icon obj-icon-deal" style="width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;">P</div>'
+            + '<div><div style="font-size:11px;color:var(--sf-text-weak);">Pipeline</div><h2 style="margin:0;">Processes</h2></div></div>'
+            + '<div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab active" onclick="app._dealView=\'pipeline\';app.renderDeals();">Board</button>'
+            + '<button class="cal-view-tab" onclick="app._dealView=\'analytics\';app.renderDeals();">Analytics</button></div>'
+            + '<button class="btn-primary" onclick="app.openDealForm()">+ New Deal</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalPipeline.toFixed(0) + 'M</div><div class="ps-label">Total Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + weighted.toFixed(0) + 'M</div><div class="ps-label">Weighted</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Deals</div></div>'
+            + '<div class="pipeline-stat" style="' + (stalled ? 'border-color:var(--sf-error);' : '') + '"><div class="ps-value" style="' + (stalled ? 'color:var(--sf-error);' : '') + '">' + stalled + '</div><div class="ps-label">Stalled (14D+)</div></div>'
+            + '</div>';
+
+        const barTotal = Math.max(totalPipeline, 1);
+        html += '<div class="pipeline-bar">' + stages.filter(s => s!=='Closed Lost').map(s => {
+            const v = this.data.deals.filter(d => d.stage === s).reduce((sum,d) => sum + (d.value||0), 0);
+            const pct = (v / barTotal * 100);
+            return pct > 0 ? '<div style="width:' + pct + '%;background:' + this._stageColors[s] + ';" title="' + s + ': $' + v.toFixed(0) + 'M"></div>' : '';
+        }).join('') + '</div>';
+
+        html += '<div class="kanban-board">' + stages.map(stage => {
+            const deals = this.data.deals.filter(d => d.stage === stage);
+            const stageVal = deals.reduce((s,d) => s + (d.value||0), 0);
+            return '<div class="kanban-column" data-stage="' + stage + '" ondragover="event.preventDefault();this.classList.add(\'drag-over\');" ondragleave="this.classList.remove(\'drag-over\');" ondrop="this.classList.remove(\'drag-over\');app.dropDeal(event,\'' + stage + '\');">'
+                + '<div class="kanban-header"><span>' + stage + ' <span class="kh-count">' + deals.length + '</span></span><span class="kh-value">$' + stageVal.toFixed(0) + 'M</span></div>'
+                + deals.map(d => {
+                    const health = this._dealHealth(d);
+                    const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+                    const daysInStage = d._stageDate ? Math.floor((new Date()-new Date(d._stageDate))/86400000) : '';
+                    return '<div class="kanban-card health-' + health + '" draggable="true" ondragstart="app.dragDeal(event,\'' + d.id + '\')" onclick="app.viewDealDetail(\'' + d.id + '\')">'
+                        + '<div class="kanban-card-title">' + (d.name||'') + '</div>'
+                        + '<div class="kanban-card-meta">' + (acct ? acct.name + ' · ' : '') + '$' + (d.value||0) + 'M · ' + (d.probability||0) + '%</div>'
+                        + '<div class="kanban-card-tags">'
+                        + (d.sector ? '<span class="kanban-card-tag" style="background:#e0e7ff;color:#3730a3;">' + d.sector + '</span>' : '')
+                        + (d.closeDate ? '<span class="kanban-card-tag" style="background:#fef3c7;color:#92400e;">Close ' + d.closeDate.slice(5) + '</span>' : '')
+                        + (daysInStage ? '<span class="kanban-card-tag" style="background:#f3f4f6;color:#374151;">' + daysInStage + 'D</span>' : '')
+                        + '</div>'
+                        + (d.driveLink ? '<div style="margin-top:4px;"><a href="' + d.driveLink + '" target="_blank" onclick="event.stopPropagation();" style="font-size:10px;color:var(--sf-brand);">📁 Drive</a></div>' : '')
+                        + '</div>';
+                }).join('') + '</div>';
+        }).join('') + '</div>';
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    dragDeal(e, id) { e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); },
+
+    dropDeal(e, newStage) {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const deal = this.data.deals.find(d => d.id === id);
+        if (!deal || deal.stage === newStage) return;
+        deal.stage = newStage;
+        deal._stageDate = new Date().toISOString().slice(0,10);
+        this.persist();
+        this.renderDeals();
+    },
+
+    viewDealDetail(id) {
+        this._currentDealId = id;
+        this._dealView = 'detail';
+        this.renderDeals();
+    },
+
+    _renderDealDetail() {
+        const d = this.data.deals.find(x => x.id === this._currentDealId);
+        if (!d) { this._dealView = 'pipeline'; this.renderDeals(); return; }
+        const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+        const health = this._dealHealth(d);
+        const healthLabel = {green:'On Track', yellow:'Needs Attention', red:'Stalled'}[health];
+        const activities = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).sort((a,b)=>(b.date||b.dueDate||'').localeCompare(a.date||a.dueDate||'')).slice(0,20);
+        const contacts = (this.data.dealContacts||[]).filter(dc => dc.deal_id === d.id).map(dc => {
+            const c = this.data.contacts.find(x => x.id === dc.contact_id); return c ? {...c, _role: dc.role} : null;
+        }).filter(Boolean);
+        const checklist = this._stageChecklist[d.stage] || [];
+        const completed = d._checklist || {};
+        const stageColor = this._stageColors[d.stage] || '#6b7280';
+
+        let html = '<div style="margin-bottom:12px;">'
+            + '<a href="#" onclick="event.preventDefault();app._dealView=\'pipeline\';app.renderDeals();" style="font-size:12px;color:var(--sf-brand);">← Back to Pipeline</a></div>';
+        html += '<div class="deal-detail-header"><div>'
+            + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">'
+            + '<h2 style="margin:0;">' + (d.name||'') + '</h2>'
+            + '<span class="deal-stage-badge" style="background:' + stageColor + ';">' + d.stage + '</span>'
+            + '<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:' + (health==='green'?'#dcfce7':health==='yellow'?'#fef3c7':'#fee2e2') + ';color:' + (health==='green'?'#166534':health==='yellow'?'#92400e':'#991b1b') + ';font-weight:600;">' + healthLabel + '</span></div>'
+            + (acct ? '<div style="font-size:13px;color:var(--sf-text-weak);"><a onclick="app.viewAccount(\'' + acct.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + acct.name + '</a></div>' : '')
+            + '</div><div style="display:flex;gap:6px;">'
+            + '<button class="btn-small" onclick="app.editDeal(\'' + d.id + '\')">Edit</button>'
+            + '<button class="btn-small" style="color:var(--sf-error);" onclick="if(confirm(\'Delete this deal?\')){app.data.deals=app.data.deals.filter(x=>x.id!==\'' + d.id + '\');app.persist();app._dealView=\'pipeline\';app.renderDeals();}">Delete</button>'
+            + '</div></div>';
+
+        html += '<div class="deal-metrics">'
+            + '<div class="deal-metric"><div class="deal-metric-label">Deal Size</div><div class="deal-metric-value">$' + (d.value||0) + 'M</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Probability</div><div class="deal-metric-value">' + (d.probability||0) + '%</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Weighted Value</div><div class="deal-metric-value">$' + ((d.value||0)*(d.probability||0)/100).toFixed(1) + 'M</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Close Date</div><div class="deal-metric-value">' + (d.closeDate||'TBD') + '</div></div>'
+            + (d.feeStructure ? '<div class="deal-metric"><div class="deal-metric-label">Fee Structure</div><div class="deal-metric-value" style="font-size:13px;">' + d.feeStructure + '</div></div>' : '')
+            + (d.sector ? '<div class="deal-metric"><div class="deal-metric-label">Sector</div><div class="deal-metric-value" style="font-size:13px;">' + d.sector + '</div></div>' : '')
+            + (d.continuationVehicle ? '<div class="deal-metric"><div class="deal-metric-label">Continuation Vehicle</div><div class="deal-metric-value" style="font-size:13px;">' + d.continuationVehicle + '</div></div>' : '')
+            + '</div>';
+
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
+
+        html += '<div class="card"><div class="card-header">Stage Checklist — ' + d.stage + '</div><div style="padding:12px;"><ul class="deal-checklist">';
+        checklist.forEach((item,i) => {
+            html += '<li><input type="checkbox" ' + (completed[d.stage+'_'+i] ? 'checked' : '') + ' onchange="app.toggleDealCheck(\'' + d.id + '\',\'' + d.stage + '_' + i + '\',this.checked)"><span>' + item + '</span></li>';
+        });
+        html += '</ul></div></div>';
+
+        html += '<div class="card"><div class="card-header">Key Contacts <button class="btn-small" style="float:right;" onclick="app.addDealContact(\'' + d.id + '\')">+ Add</button></div><div style="padding:12px;">';
+        if (contacts.length) {
+            contacts.forEach(c => {
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--sf-border-weak);"><div><a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;font-weight:600;font-size:13px;">' + c.name + '</a><div style="font-size:11px;color:var(--sf-text-weak);">' + (c._role||'') + ' · ' + (c.title||'') + '</div></div></div>';
+            });
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No contacts linked yet.</div>'; }
+        html += '</div></div>';
+
+        html += '<div class="card"><div class="card-header">Activity Timeline</div><div style="padding:12px;">';
+        if (activities.length) {
+            activities.forEach(a => {
+                html += '<div class="deal-timeline-item"><div class="deal-timeline-dot" style="background:' + (a.type==='Call'?'#22c55e':a.type==='Email'?'#3b82f6':'#f59e0b') + ';"></div><div><div style="font-weight:600;">' + (a.subject||a.type||'') + '</div><div style="color:var(--sf-text-weak);">' + (a.date||a.dueDate||'') + (a.notes ? ' · ' + a.notes.slice(0,80) : '') + '</div></div></div>';
+            });
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No activities yet.</div>'; }
+        html += '<button class="btn-small" style="margin-top:8px;" onclick="app.openActivityForm();setTimeout(()=>{document.getElementById(\'activityDeal\').value=\'' + d.id + '\';},100);">+ Log Activity</button>';
+        html += '</div></div>';
+
+        html += '<div class="card"><div class="card-header">Notes & Details</div><div style="padding:12px;">';
+        if (d.techNotes) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Technical Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + d.techNotes + '</div></div>';
+        if (d.counterparties) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Counterparties</div><div style="font-size:12px;">' + d.counterparties + '</div></div>';
+        if (d.notes) html += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + d.notes + '</div></div>';
+        if (!d.techNotes && !d.counterparties && !d.notes) html += '<div style="font-size:12px;color:var(--sf-text-weak);">No notes yet. Click Edit to add.</div>';
+        html += '</div></div>';
+
+        html += '</div>';
+        document.getElementById('content').innerHTML = html;
+    },
+
+    toggleDealCheck(dealId, key, checked) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        if (!d._checklist) d._checklist = {};
+        d._checklist[key] = checked;
+        this.persist();
+    },
+
+    addDealContact(dealId) {
+        const name = prompt('Contact name to link:');
+        if (!name) return;
+        const c = this.data.contacts.find(x => (x.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!c) { alert('Contact not found.'); return; }
+        const role = prompt('Role (e.g. Buyer, Seller, Counsel, Lender):', 'Buyer');
+        if (!this.data.dealContacts) this.data.dealContacts = [];
+        this.data.dealContacts.push({deal_id: dealId, contact_id: c.id, role: role||''});
+        this.persist();
+        this._renderDealDetail();
+    },
+
+    _renderDealAnalytics() {
+        const stages = ['Prospect','Pitch','Mandate','Due Diligence','Negotiation','Closed Won','Closed Lost'];
+        const active = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const won = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lost = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const totalPipeline = active.reduce((s,d) => s + (d.value||0), 0);
+        const weighted = active.reduce((s,d) => s + (d.value||0)*((d.probability||0)/100), 0);
+        const wonVal = won.reduce((s,d) => s + (d.value||0), 0);
+        const winRate = (won.length + lost.length) > 0 ? Math.round(won.length / (won.length + lost.length) * 100) : 0;
+        const stalled = active.filter(d => this._dealHealth(d) === 'red');
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'
+            + '<h2 style="margin:0;">Pipeline Analytics</h2>'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab" onclick="app._dealView=\'pipeline\';app.renderDeals();">Board</button>'
+            + '<button class="cal-view-tab active" onclick="app._dealView=\'analytics\';app.renderDeals();">Analytics</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalPipeline.toFixed(0) + 'M</div><div class="ps-label">Total Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + weighted.toFixed(0) + 'M</div><div class="ps-label">Weighted Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + wonVal.toFixed(0) + 'M</div><div class="ps-label">Closed Won</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + winRate + '%</div><div class="ps-label">Win Rate</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Deals</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + this.data.deals.length + '</div><div class="ps-label">All Time</div></div>'
+            + '</div>';
+
+        html += '<div class="card"><div class="card-header">Deals by Stage</div><div style="padding:16px;">';
+        const maxVal = Math.max(...stages.map(s => this.data.deals.filter(d => d.stage===s).reduce((sum,d)=>sum+(d.value||0),0)), 1);
+        stages.forEach(s => {
+            const deals = this.data.deals.filter(d => d.stage===s);
+            const val = deals.reduce((sum,d)=>sum+(d.value||0),0);
+            const pct = val/maxVal*100;
+            html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+                + '<div style="width:100px;font-size:12px;font-weight:600;text-align:right;">' + s + '</div>'
+                + '<div style="flex:1;background:var(--sf-bg);border-radius:4px;height:24px;"><div style="width:' + pct + '%;background:' + (this._stageColors[s]||'#888') + ';height:100%;border-radius:4px;min-width:' + (val>0?'2px':'0') + ';"></div></div>'
+                + '<div style="width:80px;font-size:12px;color:var(--sf-text-weak);">' + deals.length + ' · $' + val.toFixed(0) + 'M</div></div>';
+        });
+        html += '</div></div>';
+
+        if (stalled.length) {
+            html += '<div class="card" style="border-color:var(--sf-error);"><div class="card-header" style="color:var(--sf-error);">⚠ Stalled Deals (14+ days no activity)</div><div style="padding:12px;">';
+            stalled.forEach(d => {
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--sf-border-weak);cursor:pointer;" onclick="app.viewDealDetail(\'' + d.id + '\')">'
+                    + '<div><div style="font-weight:600;font-size:13px;">' + d.name + '</div><div style="font-size:11px;color:var(--sf-text-weak);">' + d.stage + ' · $' + (d.value||0) + 'M</div></div>'
+                    + '<button class="btn-small" onclick="event.stopPropagation();app.openActivityForm();setTimeout(()=>{document.getElementById(\'activityDeal\').value=\'' + d.id + '\';},100);">Log Activity</button></div>';
+            });
+            html += '</div></div>';
+        }
+
         document.getElementById('content').innerHTML = html;
     },
 
