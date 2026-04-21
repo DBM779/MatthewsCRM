@@ -5921,7 +5921,7 @@ Tone: Professional but personal, not overly formal`;
                 html += '</div>';
             });
             html += '</div>';
-        } else {
+        } else if (v === 'list') {
             acts.sort((a,b) => {
                 const po = {High:0,Normal:1,Low:2};
                 return (po[a.priority]||1) - (po[b.priority]||1) || (a.dueDate||'9').localeCompare(b.dueDate||'9');
