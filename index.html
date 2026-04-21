@@ -634,8 +634,52 @@
     </div>
 
     <script>
-// === Data layer: localStorage with auto-save ===
+// === Data layer: localStorage + Supabase cloud sync ===
 const STORAGE_KEY = 'matthewsCRM';
+const SYNC_TS_KEY = 'matthewsCRM_syncTs';
+
+// Supabase config — update these if you create a new project
+const SUPABASE_URL = 'https://bnkuieueimlyjovjilqi.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_Xj5u9741yzSNpZ7HXcY_iw_5JVrQmUN';
+const SYNC_TABLE = 'crm_sync';
+
+const cloudSync = {
+    _headers() {
+        return {'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal'};
+    },
+    _pendingSync: false,
+    _syncQueue: [],
+
+    async push(data) {
+        const payload = {id: 1, data: data, updated_at: new Date().toISOString()};
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}?id=eq.1`, {method: 'PATCH', headers: {...this._headers(), 'Prefer': 'return=minimal'}, body: JSON.stringify(payload)});
+            if (res.status === 404 || res.status === 406) {
+                await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}`, {method: 'POST', headers: {...this._headers(), 'Prefer': 'resolution=merge-duplicates,return=minimal'}, body: JSON.stringify(payload)});
+            }
+            localStorage.setItem(SYNC_TS_KEY, payload.updated_at);
+            return true;
+        } catch { return false; }
+    },
+
+    async pull() {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${SYNC_TABLE}?id=eq.1&select=data,updated_at`, {headers: this._headers()});
+            if (!res.ok) return null;
+            const rows = await res.json();
+            if (rows && rows.length > 0 && rows[0].data) {
+                localStorage.setItem(SYNC_TS_KEY, rows[0].updated_at || '');
+                return rows[0].data;
+            }
+        } catch {}
+        return null;
+    },
+
+    debouncedPush(data) {
+        if (this._pendingSync) clearTimeout(this._pendingSync);
+        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 2000);
+    }
+};
 
 const db = {
     load() {
@@ -646,6 +690,7 @@ const db = {
     },
     save(data) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        cloudSync.debouncedPush(data);
     }
 };
 
@@ -659,6 +704,8 @@ const app = {
 
     async init() {
         this.loadData();
+        // Try cloud sync on startup
+        this.cloudPull();
         // Migrate email → we_email
         let migrated = false;
         for (const c of this.data.contacts) {
@@ -771,6 +818,30 @@ const app = {
         }
     },
 
+    async cloudPull() {
+        try {
+            const cloud = await cloudSync.pull();
+            if (!cloud) return;
+            const localTs = localStorage.getItem(SYNC_TS_KEY) || '';
+            const local = db.load();
+            // If cloud has data and is newer or local is empty, use cloud
+            const cloudCount = (cloud.contacts||[]).length + (cloud.accounts||[]).length;
+            const localCount = local ? (local.contacts||[]).length + (local.accounts||[]).length : 0;
+            if (cloudCount > 0 && cloudCount >= localCount) {
+                this.data = {
+                    contacts: cloud.contacts || [], accounts: cloud.accounts || [],
+                    deals: cloud.deals || [], activities: cloud.activities || [],
+                    emails: cloud.emails || [], referrals: cloud.referrals || [],
+                    dealContacts: cloud.dealContacts || [], events: cloud.events || []
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+                this.updateSelectOptions();
+                this.render();
+                this.updateStatus('Synced', true);
+            }
+        } catch { /* offline, use local */ }
+    },
+
     loadData() {
         try {
             this.updateStatus('Loading...', false);
@@ -801,6 +872,8 @@ const app = {
 
     persist() {
         db.save(this.data);
+        this.updateStatus('Saving...', true);
+        setTimeout(() => this.updateStatus('Ready', true), 1500);
     },
 
     importJsonData(jsonData) {
