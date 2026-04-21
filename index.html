@@ -847,6 +847,26 @@ const app = {
         } catch { return []; }
     },
 
+    logTextFromTap(contactId, phone) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const today = new Date().toISOString().split('T')[0];
+        contact.la = today;
+        this.data.activities.push({
+            id: 'act-' + Date.now(),
+            type: 'Text',
+            subject: 'Text — ' + (contact.name || ''),
+            contactId: contactId,
+            accountId: contact.accountId || contact.account_id || null,
+            dueDate: today,
+            status: 'Completed',
+            notes: 'Auto-logged from text tap: ' + phone,
+            createdAt: new Date().toISOString()
+        });
+        this.persist();
+        window.location.href = 'sms:' + phone;
+    },
+
     logCallFromTap(contactId, phone) {
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
@@ -2235,7 +2255,7 @@ const app = {
                             <div class="ml-sub">${c._company||''} ${c.obligation ? '· '+c.obligation.split(',')[0].trim() : ''}</div>
                             <div class="ml-actions">
                                 ${phone ? `<a href="#" class="ml-action ml-action-call" onclick="event.stopPropagation(); event.preventDefault(); app.logCallFromTap('${c.id}','${phone}');">📞</a>` : ''}
-                                ${phone ? `<a href="sms:${phone}" class="ml-action ml-action-text" onclick="event.stopPropagation();">💬</a>` : ''}
+                                ${phone ? `<a href="#" class="ml-action ml-action-text" onclick="event.stopPropagation(); event.preventDefault(); app.logTextFromTap('${c.id}','${phone}');">💬</a>` : ''}
                                 ${email ? `<a href="mailto:${email}" class="ml-action ml-action-email" onclick="event.stopPropagation();">📧</a>` : ''}
                                 ${c.instagram ? `<a href="https://instagram.com/${c.instagram.replace('@','')}" target="_blank" class="ml-action ml-action-ig" onclick="event.stopPropagation();">📷</a>` : ''}
                             </div>
@@ -4127,6 +4147,7 @@ const app = {
                         <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; gap:4px; flex-wrap:wrap;">
                             <div style="display:flex; gap:6px; flex-wrap:wrap;">
                                 <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Call')" style="background:#e8f5e9; color:#2e7d32; border-color:#c8e6c9;">📞 Call</button>
+                                <button class="btn-small" onclick="app.logTextFromTap('${c.id}','${c.pc_number||c.mobile||c.wc_number||c.phone||''}')" style="background:#e3f2fd; color:#1565c0; border-color:#bbdefb;">💬 Text</button>
                                 <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Task')" style="background:#e0f7fa; color:#00838f; border-color:#b2ebf2;">☑️ Task</button>
                                 <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Meeting')" style="background:#fff3e0; color:#e65100; border-color:#ffe0b2;">📅 Event</button>
                                 <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Email')" style="background:#e8eaf6; color:#3949ab; border-color:#c5cae9;">📧 Email</button>
