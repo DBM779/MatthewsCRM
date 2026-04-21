@@ -9,8 +9,7 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ&libraries=marker,places&callback=Function.prototype"></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
@@ -2842,16 +2841,15 @@ const app = {
 
     async _initEventMap(address) {
         const container = document.getElementById('eventMapContainer');
-        if (!container) return;
+        if (!container || !window.google?.maps?.Map) return;
         const coords = await this.geocodeAddress(address);
-        if (!coords) {
-            container.innerHTML = `<iframe src="https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed" style="width:100%;height:100%;border:none;border-radius:0 0 4px 4px;"></iframe>`;
-            return;
-        }
-        const map = L.map(container).setView([coords.lat, coords.lng], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap', maxZoom: 19}).addTo(map);
-        const icon = L.divIcon({className:'', html:'<div style="width:30px;height:30px;border-radius:50%;background:#e6853d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📅</div>', iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-18]});
-        L.marker([coords.lat, coords.lng], {icon}).addTo(map).bindPopup(`<div style="font-weight:600;">${address}</div><div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="font-size:12px; color:var(--sf-brand);">Open in Google Maps ↗</a></div>`).openPopup();
+        if (!coords) { container.innerHTML = `<iframe src="https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed" style="width:100%;height:100%;border:none;"></iframe>`; return; }
+        const map = new google.maps.Map(container, {center: coords, zoom: 15, mapId: 'EVT_MAP', gestureHandling: 'greedy'});
+        const pin = document.createElement('div');
+        pin.innerHTML = '<div style="width:30px;height:30px;border-radius:50%;background:#e6853d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📅</div>';
+        const marker = new google.maps.marker.AdvancedMarkerElement({position: coords, map, content: pin.firstElementChild, title: address});
+        const iw = new google.maps.InfoWindow({content: `<div style="font-weight:600;">${address}</div><div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="color:#0176d3;">Directions ↗</a></div>`});
+        iw.open({anchor: marker, map});
     },
 
     inlineEventEdit(eventId, field, type, el) {
@@ -3126,43 +3124,23 @@ const app = {
         localStorage.setItem('matthewsCRM_geocache', JSON.stringify(this._geocodeCache || {}));
     },
 
-    async _nominatim(q) {
-        try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=us`, {headers: {'User-Agent': 'MatthewsCRM/1.0'}});
-            const data = await res.json();
-            if (data && data.length > 0) return {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
-        } catch (e) {}
-        return null;
-    },
+    _geocoder: null,
 
     async geocodeAddress(address) {
         const cache = this._loadGeocodeCache();
         const key = address.toLowerCase().trim();
         if (cache[key]) return cache[key];
 
-        // Try full address first
-        let result = await this._nominatim(address);
-
-        // If that fails, try without apartment/suite numbers
-        if (!result) {
-            const cleaned = address.replace(/\b(apt|suite|ste|unit|#|floor|fl)\b\.?\s*\w*/gi, '').replace(/\s+/g, ' ').trim();
-            if (cleaned !== address) result = await this._nominatim(cleaned);
-        }
-
-        // If that fails, try just city + state (drop street)
-        if (!result) {
-            const parts = address.split(',').map(p => p.trim());
-            if (parts.length >= 2) {
-                result = await this._nominatim(parts.slice(1).join(', '));
-            }
-        }
-
-        // If that fails, try last two parts (state + zip or city + state)
-        if (!result) {
-            const parts = address.split(',').map(p => p.trim());
-            if (parts.length >= 3) {
-                result = await this._nominatim(parts.slice(-2).join(', '));
-            }
+        if (!this._geocoder && window.google?.maps?.Geocoder) this._geocoder = new google.maps.Geocoder();
+        let result = null;
+        if (this._geocoder) {
+            try {
+                const resp = await this._geocoder.geocode({address: address});
+                if (resp.results && resp.results.length > 0) {
+                    const loc = resp.results[0].geometry.location;
+                    result = {lat: loc.lat(), lng: loc.lng()};
+                }
+            } catch {}
         }
 
         if (result) {
@@ -3286,90 +3264,65 @@ const app = {
         return true;
     },
 
-    // Layer group to manage all markers at once
-    _markerLayerGroup: null,
-
     applyMapFilters() {
         if (!this.mapInstance) return;
         let visibleCount = 0;
-
-        // Sync sidebar
         document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
             const idx = parseInt(el.getAttribute('data-idx'));
             const item = this._mapAllItems[idx];
             el.style.display = (item && this._itemPassesFilter(item)) ? '' : 'none';
         });
-
-        // Clear ALL markers from map first
-        if (this._markerLayerGroup) {
-            this._markerLayerGroup.clearLayers();
-        } else {
-            this._markerLayerGroup = L.layerGroup().addTo(this.mapInstance);
-        }
-
-        // Re-add only matching markers
-        const visibleBounds = [];
+        const bounds = new google.maps.LatLngBounds();
         this.mapMarkers.forEach(m => {
             if (this._itemPassesFilter(m.item)) {
-                this._markerLayerGroup.addLayer(m.marker);
-                visibleBounds.push([m.coords.lat, m.coords.lng]);
+                m.marker.map = this.mapInstance;
+                bounds.extend(m.coords);
                 visibleCount++;
+            } else {
+                m.marker.map = null;
             }
         });
-
         const countEl = document.getElementById('mapPinCount');
         if (countEl) countEl.textContent = `${visibleCount} of ${this.mapMarkers.length} pins shown`;
-        const hasActiveFilter = this.mapFilters.text || this.mapFilters.tier || this.mapFilters.tag || this.mapFilters.type !== 'all';
-        if (hasActiveFilter && visibleBounds.length > 1) this.mapInstance.fitBounds(visibleBounds, {padding: [40, 40]});
-        else if (hasActiveFilter && visibleBounds.length === 1) this.mapInstance.setView(visibleBounds[0], 14);
+        const hasFilter = this.mapFilters.text || this.mapFilters.tier || this.mapFilters.tag || this.mapFilters.type !== 'all';
+        if (hasFilter && visibleCount > 0) this.mapInstance.fitBounds(bounds);
     },
 
-    _createMapMarker(item, coords) {
+    _infoWindow: null,
+    _createGoogleMarker(item, coords, map) {
         const color = item._type === 'contact' ? '#a094ed' : '#7f8de1';
-        const icon = L.divIcon({
-            className: '',
-            html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${item._initials}</div>`,
-            iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -18]
-        });
+        const pin = document.createElement('div');
+        pin.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;">${item._initials}</div>`;
+        const marker = new google.maps.marker.AdvancedMarkerElement({position: coords, map: map, content: pin.firstElementChild, title: item.name});
         const isContact = item._type === 'contact';
-        const typeLabel = isContact ? 'Contact' : 'Account';
         const viewFn = isContact ? 'viewContact' : 'viewAccount';
-        let detailLines = '';
+        let detail = '';
         if (isContact) {
-            if (item.title) detailLines += `<div style="font-size:12px; color:#666;">${item.title}</div>`;
-            if (item.email) detailLines += `<div style="font-size:12px;"><a href="mailto:${item.email}">${item.email}</a></div>`;
-            if (item.mobile || item.phone) detailLines += `<div style="font-size:12px;"><a href="tel:${item.mobile || item.phone}">${item.mobile || item.phone}</a></div>`;
+            if (item.pc_number||item.mobile) detail += `<div><a href="tel:${item.pc_number||item.mobile}">${item.pc_number||item.mobile}</a></div>`;
+            if (item.pe_email||item.we_email) detail += `<div><a href="mailto:${item.pe_email||item.we_email}">${item.pe_email||item.we_email}</a></div>`;
         } else {
-            if (item.type) detailLines += `<div style="font-size:12px; color:#666;">Type: ${item.type}</div>`;
-            if (item.industry) detailLines += `<div style="font-size:12px; color:#666;">Industry: ${item.industry}</div>`;
-            if (item.website) detailLines += `<div style="font-size:12px;"><a href="${item.website.startsWith('http')?item.website:'https://'+item.website}" target="_blank">${item.website}</a></div>`;
-            const contactCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === item.id).length;
-            if (contactCount) detailLines += `<div style="font-size:12px; color:#666;">${contactCount} contact${contactCount !== 1 ? 's' : ''}</div>`;
+            if (item.type) detail += `<div>${item.type}</div>`;
+            if (item.industry) detail += `<div>${item.industry}</div>`;
         }
-        const popupHtml = `<div style="min-width:200px;">
-            <div style="font-size:10px; text-transform:uppercase; color:#888; letter-spacing:0.5px; margin-bottom:2px;">${typeLabel}</div>
-            <div style="font-weight:700; font-size:14px; margin-bottom:6px;">
-                <a onclick="app.${viewFn}('${item.id}')" style="color:var(--sf-brand); cursor:pointer;">${item.name}</a>
-            </div>
-            ${detailLines}
-            <div style="font-size:11px; color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">${item.address}</div>
-            <div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}" target="_blank" style="font-size:12px; color:var(--sf-brand);">Open in Google Maps ↗</a></div>
-        </div>`;
-        return L.marker([coords.lat, coords.lng], {icon}).bindPopup(popupHtml);
+        marker.addEventListener('gmp-click', () => {
+            if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
+            this._infoWindow.setContent(`<div style="font-size:13px; max-width:250px;">
+                <div style="font-size:10px; text-transform:uppercase; color:#888;">${isContact?'Contact':'Account'}</div>
+                <div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.${viewFn}('${item.id}')" style="color:#0176d3; cursor:pointer;">${item.name}</a></div>
+                ${detail}
+                <div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">${item.address}</div>
+                <div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}" target="_blank" style="color:#0176d3;">Directions ↗</a></div>
+            </div>`);
+            this._infoWindow.open({anchor: marker, map: map});
+        });
+        return marker;
     },
 
     async initMapWithMarkers(items) {
-        if (this.mapInstance) { this.mapInstance.remove(); this.mapInstance = null; }
         this.mapMarkers = [];
-        this._markerLayerGroup = null;
-
-        const map = L.map('crmMap').setView([39.8283, -98.5795], 4);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors',
-            maxZoom: 19
-        }).addTo(map);
+        if (!window.google?.maps?.Map) { document.getElementById('mapLoadingMsg').textContent = 'Loading Google Maps...'; setTimeout(() => this.initMapWithMarkers(items), 500); return; }
+        const map = new google.maps.Map(document.getElementById('crmMap'), {center: {lat: 39.8283, lng: -98.5795}, zoom: 4, mapId: 'CRM_MAP', gestureHandling: 'greedy'});
         this.mapInstance = map;
-        this._markerLayerGroup = L.layerGroup().addTo(map);
 
         const loadingEl = document.getElementById('mapLoadingMsg');
         const cache = this._loadGeocodeCache();
@@ -3380,14 +3333,12 @@ const app = {
             if (!item.address) continue;
             const coords = cache[item.address.toLowerCase().trim()];
             if (!coords) continue;
-            this.mapMarkers.push({marker: this._createMapMarker(item, coords), coords, item, idx: i});
+            const marker = this._createGoogleMarker(item, coords, map);
+            this.mapMarkers.push({marker, coords, item, idx: i});
         }
-
-        // Show all cached pins right away, zoomed to US
         if (this.mapMarkers.length > 0) {
             if (loadingEl) loadingEl.style.display = 'none';
             this.applyMapFilters();
-            map.setView([39.8283, -98.5795], 4);
         }
 
         // Step 2: Geocode any uncached addresses and add pins as they resolve
@@ -3405,15 +3356,11 @@ const app = {
                 remaining--;
                 if (coords) {
                     const idx = items.indexOf(item);
-                    const marker = this._createMapMarker(item, coords);
+                    const marker = this._createGoogleMarker(item, coords, this.mapInstance);
                     this.mapMarkers.push({marker, coords, item, idx});
-                    // Only add to map if it passes current filters
-                    if (this._itemPassesFilter(item)) {
-                        this._markerLayerGroup.addLayer(marker);
-                    }
+                    if (!this._itemPassesFilter(item)) marker.map = null;
                 }
                 if (countEl) countEl.textContent = `${this.mapMarkers.length} pins` + (remaining > 0 ? ` (geocoding ${remaining} more…)` : '');
-                await new Promise(r => setTimeout(r, 1100));
             }
             if (loadingEl) loadingEl.style.display = 'none';
             this.applyMapFilters();
@@ -3458,7 +3405,7 @@ const app = {
                 }
                 return;
             }
-            const marker = this._createMapMarker(item, coords);
+            const marker = this._createGoogleMarker(item, coords, this.mapInstance);
             entry = {marker, coords, item, idx};
             this.mapMarkers.push(entry);
             if (sideItem) sideItem.querySelector('.map-item-address').textContent = item.address;
@@ -3466,11 +3413,10 @@ const app = {
 
         // Show ONLY this one pin on the map
         this._focusedIdx = idx;
-        this._markerLayerGroup.clearLayers();
-        this._markerLayerGroup.addLayer(entry.marker);
-
-        this.mapInstance.setView([entry.coords.lat, entry.coords.lng], 15);
-        entry.marker.openPopup();
+        this.mapMarkers.forEach(m => { m.marker.map = (m === entry) ? this.mapInstance : null; });
+        this.mapInstance.setCenter(entry.coords);
+        this.mapInstance.setZoom(15);
+        google.maps.event.trigger(entry.marker, 'gmp-click');
 
         // Update pin count and show "Show All" button
         const countEl = document.getElementById('mapPinCount');
