@@ -12,7 +12,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCLI-P9B3FpaFGfJ5Ux40YEsO4U_iNvxbY&libraries=marker,places,visualization&v=weekly&callback=Function.prototype"></script>
+    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88&libraries=marker,places,visualization&v=weekly&callback=Function.prototype"></script>
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -420,7 +420,36 @@
         .cal-e-crm {background:#e6853d; color:#fff;}
         .cal-e-gcal {background:#4285f4; color:#fff;}
         .cal-e-bday {background:#dcfce7; color:#166534;}
-        @media (max-width:768px) {.cal-day {min-height:40px; padding:1px;} .cal-day-n {font-size:10px;} .cal-e {font-size:8px;}}
+        .cal-view-tabs {display:flex; gap:2px; background:var(--sf-bg-alt); border-radius:6px; padding:2px;}
+        .cal-view-tab {padding:5px 14px; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--sf-text-weak);}
+        .cal-view-tab.active {background:#fff; color:var(--sf-text); box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+        .cal-week-grid {display:grid; grid-template-columns:60px repeat(7,1fr); border:1px solid var(--sf-border-weak); border-radius:4px; overflow:hidden;}
+        .cal-week-time {font-size:10px; color:var(--sf-text-weak); text-align:right; padding:2px 6px; border-bottom:1px solid var(--sf-border-weak); height:40px; background:var(--sf-bg);}
+        .cal-week-cell {border-right:1px solid var(--sf-border-weak); border-bottom:1px solid var(--sf-border-weak); height:40px; padding:1px 2px; position:relative; font-size:9px; overflow:hidden; cursor:pointer;}
+        .cal-week-cell:hover {background:var(--sf-bg);}
+        .cal-week-cell:nth-child(8n) {border-right:none;}
+        .cal-week-hdr {font-size:11px; font-weight:700; text-align:center; padding:6px 2px; background:var(--sf-bg-alt); border-bottom:1px solid var(--sf-border-weak); border-right:1px solid var(--sf-border-weak);}
+        .cal-week-hdr.today {color:var(--sf-brand); background:#eef4fc;}
+        .cal-agenda-item {display:flex; gap:12px; padding:10px 12px; border-bottom:1px solid var(--sf-border-weak); cursor:pointer; align-items:flex-start;}
+        .cal-agenda-item:hover {background:var(--sf-bg);}
+        .cal-agenda-time {min-width:60px; font-size:12px; font-weight:600; color:var(--sf-text-weak);}
+        .cal-agenda-dot {width:10px; height:10px; border-radius:50%; margin-top:4px; flex-shrink:0;}
+        .cal-agenda-info {flex:1; min-width:0;}
+        .cal-agenda-title {font-weight:600; font-size:13px;}
+        .cal-agenda-meta {font-size:11px; color:var(--sf-text-weak);}
+        .cal-sidebar {width:280px; border-left:1px solid var(--sf-border-weak); padding:12px; overflow-y:auto; flex-shrink:0;}
+        .cal-sidebar-section {margin-bottom:16px;}
+        .cal-sidebar-title {font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-text-weak); margin-bottom:8px;}
+        .cal-toggle {display:flex; align-items:center; gap:8px; padding:4px 0; cursor:pointer; font-size:12px;}
+        .cal-toggle input[type=checkbox] {margin:0;}
+        .cal-toggle-dot {width:10px; height:10px; border-radius:50%;}
+        .cal-day-view-grid {display:grid; grid-template-columns:60px 1fr; border:1px solid var(--sf-border-weak); border-radius:4px; overflow:hidden;}
+        .cal-travel-card {background:#fff; border:1px solid var(--sf-border-weak); border-radius:8px; padding:12px; margin-bottom:8px;}
+        .cal-travel-card .flight-num {font-weight:700; color:var(--sf-brand);}
+        .cal-event-detail {position:absolute; background:#fff; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.15); padding:16px; z-index:100; width:320px; max-height:400px; overflow-y:auto;}
+        .cal-event-detail .rsvp-btn {padding:4px 12px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid var(--sf-border);}
+        .cal-event-detail .rsvp-btn.active {background:var(--sf-brand); color:#fff; border-color:var(--sf-brand);}
+        @media (max-width:768px) {.cal-day {min-height:40px; padding:1px;} .cal-day-n {font-size:10px;} .cal-e {font-size:8px;} .cal-sidebar{display:none;} .cal-view-tab{padding:4px 8px; font-size:11px;}}
         /* Mobile list (hidden on desktop, shown on mobile) */
         .mobile-list {display: none;}
         .mobile-list-item {padding: 10px 12px; border-bottom: 1px solid var(--sf-border-weak); cursor: pointer; display: flex; align-items: center; gap: 10px;}
@@ -751,7 +780,7 @@ const STORAGE_KEY = 'matthewsCRM';
 
 // Initialize Firebase
 const firebaseApp = firebase.initializeApp({
-    apiKey: 'AIzaSyCLI-P9B3FpaFGfJ5Ux40YEsO4U_iNvxbY',
+    apiKey: 'AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88',
     authDomain: 'tmc-crm-f3728.firebaseapp.com',
     projectId: 'tmc-crm-f3728'
 });
@@ -3271,111 +3300,378 @@ const app = {
     // === Calendar ===
     _calMonth: null,
     _calYear: null,
+    _calView: 'month',
     _gcalEvents: [],
+    _gcalCalendars: [],
+    _gcalHiddenCals: {},
+    _travelEvents: [],
 
-    async fetchGoogleCalendar(start, end) {
-        if (!this.isGmailConnected()) return [];
+    async fetchCalendarList() {
+        if (!this.isGmailConnected()) return;
         try {
-            const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&maxResults=200&singleEvents=true&orderBy=startTime`, {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
                 headers: {'Authorization': 'Bearer ' + this._gmailToken}
             });
-            if (!res.ok) return [];
+            if (!res.ok) return;
             const data = await res.json();
-            return (data.items || []).map(e => ({
-                id: e.id,
-                name: e.summary || '(no title)',
-                start: e.start?.dateTime || e.start?.date || '',
-                end: e.end?.dateTime || e.end?.date || '',
-                address: e.location || '',
-                description: e.description || '',
-                _source: 'gcal',
-                _htmlLink: e.htmlLink
-            }));
-        } catch { return []; }
+            this._gcalCalendars = (data.items || []).map(c => ({id: c.id, name: c.summary, color: c.backgroundColor || '#4285f4', primary: c.primary || false}));
+            const saved = localStorage.getItem('matthewsCRM_hiddenCals');
+            if (saved) try { this._gcalHiddenCals = JSON.parse(saved); } catch {}
+        } catch {}
+    },
+
+    async fetchAllCalendarEvents(start, end) {
+        if (!this.isGmailConnected()) return [];
+        if (!this._gcalCalendars.length) await this.fetchCalendarList();
+        const visible = this._gcalCalendars.filter(c => !this._gcalHiddenCals[c.id]);
+        const all = [];
+        for (const cal of visible) {
+            try {
+                const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(cal.id) + '/events?timeMin=' + start + '&timeMax=' + end + '&maxResults=250&singleEvents=true&orderBy=startTime', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                (data.items || []).forEach(e => {
+                    const attendees = (e.attendees || []);
+                    const myStatus = attendees.find(a => a.self)?.responseStatus || '';
+                    all.push({
+                        id: e.id, calId: cal.id, name: e.summary || '(no title)',
+                        start: e.start?.dateTime || e.start?.date || '',
+                        end: e.end?.dateTime || e.end?.date || '',
+                        address: e.location || '', description: e.description || '',
+                        _source: 'gcal', _color: cal.color, _calName: cal.name,
+                        _htmlLink: e.htmlLink, _attendees: attendees,
+                        _myStatus: myStatus, _organizer: e.organizer?.email || '',
+                        _allDay: !e.start?.dateTime
+                    });
+                });
+            } catch {}
+        }
+        return all;
+    },
+
+    async fetchGoogleCalendar(start, end) {
+        return this.fetchAllCalendarEvents(start, end);
+    },
+
+    toggleCalendarVisibility(calId) {
+        this._gcalHiddenCals[calId] = !this._gcalHiddenCals[calId];
+        localStorage.setItem('matthewsCRM_hiddenCals', JSON.stringify(this._gcalHiddenCals));
+        this._gcalEvents = [];
+        this.renderCalendar();
+    },
+
+    async rsvpEvent(calId, eventId, status) {
+        if (!this.isGmailConnected()) return;
+        try {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) return;
+            const evt = await res.json();
+            const attendees = (evt.attendees || []).map(a => a.self ? {...a, responseStatus: status} : a);
+            await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                method: 'PATCH',
+                headers: {'Authorization': 'Bearer ' + this._gmailToken, 'Content-Type': 'application/json'},
+                body: JSON.stringify({attendees})
+            });
+            this._gcalEvents = [];
+            this.renderCalendar();
+        } catch(e) { console.log('RSVP failed:', e); }
+    },
+
+    async createGcalEvent(summary, startDT, endDT, location, description, attendeeEmails) {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        const body = {summary, start: {dateTime: startDT, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}, end: {dateTime: endDT, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}};
+        if (location) body.location = location;
+        if (description) body.description = description;
+        if (attendeeEmails && attendeeEmails.length) body.attendees = attendeeEmails.map(e => ({email: e}));
+        try {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + this._gmailToken, 'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (res.ok) { this._gcalEvents = []; this.renderCalendar(); this.updateStatus('Event created on Google Calendar', true); }
+        } catch(e) { console.log('Create gcal event failed:', e); }
+    },
+
+    async deleteGcalEvent(calId, eventId) {
+        if (!this.isGmailConnected()) return;
+        if (!confirm('Delete this event from Google Calendar?')) return;
+        try {
+            await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                method: 'DELETE', headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            this._gcalEvents = []; this.renderCalendar();
+        } catch {}
+    },
+
+    async searchGmailTravel() {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        this._travelEvents = [];
+        const queries = ['from:flights@google.com', 'subject:flight confirmation', 'subject:booking confirmation hotel', 'subject:reservation confirmation', 'subject:itinerary', 'subject:e-ticket'];
+        const allMessages = [];
+        for (const q of queries) {
+            try {
+                const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?q=' + encodeURIComponent(q) + '&maxResults=10', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (data.messages) allMessages.push(...data.messages);
+            } catch {}
+        }
+        const seen = new Set();
+        const unique = allMessages.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; }).slice(0, 20);
+        for (const msg of unique) {
+            try {
+                const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + msg.id + '?format=metadata&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=From', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                const headers = data.payload?.headers || [];
+                const subject = headers.find(h => h.name === 'Subject')?.value || '';
+                const date = headers.find(h => h.name === 'Date')?.value || '';
+                const from = headers.find(h => h.name === 'From')?.value || '';
+                const snippet = data.snippet || '';
+                const type = this._detectTravelType(subject, from, snippet);
+                if (type) {
+                    this._travelEvents.push({id: msg.id, subject, date, from, snippet, type, _parsed: this._parseTravelSnippet(snippet, subject, type)});
+                }
+            } catch {}
+        }
+        this.renderCalendar();
+    },
+
+    _detectTravelType(subject, from, snippet) {
+        const s = (subject + ' ' + from + ' ' + snippet).toLowerCase();
+        if (s.includes('flight') || s.includes('airline') || s.includes('boarding') || s.includes('e-ticket') || from.includes('flights@google.com')) return 'flight';
+        if (s.includes('hotel') || s.includes('resort') || s.includes('check-in') || s.includes('accommodation')) return 'hotel';
+        if (s.includes('rental car') || s.includes('car rental') || s.includes('hertz') || s.includes('enterprise') || s.includes('avis')) return 'car';
+        if (s.includes('reservation') || s.includes('booking') || s.includes('itinerary')) return 'travel';
+        return null;
+    },
+
+    _parseTravelSnippet(snippet, subject, type) {
+        const result = {dates: [], confirmation: '', details: subject};
+        const dateRe = /\b(\w{3,9}\s+\d{1,2},?\s+\d{4})\b/g;
+        let m; while ((m = dateRe.exec(snippet)) !== null) result.dates.push(m[1]);
+        const confRe = /(?:confirmation|booking|record locator|PNR)[:\s#]*([A-Z0-9]{5,8})/i;
+        const confM = confRe.exec(snippet);
+        if (confM) result.confirmation = confM[1];
+        return result;
     },
 
     renderCalendar() {
         const today = new Date();
         if (!this._calYear) this._calYear = today.getFullYear();
-        if (!this._calMonth) this._calMonth = today.getMonth();
-        const year = this._calYear;
-        const month = this._calMonth;
-        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-        const first = new Date(year, month, 1);
-        const last = new Date(year, month + 1, 0);
-        const startDay = first.getDay();
-        const daysInMonth = last.getDate();
+        if (this._calMonth == null) this._calMonth = today.getMonth();
+        const year = this._calYear, month = this._calMonth;
+        const MN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
         const todayStr = today.toISOString().split('T')[0];
-
-        // Collect CRM events for this month
-        const monthStart = `${year}-${String(month+1).padStart(2,'0')}-01`;
-        const monthEnd = `${year}-${String(month+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
-        const crmEvents = this.data.events.filter(e => {
-            const d = (e.start||'').slice(0,10);
-            return d >= monthStart && d <= monthEnd;
-        });
-
-        // Birthdays this month
-        const birthdays = this.data.contacts.filter(c => {
-            if (!c.birthdate) return false;
-            const bd = new Date(c.birthdate);
-            return bd.getMonth() === month;
-        });
-
-        // Build calendar grid
-        const days = [];
-        const prevMonth = new Date(year, month, 0);
-        for (let i = startDay - 1; i >= 0; i--) days.push({day: prevMonth.getDate() - i, other: true});
-        for (let d = 1; d <= daysInMonth; d++) days.push({day: d, other: false});
-        const remaining = 7 - (days.length % 7);
-        if (remaining < 7) for (let i = 1; i <= remaining; i++) days.push({day: i, other: true});
-
-        const html = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <button class="btn-small" onclick="app._gcalEvents=[]; app._calMonth--; if(app._calMonth<0){app._calMonth=11;app._calYear--;} app.renderCalendar();">◀</button>
-                    <h2 style="margin:0; min-width:180px; text-align:center;">${monthNames[month]} ${year}</h2>
-                    <button class="btn-small" onclick="app._gcalEvents=[]; app._calMonth++; if(app._calMonth>11){app._calMonth=0;app._calYear++;} app.renderCalendar();">▶</button>
-                    <button class="btn-small" onclick="app._calMonth=${today.getMonth()}; app._calYear=${today.getFullYear()}; app.renderCalendar();">Today</button>
-                </div>
-                <div style="display:flex; gap:6px;">
-                    ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Google Calendar synced</span>' : `<button class="btn-small" onclick="app.connectGmail()">Connect Google Calendar</button>`}
-                    <button class="btn-primary" onclick="app.openEventForm();" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
-                </div>
-            </div>
-            <div style="display:flex; gap:8px; margin-bottom:8px; font-size:11px;">
-                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e6853d;"></span> CRM Events</span>
-                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#4285f4;"></span> Google Calendar</span>
-                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#dcfce7;"></span> Birthdays</span>
-            </div>
-            <div class="cal-grid">
-                ${'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',').map(d => `<div class="cal-hdr">${d}</div>`).join('')}
-                ${days.map(d => {
-                    const dateStr = d.other ? '' : `${year}-${String(month+1).padStart(2,'0')}-${String(d.day).padStart(2,'0')}`;
-                    const isToday = dateStr === todayStr;
-                    const dayEvents = d.other ? [] : crmEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
-                    const dayBdays = d.other ? [] : birthdays.filter(c => new Date(c.birthdate).getDate() === d.day);
-                    const dayGcal = d.other ? [] : this._gcalEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
-                    return `<div class="cal-day ${d.other?'other':''} ${isToday?'today':''}" onclick="${!d.other ? `app.openEventForm(); setTimeout(()=>{document.getElementById('eventStart').value='${dateStr}T09:00'},100);` : ''}">
-                        <div class="cal-day-n">${d.day}</div>
-                        ${dayBdays.map(c => `<div class="cal-e cal-e-bday" onclick="event.stopPropagation(); app.viewContact('${c.id}');">🎂 ${c.name.split(' ')[0]}</div>`).join('')}
-                        ${dayEvents.map(e => `<div class="cal-e cal-e-crm" onclick="event.stopPropagation(); app.viewEvent('${e.id}');">${e.name}</div>`).join('')}
-                        ${dayGcal.map(e => `<div class="cal-e cal-e-gcal" onclick="event.stopPropagation(); ${e._htmlLink ? `window.open('${e._htmlLink}','_blank')` : ''};" title="${e.name}">${e.name}</div>`).join('')}
-                    </div>`;
-                }).join('')}
-            </div>
-        `;
-        document.getElementById('content').innerHTML = html;
-
-        // Fetch Google Calendar events in background
+        const v = this._calView || 'month';
+        const cals = this._gcalCalendars || [];
+        const calToggles = cals.length ? cals.map(c => '<label class="cal-toggle"><input type="checkbox" ' + (this._gcalHiddenCals[c.id] ? '' : 'checked') + ' onchange="app.toggleCalendarVisibility(\'' + c.id.replace(/'/g,"\\'") + '\')"><span class="cal-toggle-dot" style="background:' + c.color + '"></span>' + c.name + '</label>').join('') : '<div style="font-size:11px;color:var(--sf-text-weak);">Connect Google to see calendars</div>';
+        const header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<button class="btn-small" onclick="app._gcalEvents=[];app.calNav(-1);">◀</button>'
+            + '<h2 style="margin:0;min-width:180px;text-align:center;">' + MN[month] + ' ' + year + '</h2>'
+            + '<button class="btn-small" onclick="app._gcalEvents=[];app.calNav(1);">▶</button>'
+            + '<button class="btn-small" onclick="app._calMonth=' + today.getMonth() + ';app._calYear=' + today.getFullYear() + ';app._gcalEvents=[];app.renderCalendar();">Today</button>'
+            + '</div>'
+            + '<div style="display:flex;align-items:center;gap:6px;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='month'?'active':'') + '" onclick="app._calView=\'month\';app.renderCalendar();">Month</button>'
+            + '<button class="cal-view-tab ' + (v==='week'?'active':'') + '" onclick="app._calView=\'week\';app.renderCalendar();">Week</button>'
+            + '<button class="cal-view-tab ' + (v==='day'?'active':'') + '" onclick="app._calView=\'day\';app.renderCalendar();">Day</button>'
+            + '<button class="cal-view-tab ' + (v==='agenda'?'active':'') + '" onclick="app._calView=\'agenda\';app.renderCalendar();">Agenda</button>'
+            + '</div>'
+            + (this.isGmailConnected() ? '' : '<button class="btn-small" onclick="app.connectGmail()">Connect Google</button>')
+            + '<button class="btn-small" onclick="app.searchGmailTravel();">✈ Travel</button>'
+            + '<button class="btn-small" onclick="app.openCalNewEvent();">+ Event</button>'
+            + '</div></div>';
+        let body = '';
+        if (v === 'month') body = this._renderCalMonth(year, month, todayStr);
+        else if (v === 'week') body = this._renderCalWeek(year, month, todayStr);
+        else if (v === 'day') body = this._renderCalDay(year, month, todayStr);
+        else if (v === 'agenda') body = this._renderCalAgenda(todayStr);
+        const sidebar = '<div class="cal-sidebar">'
+            + '<div class="cal-sidebar-section"><div class="cal-sidebar-title">My Calendars</div>' + calToggles + '</div>'
+            + '<div class="cal-sidebar-section"><div class="cal-sidebar-title">Legend</div>'
+            + '<div style="font-size:11px;display:flex;flex-direction:column;gap:4px;">'
+            + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e6853d;"></span> CRM Events</span>'
+            + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#dcfce7;"></span> Birthdays</span>'
+            + '</div></div>'
+            + (this._travelEvents.length ? '<div class="cal-sidebar-section"><div class="cal-sidebar-title">✈ Travel</div>' + this._travelEvents.slice(0,5).map(t => '<div class="cal-travel-card"><div style="font-size:10px;text-transform:uppercase;color:' + (t.type==='flight'?'#1a73e8':t.type==='hotel'?'#e8710a':'#666') + ';font-weight:700;">' + t.type + '</div><div style="font-size:12px;font-weight:600;margin:2px 0;">' + t.subject.slice(0,50) + '</div>' + (t._parsed.confirmation ? '<div class="flight-num">Conf: ' + t._parsed.confirmation + '</div>' : '') + '<div style="font-size:10px;color:#888;">' + t._parsed.dates.join(' - ') + '</div></div>').join('') + '</div>' : '')
+            + '</div>';
+        document.getElementById('content').innerHTML = '<div style="display:flex;gap:0;min-height:calc(100vh - 140px);">'
+            + '<div style="flex:1;min-width:0;">' + header + body + '</div>' + sidebar + '</div>';
         if (this.isGmailConnected() && !this._gcalEvents.length) {
             const s = new Date(year, month, 1).toISOString();
             const e = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
-            this.fetchGoogleCalendar(s, e).then(events => {
-                this._gcalEvents = events;
-                if (events.length) this.renderCalendar();
-            });
+            this.fetchGoogleCalendar(s, e).then(evts => { this._gcalEvents = evts; if (evts.length) this.renderCalendar(); });
+            if (!this._gcalCalendars.length) this.fetchCalendarList().then(() => this.renderCalendar());
         }
+    },
+
+    calNav(dir) {
+        this._calMonth += dir;
+        if (this._calMonth > 11) { this._calMonth = 0; this._calYear++; }
+        if (this._calMonth < 0) { this._calMonth = 11; this._calYear--; }
+        this.renderCalendar();
+    },
+
+    openCalNewEvent(dateStr) {
+        this.openEventForm();
+        if (dateStr) setTimeout(() => { const el = document.getElementById('eventStart'); if (el) el.value = dateStr + 'T09:00'; }, 100);
+    },
+
+    _getEventsForDate(dateStr) {
+        const crm = this.data.events.filter(e => (e.start||'').slice(0,10) === dateStr).map(e => ({...e, _source:'crm', _color:'#e6853d'}));
+        const gcal = this._gcalEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
+        const bdays = this.data.contacts.filter(c => { if (!c.birthdate) return false; const bd = c.birthdate.slice(5); return bd === dateStr.slice(5); }).map(c => ({id:c.id, name:'🎂 '+c.name.split(' ')[0], _source:'bday', _color:'#dcfce7', start:dateStr}));
+        return [...bdays, ...crm, ...gcal];
+    },
+
+    _renderCalMonth(year, month, todayStr) {
+        const first = new Date(year, month, 1), last = new Date(year, month+1, 0);
+        const startDay = first.getDay(), daysInMonth = last.getDate();
+        const days = [];
+        const prev = new Date(year, month, 0);
+        for (let i = startDay-1; i >= 0; i--) days.push({day: prev.getDate()-i, other: true});
+        for (let d = 1; d <= daysInMonth; d++) days.push({day: d, other: false});
+        const rem = 7 - (days.length % 7); if (rem < 7) for (let i = 1; i <= rem; i++) days.push({day: i, other: true});
+        return '<div class="cal-grid">' + 'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',').map(d => '<div class="cal-hdr">' + d + '</div>').join('')
+            + days.map(d => {
+                const ds = d.other ? '' : year + '-' + String(month+1).padStart(2,'0') + '-' + String(d.day).padStart(2,'0');
+                const evts = ds ? this._getEventsForDate(ds) : [];
+                return '<div class="cal-day ' + (d.other?'other':'') + ' ' + (ds===todayStr?'today':'') + '" onclick="' + (!d.other ? "app.openCalNewEvent('" + ds + "');" : '') + '">'
+                    + '<div class="cal-day-n">' + d.day + '</div>'
+                    + evts.slice(0,3).map(e => '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');" title="' + (e.name||'').replace(/"/g,'&quot;') + '">' + (e.name||'').slice(0,20) + '</div>').join('')
+                    + (evts.length > 3 ? '<div style="font-size:9px;color:var(--sf-text-weak);">+' + (evts.length-3) + ' more</div>' : '')
+                    + '</div>';
+            }).join('') + '</div>';
+    },
+
+    _renderCalWeek(year, month, todayStr) {
+        const d = new Date(year, month, new Date().getDate());
+        const sun = new Date(d); sun.setDate(d.getDate() - d.getDay());
+        const days = []; for (let i = 0; i < 7; i++) { const dd = new Date(sun); dd.setDate(sun.getDate()+i); days.push(dd); }
+        const hours = []; for (let h = 6; h <= 21; h++) hours.push(h);
+        let html = '<div class="cal-week-grid"><div class="cal-week-hdr"></div>';
+        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        days.forEach((dd,i) => { const ds = dd.toISOString().slice(0,10); html += '<div class="cal-week-hdr ' + (ds===todayStr?'today':'') + '">' + dayNames[i] + ' ' + dd.getDate() + '</div>'; });
+        hours.forEach(h => {
+            html += '<div class="cal-week-time">' + (h>12?h-12:h) + (h>=12?'p':'a') + '</div>';
+            days.forEach(dd => {
+                const ds = dd.toISOString().slice(0,10);
+                const hStr = String(h).padStart(2,'0');
+                const evts = this._getEventsForDate(ds).filter(e => (e.start||'').includes('T' + hStr));
+                html += '<div class="cal-week-cell" onclick="app.openCalNewEvent(\'' + ds + '\')">' + evts.map(e => '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">' + (e.name||'').slice(0,15) + '</div>').join('') + '</div>';
+            });
+        });
+        return html + '</div>';
+    },
+
+    _renderCalDay(year, month, todayStr) {
+        const ds = todayStr;
+        const hours = []; for (let h = 6; h <= 21; h++) hours.push(h);
+        const evts = this._getEventsForDate(ds);
+        let html = '<div class="cal-day-view-grid">';
+        hours.forEach(h => {
+            const hStr = String(h).padStart(2,'0');
+            const hEvts = evts.filter(e => (e.start||'').includes('T' + hStr));
+            html += '<div class="cal-week-time">' + (h>12?h-12:h) + ':00' + (h>=12?'pm':'am') + '</div>';
+            html += '<div class="cal-week-cell" style="height:50px;" onclick="app.openCalNewEvent(\'' + ds + '\')">';
+            hEvts.forEach(e => { html += '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;padding:2px 6px;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">' + (e.name||'') + ' <span style="opacity:0.7;font-size:9px;">' + (e.start||'').slice(11,16) + '</span></div>'; });
+            html += '</div>';
+        });
+        return html + '</div>';
+    },
+
+    _renderCalAgenda(todayStr) {
+        const start = new Date(); const days = [];
+        for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate()+i); days.push(d.toISOString().slice(0,10)); }
+        let html = '<div style="border:1px solid var(--sf-border-weak);border-radius:4px;overflow:hidden;">';
+        let hasEvents = false;
+        days.forEach(ds => {
+            const evts = this._getEventsForDate(ds);
+            if (!evts.length) return;
+            hasEvents = true;
+            const d = new Date(ds+'T12:00:00');
+            const dayLabel = ds === todayStr ? 'Today' : ds === new Date(new Date().setDate(new Date().getDate()+1)).toISOString().slice(0,10) ? 'Tomorrow' : d.toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'});
+            html += '<div style="background:var(--sf-bg-alt);padding:6px 12px;font-size:11px;font-weight:700;color:var(--sf-text-weak);border-bottom:1px solid var(--sf-border-weak);">' + dayLabel + '</div>';
+            evts.forEach(e => {
+                const time = (e.start||'').includes('T') ? new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : 'All day';
+                const contact = e._attendees ? this._findContactByEmail(e._attendees.map(a=>a.email)) : null;
+                html += '<div class="cal-agenda-item" onclick="app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">'
+                    + '<div class="cal-agenda-time">' + time + '</div>'
+                    + '<div class="cal-agenda-dot" style="background:' + (e._color||'#4285f4') + ';"></div>'
+                    + '<div class="cal-agenda-info"><div class="cal-agenda-title">' + (e.name||'') + '</div>'
+                    + '<div class="cal-agenda-meta">' + (e._calName||e._source||'') + (e.address ? ' · ' + e.address : '') + (contact ? ' · <a onclick="event.stopPropagation();app.viewContact(\'' + contact.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + contact.name + '</a>' : '') + '</div>'
+                    + (e._myStatus ? '<div style="margin-top:2px;">' + this._rsvpBadge(e._myStatus) + '</div>' : '')
+                    + '</div></div>';
+            });
+        });
+        if (!hasEvents) html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No events in the next 14 days.</div>';
+        return html + '</div>';
+    },
+
+    _rsvpBadge(status) {
+        const colors = {accepted:'#2e844a', tentative:'#fe9339', declined:'#ba0517', needsAction:'#888'};
+        const labels = {accepted:'Accepted', tentative:'Maybe', declined:'Declined', needsAction:'Pending'};
+        return '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:' + (colors[status]||'#888') + '22;color:' + (colors[status]||'#888') + ';font-weight:600;">' + (labels[status]||status) + '</span>';
+    },
+
+    _findContactByEmail(emails) {
+        if (!emails || !emails.length) return null;
+        return this.data.contacts.find(c => emails.some(e => e === c.pe_email || e === c.we_email || e === c.email));
+    },
+
+    calEventClick(source, id) {
+        if (source === 'crm') { this.viewEvent(id); return; }
+        if (source === 'bday') { this.viewContact(id); return; }
+        const evt = this._gcalEvents.find(e => e.id === id);
+        if (!evt) return;
+        const contact = evt._attendees ? this._findContactByEmail(evt._attendees.map(a=>a.email)) : null;
+        const rsvpHtml = evt._attendees && evt._attendees.length ? '<div style="margin-top:8px;"><div style="font-size:11px;font-weight:700;margin-bottom:4px;">RSVP</div><div style="display:flex;gap:4px;">'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='accepted'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'accepted\')">Accept</button>'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='tentative'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'tentative\')">Maybe</button>'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='declined'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'declined\')">Decline</button>'
+            + '</div></div>' : '';
+        const attendeeList = (evt._attendees||[]).slice(0,10).map(a => { const c = this._findContactByEmail([a.email]); return '<div style="font-size:11px;padding:2px 0;">' + (c ? '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name + '</a>' : a.email) + ' ' + this._rsvpBadge(a.responseStatus) + '</div>'; }).join('');
+        const html = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:999;" onclick="this.remove();">'
+            + '<div class="cal-event-detail" style="top:50%;left:50%;transform:translate(-50%,-50%);position:fixed;" onclick="event.stopPropagation();">'
+            + '<div style="display:flex;justify-content:space-between;align-items:start;"><div>'
+            + '<div style="font-size:10px;text-transform:uppercase;color:' + (evt._color||'#4285f4') + ';font-weight:700;">' + (evt._calName||'Google Calendar') + '</div>'
+            + '<div style="font-size:16px;font-weight:700;margin:4px 0;">' + evt.name + '</div></div>'
+            + '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="background:none;border:none;font-size:18px;cursor:pointer;">✕</button></div>'
+            + '<div style="font-size:12px;color:var(--sf-text-weak);margin-bottom:8px;">' + new Date(evt.start).toLocaleString('en-US',{weekday:'long',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) + (evt.end ? ' - ' + new Date(evt.end).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '') + '</div>'
+            + (evt.address ? '<div style="font-size:12px;margin-bottom:6px;">📍 ' + evt.address + '</div>' : '')
+            + (evt.description ? '<div style="font-size:12px;margin-bottom:8px;color:var(--sf-text-weak);white-space:pre-wrap;">' + evt.description.slice(0,300) + '</div>' : '')
+            + (contact ? '<div style="margin-bottom:8px;padding:8px;background:var(--sf-bg);border-radius:6px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);margin-bottom:2px;">CRM CONTACT</div><a onclick="app.viewContact(\'' + contact.id + '\')" style="color:var(--sf-brand);font-weight:600;cursor:pointer;">' + contact.name + '</a><div style="font-size:11px;color:var(--sf-text-weak);">' + (contact.title||'') + '</div></div>' : '')
+            + (attendeeList ? '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;margin-bottom:4px;">Attendees</div>' + attendeeList + '</div>' : '')
+            + rsvpHtml
+            + '<div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--sf-border-weak);padding-top:10px;">'
+            + (evt._htmlLink ? '<a href="' + evt._htmlLink + '" target="_blank" class="btn-small">Open in Google</a>' : '')
+            + '<button class="btn-small" style="color:var(--sf-error);" onclick="app.deleteGcalEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\');this.closest(\'[style*=fixed]\').remove();">Delete</button>'
+            + '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', html);
+    },
+
+    scheduleWithContact(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        const email = c.pe_email || c.we_email || c.email || '';
+        const summary = prompt('Meeting subject:', 'Meeting with ' + c.name);
+        if (!summary) return;
+        const dateStr = prompt('Date and time (YYYY-MM-DDTHH:MM):', new Date(Date.now()+86400000).toISOString().slice(0,16));
+        if (!dateStr) return;
+        const endStr = new Date(new Date(dateStr).getTime() + 3600000).toISOString().slice(0,19);
+        this.createGcalEvent(summary, dateStr + ':00', endStr, '', '', email ? [email] : []);
     },
 
     _geocodeCache: null,
