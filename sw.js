@@ -1,4 +1,4 @@
-const CACHE_NAME = 'matthews-crm-v3';
+const CACHE_NAME = 'matthews-crm-v4';
 const ASSETS = ['./', './index.html', './manifest.json'];
 const CDN_ASSETS = [
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
