@@ -5782,6 +5782,24 @@ const app = {
                         </div>
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
                         <div class="sf-detail-field"><div class="sf-detail-field-value" style="cursor:pointer; white-space:pre-wrap;" onclick="app.inlineDetailEdit('${c.id}','notes','textarea',this)" title="Click to edit">${c.notes || '—'}</div></div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Connections <button class="btn-small" style="float:right;" onclick="app.addConnection('${c.id}')">+ Add</button></h3>
+                        ${(() => {
+                            const conns = (this.data._connections||[]).filter(cn => cn.from === c.id || cn.to === c.id);
+                            if (!conns.length) return '<div style="font-size:12px;color:var(--sf-text-weak);padding:4px 0;">No connections yet. Click + Add to map who this contact knows.</div>';
+                            return '<div style="display:flex;flex-direction:column;gap:6px;">' + conns.map(cn => {
+                                const otherId = cn.from === c.id ? cn.to : cn.from;
+                                const other = this.data.contacts.find(x => x.id === otherId);
+                                if (!other) return '';
+                                const strengthColors = {strong:'#22c55e',medium:'#f59e0b',weak:'#9ca3af'};
+                                return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--sf-border-weak);">'
+                                    + '<div style="display:flex;align-items:center;gap:8px;">'
+                                    + '<div style="width:8px;height:8px;border-radius:50%;background:' + (strengthColors[cn.strength]||'#9ca3af') + ';"></div>'
+                                    + '<div><a onclick="app.viewContact(\'' + other.id + '\')" style="color:var(--sf-brand);cursor:pointer;font-weight:600;font-size:13px;">' + other.name + '</a>'
+                                    + '<div style="font-size:11px;color:var(--sf-text-weak);">' + (cn.type||'Knows') + (cn.context ? ' · ' + cn.context : '') + '</div></div></div>'
+                                    + '<button class="btn-small" onclick="app.removeConnection(\'' + c.id + '\',\'' + cn.id + '\')" style="font-size:10px;color:var(--sf-error);">✕</button></div>';
+                            }).join('') + '</div>';
+                        })()}
                     </div>
                 </div>
 
@@ -5917,6 +5935,30 @@ const app = {
     },
 
     // Filter contact timeline by type
+    addConnection(contactId) {
+        const name = prompt('Who does this contact know? (enter name):');
+        if (!name) return;
+        const other = this.data.contacts.find(c => (c.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!other) { alert('Contact not found.'); return; }
+        if (other.id === contactId) return;
+        if (!this.data._connections) this.data._connections = [];
+        const exists = this.data._connections.find(cn => (cn.from === contactId && cn.to === other.id) || (cn.from === other.id && cn.to === contactId));
+        if (exists) { alert('Connection already exists.'); return; }
+        const type = prompt('Relationship type:', 'Knows') || 'Knows';
+        const context = prompt('Context (e.g. "Met at conference", "College roommates"):', '') || '';
+        const strength = prompt('Strength (strong/medium/weak):', 'medium') || 'medium';
+        this.data._connections.push({id: 'conn-' + Date.now(), from: contactId, to: other.id, type, context, strength, created: new Date().toISOString()});
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    removeConnection(contactId, connId) {
+        if (!this.data._connections) return;
+        this.data._connections = this.data._connections.filter(cn => cn.id !== connId);
+        this.persist();
+        this.renderContactDetail();
+    },
+
     filterContactTimeline(contactId, type) {
         const list = document.getElementById('cdTimelineList');
         if (!list) return;
