@@ -384,6 +384,19 @@
             .sf-app-tab span.obj-icon {display: none;}
             .sf-hl-fields {grid-template-columns: 1fr !important;}
         }
+        .cal-grid {display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--sf-border-weak); border-radius:4px; overflow:hidden;}
+        .cal-hdr {background:var(--sf-bg-alt); padding:6px; text-align:center; font-size:11px; font-weight:700; color:var(--sf-text-weak); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);}
+        .cal-day {min-height:80px; padding:3px; border-right:1px solid var(--sf-border-weak); border-bottom:1px solid var(--sf-border-weak); background:#fff; font-size:11px; vertical-align:top; overflow:hidden;}
+        .cal-day:nth-child(7n) {border-right:none;}
+        .cal-day:hover {background:var(--sf-bg);}
+        .cal-day.other {background:var(--sf-bg); color:var(--sf-text-weakest);}
+        .cal-day.today {background:#eef4fc; border:2px solid var(--sf-brand);}
+        .cal-day-n {font-weight:600; font-size:12px; margin-bottom:1px;}
+        .cal-e {padding:1px 3px; margin-bottom:1px; border-radius:2px; font-size:9px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;}
+        .cal-e-crm {background:#e6853d; color:#fff;}
+        .cal-e-gcal {background:#4285f4; color:#fff;}
+        .cal-e-bday {background:#dcfce7; color:#166534;}
+        @media (max-width:768px) {.cal-day {min-height:40px; padding:1px;} .cal-day-n {font-size:10px;} .cal-e {font-size:8px;}}
         /* Mobile list (hidden on desktop, shown on mobile) */
         .mobile-list {display: none;}
         .mobile-list-item {padding: 10px 12px; border-bottom: 1px solid var(--sf-border-weak); cursor: pointer; display: flex; align-items: center; gap: 10px;}
@@ -425,6 +438,7 @@
         <div class="sf-app-tab" data-view="contacts" onclick="app.navigate('contacts')"><span class="obj-icon obj-icon-contact">C</span>Contacts</div>
         <div class="sf-app-tab" data-view="accounts" onclick="app.navigate('accounts')"><span class="obj-icon obj-icon-account">A</span>Accounts</div>
         <div class="sf-app-tab" data-view="activities" onclick="app.navigate('activities')"><span class="obj-icon obj-icon-activity">E</span>Events</div>
+        <div class="sf-app-tab" data-view="calendar" onclick="app.navigate('calendar')"><span class="obj-icon obj-icon-activity">C</span>Calendar</div>
         <div class="sf-app-tab" data-view="map" onclick="app.navigate('map')"><span class="obj-icon obj-icon-map">M</span>Map</div>
         <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">P</span>Processes</div>
         <div class="sf-app-tab" data-view="reports" onclick="app.navigate('reports')"><span class="obj-icon obj-icon-report">R</span>Reports</div>
@@ -797,7 +811,7 @@ const app = {
         if (!window.google?.accounts?.oauth2) return;
         this._gmailClient = google.accounts.oauth2.initTokenClient({
             client_id: this.GMAIL_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/gmail.readonly',
+            scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
             callback: (resp) => {
                 if (resp.access_token) {
                     this._gmailToken = resp.access_token;
@@ -918,7 +932,7 @@ const app = {
             if (savedHash.startsWith('contactDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.contacts.find(c => c.id === id); if (this.currentRecord) this.currentView = 'contactDetail'; }
             else if (savedHash.startsWith('activityDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.events.find(a => a.id === id); if (this.currentRecord) this.currentView = 'activityDetail'; }
             else if (savedHash.startsWith('accountDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.accounts.find(a => a.id === id); if (this.currentRecord) this.currentView = 'accountDetail'; }
-            else if (['dashboard','contacts','accounts','deals','activities','map','emails','referrals','reports','settings'].includes(savedHash)) this.currentView = savedHash;
+            else if (['dashboard','contacts','accounts','deals','activities','calendar','map','emails','referrals','reports','settings'].includes(savedHash)) this.currentView = savedHash;
         }
 
         // 3. RENDER IMMEDIATELY — user sees the app now
@@ -1437,7 +1451,7 @@ const app = {
         this.currentView = view;
         this._bulkSelected.clear();
         location.hash = view;
-        const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
+        const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', calendar: 'calendar', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
         const activeTabId = tabMap[view] || view;
         document.querySelectorAll('.sf-app-tab').forEach(el => {
             el.classList.toggle('active', el.getAttribute('data-view') === activeTabId);
@@ -1463,7 +1477,7 @@ const app = {
         const hash = this._dataHash();
         if (hash !== this._lastDataHash) { this._renderCache = {}; this._lastDataHash = hash; }
 
-        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Events', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
+        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Events', calendar:'Calendar', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
         document.getElementById('breadcrumb').textContent = labels[this.currentView] || this.currentView;
         // sync tab active state in case of programmatic nav
         const tabMap = {dashboard:'dashboard', contacts:'contacts', contactDetail:'contacts', accounts:'accounts', accountDetail:'accounts', deals:'deals', activities:'activities', map:'map', emails:'emails', referrals:'referrals', reports:'reports', settings:'settings'};
@@ -1480,6 +1494,7 @@ const app = {
             case 'deals': this.renderDeals(); break;
             case 'activities': this.renderEvents(); break;
             case 'activityDetail': this.renderEventDetail(); break;
+            case 'calendar': this.renderCalendar(); break;
             case 'map': this.renderMap(); break;
             case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
@@ -2987,6 +3002,116 @@ const app = {
         evt.files.splice(idx, 1);
         this.persist();
         this.renderEventDetail();
+    },
+
+    // === Calendar ===
+    _calMonth: null,
+    _calYear: null,
+    _gcalEvents: [],
+
+    async fetchGoogleCalendar(start, end) {
+        if (!this.isGmailConnected()) return [];
+        try {
+            const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&maxResults=200&singleEvents=true&orderBy=startTime`, {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) return [];
+            const data = await res.json();
+            return (data.items || []).map(e => ({
+                id: e.id,
+                name: e.summary || '(no title)',
+                start: e.start?.dateTime || e.start?.date || '',
+                end: e.end?.dateTime || e.end?.date || '',
+                address: e.location || '',
+                description: e.description || '',
+                _source: 'gcal',
+                _htmlLink: e.htmlLink
+            }));
+        } catch { return []; }
+    },
+
+    renderCalendar() {
+        const today = new Date();
+        if (!this._calYear) this._calYear = today.getFullYear();
+        if (!this._calMonth) this._calMonth = today.getMonth();
+        const year = this._calYear;
+        const month = this._calMonth;
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const first = new Date(year, month, 1);
+        const last = new Date(year, month + 1, 0);
+        const startDay = first.getDay();
+        const daysInMonth = last.getDate();
+        const todayStr = today.toISOString().split('T')[0];
+
+        // Collect CRM events for this month
+        const monthStart = `${year}-${String(month+1).padStart(2,'0')}-01`;
+        const monthEnd = `${year}-${String(month+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+        const crmEvents = this.data.events.filter(e => {
+            const d = (e.start||'').slice(0,10);
+            return d >= monthStart && d <= monthEnd;
+        });
+
+        // Birthdays this month
+        const birthdays = this.data.contacts.filter(c => {
+            if (!c.birthdate) return false;
+            const bd = new Date(c.birthdate);
+            return bd.getMonth() === month;
+        });
+
+        // Build calendar grid
+        const days = [];
+        const prevMonth = new Date(year, month, 0);
+        for (let i = startDay - 1; i >= 0; i--) days.push({day: prevMonth.getDate() - i, other: true});
+        for (let d = 1; d <= daysInMonth; d++) days.push({day: d, other: false});
+        const remaining = 7 - (days.length % 7);
+        if (remaining < 7) for (let i = 1; i <= remaining; i++) days.push({day: i, other: true});
+
+        const html = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button class="btn-small" onclick="app._gcalEvents=[]; app._calMonth--; if(app._calMonth<0){app._calMonth=11;app._calYear--;} app.renderCalendar();">◀</button>
+                    <h2 style="margin:0; min-width:180px; text-align:center;">${monthNames[month]} ${year}</h2>
+                    <button class="btn-small" onclick="app._gcalEvents=[]; app._calMonth++; if(app._calMonth>11){app._calMonth=0;app._calYear++;} app.renderCalendar();">▶</button>
+                    <button class="btn-small" onclick="app._calMonth=${today.getMonth()}; app._calYear=${today.getFullYear()}; app.renderCalendar();">Today</button>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Google Calendar synced</span>' : `<button class="btn-small" onclick="app.connectGmail()">Connect Google Calendar</button>`}
+                    <button class="btn-primary" onclick="app.openEventForm();" style="padding:2px 10px; font-size:12px; height:26px;">New Event</button>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom:8px; font-size:11px;">
+                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e6853d;"></span> CRM Events</span>
+                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#4285f4;"></span> Google Calendar</span>
+                <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#dcfce7;"></span> Birthdays</span>
+            </div>
+            <div class="cal-grid">
+                ${'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',').map(d => `<div class="cal-hdr">${d}</div>`).join('')}
+                ${days.map(d => {
+                    const dateStr = d.other ? '' : `${year}-${String(month+1).padStart(2,'0')}-${String(d.day).padStart(2,'0')}`;
+                    const isToday = dateStr === todayStr;
+                    const dayEvents = d.other ? [] : crmEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
+                    const dayBdays = d.other ? [] : birthdays.filter(c => new Date(c.birthdate).getDate() === d.day);
+                    const dayGcal = d.other ? [] : this._gcalEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
+                    return `<div class="cal-day ${d.other?'other':''} ${isToday?'today':''}" onclick="${!d.other ? `app.openEventForm(); setTimeout(()=>{document.getElementById('eventStart').value='${dateStr}T09:00'},100);` : ''}">
+                        <div class="cal-day-n">${d.day}</div>
+                        ${dayBdays.map(c => `<div class="cal-e cal-e-bday" onclick="event.stopPropagation(); app.viewContact('${c.id}');">🎂 ${c.name.split(' ')[0]}</div>`).join('')}
+                        ${dayEvents.map(e => `<div class="cal-e cal-e-crm" onclick="event.stopPropagation(); app.viewEvent('${e.id}');">${e.name}</div>`).join('')}
+                        ${dayGcal.map(e => `<div class="cal-e cal-e-gcal" onclick="event.stopPropagation(); ${e._htmlLink ? `window.open('${e._htmlLink}','_blank')` : ''};" title="${e.name}">${e.name}</div>`).join('')}
+                    </div>`;
+                }).join('')}
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+
+        // Fetch Google Calendar events in background
+        if (this.isGmailConnected() && !this._gcalEvents.length) {
+            const s = new Date(year, month, 1).toISOString();
+            const e = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+            this.fetchGoogleCalendar(s, e).then(events => {
+                this._gcalEvents = events;
+                if (events.length) this.renderCalendar();
+            });
+        }
     },
 
     _geocodeCache: null,
