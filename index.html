@@ -7720,11 +7720,11 @@ Tone: Professional but personal, not overly formal`;
         } catch (err) { alert('Import error: ' + err.message); }
     },
 
-    // vCard (.vcf) export — iPhone/Apple Contacts compatible
+    // vCard (.vcf) export — iPhone/Apple Contacts compatible with emoji labels
     exportVcf() {
         const contacts = this.data.contacts;
         if (!contacts.length) { alert('No contacts to export'); return; }
-        const esc = v => String(v || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+        const ve = v => String(v || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
         const cards = contacts.map(c => {
             const parts = (c.name || '').trim().split(/\s+/);
             const last = parts.length > 1 ? parts.pop() : '';
@@ -7733,24 +7733,45 @@ Tone: Professional but personal, not overly formal`;
             const lines = [
                 'BEGIN:VCARD',
                 'VERSION:3.0',
-                `N:${esc(last)};${esc(first)};;;`,
-                `FN:${esc(c.name)}`,
+                `N:${ve(last)};${ve(first)};;;`,
+                `FN:${ve(c.name)}`,
             ];
-            if (acct) lines.push(`ORG:${esc(acct.name)}`);
-            if (c.title) lines.push(`TITLE:${esc(c.title)}`);
-            if (c.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(c.email)}`);
-            if (c.mobile) lines.push(`TEL;TYPE=CELL:${esc(c.mobile)}`);
-            if (c.phone) lines.push(`TEL;TYPE=WORK,VOICE:${esc(c.phone)}`);
-            if (c.address) lines.push(`ADR;TYPE=HOME:;;${esc(c.address)};;;;`);
+            if (acct) lines.push(`ORG:${ve(acct.name)}`);
+            if (c.title) lines.push(`TITLE:${ve(c.title)}`);
+            // Emails with labels
+            if (c.pe_email) lines.push(`EMAIL;TYPE=HOME;X-ABLabel=🏠 Personal:${ve(c.pe_email)}`);
+            if (c.we_email) lines.push(`EMAIL;TYPE=WORK;X-ABLabel=💼 Work:${ve(c.we_email)}`);
+            if (c.email && c.email !== c.pe_email && c.email !== c.we_email) lines.push(`EMAIL;TYPE=INTERNET:${ve(c.email)}`);
+            // Phone numbers with emoji labels
+            if (c.pc_number) lines.push(`TEL;TYPE=CELL;X-ABLabel=📱 Personal Cell:${ve(c.pc_number)}`);
+            if (c.wc_number) lines.push(`TEL;TYPE=WORK,CELL;X-ABLabel=💼 Work Cell:${ve(c.wc_number)}`);
+            if (c.mobile && c.mobile !== c.pc_number && c.mobile !== c.wc_number) lines.push(`TEL;TYPE=CELL:${ve(c.mobile)}`);
+            if (c.phone && c.phone !== c.pc_number && c.phone !== c.wc_number) lines.push(`TEL;TYPE=WORK,VOICE;X-ABLabel=🏢 Office:${ve(c.phone)}`);
+            if (c.home_phone) lines.push(`TEL;TYPE=HOME,VOICE;X-ABLabel=🏠 Home:${ve(c.home_phone)}`);
+            if (c.other_phone) lines.push(`TEL;TYPE=OTHER;X-ABLabel=📞 Other:${ve(c.other_phone)}`);
+            if (c.fax) lines.push(`TEL;TYPE=FAX:${ve(c.fax)}`);
+            if (c.assistant_phone) lines.push(`TEL;TYPE=WORK;X-ABLabel=📞 Assistant:${ve(c.assistant_phone)}`);
+            // Address
+            if (c.address) lines.push(`ADR;TYPE=HOME:;;${ve(c.address)};;;;`);
+            // Birthday
             if (c.birthdate) lines.push(`BDAY:${c.birthdate.replace(/-/g, '')}`);
-            if (c.linkedin) lines.push(`URL:${esc(c.linkedin)}`);
-            if (c.instagram) lines.push(`X-SOCIALPROFILE;type=instagram:${esc(c.instagram)}`);
-            if (c.notes) lines.push(`NOTE:${esc(c.notes)}`);
-            if (c.tags) lines.push(`CATEGORIES:${esc(c.tags)}`);
+            // Social profiles
+            if (c.instagram) lines.push(`X-SOCIALPROFILE;type=instagram;x-user=${ve(c.instagram.replace('@',''))}:https://instagram.com/${ve(c.instagram.replace('@',''))}`);
+            if (c.facebook) lines.push(`X-SOCIALPROFILE;type=facebook:${ve(c.facebook)}`);
+            if (c.linkedin) lines.push(`URL;X-ABLabel=LinkedIn:${ve(c.linkedin)}`);
+            // Notes — include obligation, tier, tags for context
+            const notesParts = [];
+            if (c.obligation) notesParts.push('Obligation: ' + c.obligation);
+            if (c.tier) notesParts.push('Tier: ' + c.tier);
+            if (c.tags) notesParts.push('Tags: ' + c.tags);
+            if (c.notes) notesParts.push(c.notes);
+            if (c.general_notes) notesParts.push(c.general_notes);
+            if (notesParts.length) lines.push(`NOTE:${ve(notesParts.join(' | '))}`);
+            if (c.tags) lines.push(`CATEGORIES:${ve(c.tags)}`);
             lines.push('END:VCARD');
             return lines.join('\r\n');
         }).join('\r\n');
-        const blob = new Blob([cards], {type: 'text/vcard'});
+        const blob = new Blob([cards], {type: 'text/vcard;charset=utf-8'});
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `matthews-crm-contacts-${new Date().toISOString().split('T')[0]}.vcf`;
