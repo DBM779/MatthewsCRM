@@ -773,7 +773,7 @@
                 <input type="hidden" id="eventId">
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
                 <div class="form-group" style="grid-column:span 2;"><label>Event Name *</label><input type="text" id="eventName" required></div>
-                <div class="form-group"><label>Type</label><select id="eventType"><option value="Meeting">Meeting</option><option value="Conference">Conference</option><option value="Lunch">Lunch</option><option value="Dinner">Dinner</option><option value="Call">Call</option><option value="Presentation">Presentation</option><option value="Networking">Networking</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Type</label><select id="eventType"><option value="Meeting">📅 Meeting</option><option value="Conference">🏛️ Conference</option><option value="Lunch">🍽️ Lunch</option><option value="Dinner">🍷 Dinner</option><option value="Birthday Party">🎂 Birthday Party</option><option value="Happy Hour">🍻 Happy Hour</option><option value="Call">📞 Call</option><option value="Presentation">📊 Presentation</option><option value="Networking">🤝 Networking</option><option value="Other">📋 Other</option></select></div>
                 <div class="form-group"><label>Status</label><select id="eventStatus"><option value="Scheduled">Scheduled</option><option value="Completed">Completed</option><option value="Cancelled">Cancelled</option></select></div>
                 <div class="form-group"><label>Start Date/Time *</label><input type="datetime-local" id="eventStart" required></div>
                 <div class="form-group"><label>End Date/Time</label><input type="datetime-local" id="eventEnd"></div>
@@ -3013,7 +3013,9 @@ const app = {
             const idx = this.data.events.findIndex(x => x.id === id);
             if (idx >= 0) this.data.events[idx] = {...this.data.events[idx], ...evt};
         } else {
-            this.data.events.push({...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()});
+            const newEvt = {...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()};
+            if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newEvt._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
+            this.data.events.push(newEvt);
         }
         this.persist();
         if (evt.address) this.geocodeAddress(evt.address);
@@ -3157,36 +3159,139 @@ const app = {
         document.getElementById('content').innerHTML = html;
     },
 
+    _evtTheme(type) {
+        const themes = {
+            'Dinner': {grad:'linear-gradient(135deg,#92400e,#b45309)', icon:'🍷', bg:'#fffbeb'},
+            'Lunch': {grad:'linear-gradient(135deg,#9a3412,#ea580c)', icon:'🍽️', bg:'#fff7ed'},
+            'Birthday Party': {grad:'linear-gradient(135deg,#7e22ce,#c026d3)', icon:'🎂', bg:'#faf5ff'},
+            'Happy Hour': {grad:'linear-gradient(135deg,#1d4ed8,#2563eb)', icon:'🍻', bg:'#eff6ff'},
+            'Meeting': {grad:'linear-gradient(135deg,#0f766e,#14b8a6)', icon:'📅', bg:'#f0fdfa'},
+            'Conference': {grad:'linear-gradient(135deg,#4338ca,#6366f1)', icon:'🏛️', bg:'#eef2ff'},
+            'Networking': {grad:'linear-gradient(135deg,#b91c1c,#ef4444)', icon:'🤝', bg:'#fef2f2'},
+            'Presentation': {grad:'linear-gradient(135deg,#0369a1,#0ea5e9)', icon:'📊', bg:'#f0f9ff'},
+            'Call': {grad:'linear-gradient(135deg,#166534,#22c55e)', icon:'📞', bg:'#f0fdf4'},
+        };
+        return themes[type] || {grad:'linear-gradient(135deg,#374151,#6b7280)', icon:'📋', bg:'#f9fafb'};
+    },
+
+    _contactReliability(contactId) {
+        const events = this.data.events.filter(e => {
+            const statuses = e.contactStatuses || {};
+            return statuses[contactId];
+        });
+        if (events.length === 0) return null;
+        const attended = events.filter(e => (e.contactStatuses||{})[contactId] === 'Attended').length;
+        const invited = events.length;
+        return {attended, invited, pct: Math.round(attended / invited * 100)};
+    },
+
     _renderEventCards(sorted, ti) {
         const now = new Date();
-        return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">' + sorted.map(e => {
+        let html = '<div style="display:flex;gap:6px;margin-bottom:12px;"><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Dinner Party\')">🍷 Quick Dinner</button><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Birthday Party\')">🎂 Quick Birthday</button><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Happy Hour\')">🍻 Quick Happy Hour</button></div>';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;">';
+        sorted.forEach(e => {
             const guests = this._getEventGuests(e);
             const rsvp = this._getEventRSVP(e, guests);
             const startD = e.start ? new Date(e.start) : null;
             const diff = startD ? Math.ceil((startD - now) / 86400000) : null;
-            const countdown = diff !== null ? (diff > 0 ? diff + 'd away' : diff === 0 ? 'Today!' : Math.abs(diff) + 'd ago') : '';
-            const cdColor = diff > 0 ? (diff <= 3 ? 'var(--sf-warning)' : 'var(--sf-brand)') : diff === 0 ? 'var(--sf-success)' : 'var(--sf-text-weak)';
-            const statusColor = e.status==='Scheduled' ? '#3b82f6' : e.status==='Completed' ? '#22c55e' : '#9ca3af';
-            return '<div style="background:#fff;border:1px solid var(--sf-border-weak);border-radius:8px;overflow:hidden;cursor:pointer;transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,0.1)\'" onmouseout="this.style.boxShadow=\'\'" onclick="app.viewEvent(\'' + e.id + '\')">'
-                + '<div style="background:linear-gradient(135deg,' + statusColor + '22,' + statusColor + '08);padding:14px 16px 10px;border-bottom:1px solid var(--sf-border-weak);">'
-                + '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
-                + '<div><div style="font-size:10px;text-transform:uppercase;font-weight:700;color:' + statusColor + ';">' + (ti[e.type]||'📋') + ' ' + (e.type||'Event') + '</div>'
-                + '<div style="font-size:16px;font-weight:700;margin:4px 0;">' + (e.name||'') + '</div></div>'
-                + (countdown ? '<div style="font-size:11px;font-weight:700;color:' + cdColor + ';background:#fff;padding:2px 8px;border-radius:4px;">' + countdown + '</div>' : '')
-                + '</div>'
-                + '<div style="font-size:12px;color:var(--sf-text-weak);">' + (startD ? startD.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '') + '</div>'
-                + (e.address ? '<div style="font-size:11px;color:var(--sf-text-weak);margin-top:2px;">📍 ' + e.address + '</div>' : '')
-                + '</div>'
-                + '<div style="padding:10px 16px;">'
-                + '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:6px;">'
-                + '<span style="color:var(--sf-success);font-weight:600;">✓ ' + rsvp.yes + ' Yes</span>'
-                + '<span style="color:var(--sf-warning);font-weight:600;">? ' + rsvp.maybe + ' Maybe</span>'
-                + '<span style="color:var(--sf-error);font-weight:600;">✕ ' + rsvp.no + ' No</span>'
-                + '<span style="color:var(--sf-text-weak);">⏳ ' + rsvp.pending + ' Pending</span>'
-                + '</div>'
-                + (guests.length ? '<div style="display:flex;gap:-4px;">' + guests.slice(0,6).map((g,i) => '<div style="width:24px;height:24px;border-radius:50%;background:' + ['#a094ed','#7f8de1','#e6853d','#48c3cc','#f472b6','#22c55e'][i%6] + ';color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:' + (i>0?'-6px':'0') + ';">' + (g.name||'').split(' ').map(s=>s[0]).join('').slice(0,2) + '</div>').join('') + (guests.length > 6 ? '<div style="width:24px;height:24px;border-radius:50%;background:var(--sf-bg);color:var(--sf-text-weak);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px;">+' + (guests.length-6) + '</div>' : '') + '</div>' : '')
-                + '</div></div>';
-        }).join('') + '</div>';
+            const countdown = diff !== null ? (diff > 0 ? (diff === 1 ? 'Tomorrow' : diff + ' days away') : diff === 0 ? 'TODAY' : Math.abs(diff) + 'd ago') : '';
+            const cdColor = diff !== null ? (diff === 0 ? '#22c55e' : diff <= 3 && diff > 0 ? '#f59e0b' : diff > 0 ? '#3b82f6' : '#9ca3af') : '#9ca3af';
+            const theme = this._evtTheme(e.type);
+            const budget = (e._budget||[]).reduce((s,b)=>s+b.amount,0);
+            const checkDone = (e._checklist||[]).filter(c=>c.done).length;
+            const checkTotal = (e._checklist||[]).length;
+            const costPerHead = guests.length > 0 && budget > 0 ? '$' + Math.round(budget/guests.length) : '';
+
+            html += '<div style="background:#fff;border-radius:12px;overflow:hidden;cursor:pointer;transition:all 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.08);" onmouseover="this.style.boxShadow=\'0 8px 24px rgba(0,0,0,0.12)\';this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.boxShadow=\'0 1px 3px rgba(0,0,0,0.08)\';this.style.transform=\'none\'" onclick="app.viewEvent(\'' + e.id + '\')">';
+            html += '<div style="' + theme.grad + ';padding:16px 18px 14px;color:#fff;position:relative;">';
+            html += '<div style="position:absolute;top:12px;right:14px;font-size:32px;opacity:0.3;">' + theme.icon + '</div>';
+            html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;opacity:0.85;font-weight:600;">' + (e.type||'Event') + '</div>';
+            html += '<div style="font-size:18px;font-weight:800;margin:6px 0 4px;line-height:1.2;">' + (e.name||'Untitled') + '</div>';
+            if (startD) html += '<div style="font-size:12px;opacity:0.9;">' + startD.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) + ' · ' + startD.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + '</div>';
+            if (e.address) html += '<div style="font-size:11px;opacity:0.75;margin-top:3px;">📍 ' + e.address + '</div>';
+            html += '</div>';
+
+            html += '<div style="padding:12px 18px;">';
+            if (countdown) html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:' + cdColor + ';background:' + cdColor + '15;padding:3px 10px;border-radius:12px;margin-bottom:8px;">' + (diff === 0 ? '🔴 ' : '') + countdown + '</div> ';
+            if (e.status === 'Completed') html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:#22c55e;background:#dcfce7;padding:3px 10px;border-radius:12px;margin-bottom:8px;">✓ Completed</div> ';
+
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">';
+            html += '<div style="display:flex;gap:2px;">';
+            const rsvpBar = rsvp.total > 0 ? [
+                {pct: rsvp.yes/rsvp.total*100, color:'#22c55e'},
+                {pct: rsvp.maybe/rsvp.total*100, color:'#f59e0b'},
+                {pct: rsvp.no/rsvp.total*100, color:'#ef4444'},
+                {pct: rsvp.pending/rsvp.total*100, color:'#e5e7eb'}
+            ] : [];
+            html += '<div style="display:flex;width:80px;height:6px;border-radius:3px;overflow:hidden;background:#e5e7eb;">';
+            rsvpBar.forEach(b => { if (b.pct > 0) html += '<div style="width:' + b.pct + '%;background:' + b.color + ';"></div>'; });
+            html += '</div></div>';
+            html += '<div style="font-size:11px;color:var(--sf-text-weak);">' + guests.length + ' guest' + (guests.length!==1?'s':'') + '</div>';
+            html += '</div>';
+
+            html += '<div style="display:flex;gap:8px;font-size:10px;font-weight:600;">';
+            html += '<span style="color:#22c55e;">' + rsvp.yes + ' yes</span>';
+            html += '<span style="color:#f59e0b;">' + rsvp.maybe + ' maybe</span>';
+            html += '<span style="color:#ef4444;">' + rsvp.no + ' no</span>';
+            html += '<span style="color:#9ca3af;">' + rsvp.pending + ' pending</span>';
+            html += '</div>';
+
+            const bottomTags = [];
+            if (budget > 0) bottomTags.push('💰 $' + budget.toFixed(0));
+            if (costPerHead) bottomTags.push('👤 ' + costPerHead + '/head');
+            if (checkTotal > 0) bottomTags.push('☑ ' + checkDone + '/' + checkTotal);
+            if ((e._potluck||[]).length) bottomTags.push('🍽 ' + (e._potluck||[]).filter(p=>p.claimed).length + '/' + (e._potluck||[]).length + ' claimed');
+            if (bottomTags.length) {
+                html += '<div style="display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;font-size:10px;color:var(--sf-text-weak);flex-wrap:wrap;">';
+                bottomTags.forEach(t => { html += '<span>' + t + '</span>'; });
+                html += '</div>';
+            }
+
+            if (guests.length) {
+                html += '<div style="display:flex;margin-top:8px;">';
+                guests.slice(0,8).forEach((g,i) => {
+                    const colors = ['#a094ed','#7f8de1','#e6853d','#48c3cc','#f472b6','#22c55e','#f59e0b','#6366f1'];
+                    html += '<div style="width:26px;height:26px;border-radius:50%;background:' + colors[i%8] + ';color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:' + (i>0?'-6':'0') + 'px;" title="' + (g.name||'') + '">' + (g.name||'').split(' ').map(s=>s[0]).join('').slice(0,2) + '</div>';
+                });
+                if (guests.length > 8) html += '<div style="width:26px;height:26px;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px;">+' + (guests.length-8) + '</div>';
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+        });
+        html += '</div>';
+        return html;
+    },
+
+    duplicateEvent(id) {
+        const orig = this.data.events.find(x => x.id === id);
+        if (!orig) return;
+        const clone = JSON.parse(JSON.stringify(orig));
+        clone.id = 'evt-' + Date.now();
+        clone.name = (clone.name||'') + ' (Copy)';
+        clone.status = 'Scheduled';
+        clone.createdAt = new Date().toISOString();
+        if (clone._checklist) clone._checklist.forEach(c => c.done = false);
+        if (clone.contactStatuses) Object.keys(clone.contactStatuses).forEach(k => clone.contactStatuses[k] = 'Invited');
+        delete clone._recap;
+        this.data.events.push(clone);
+        this.persist();
+        this.viewEvent(clone.id);
+    },
+
+    _evtCreateFromTemplate(type) {
+        const templates = {
+            'Dinner Party': {type:'Dinner', name:'Dinner Party', _checklist:[{text:'Choose restaurant/venue',done:false},{text:'Send invitations',done:false},{text:'Confirm headcount',done:false},{text:'Make reservation',done:false},{text:'Plan menu/wine',done:false}]},
+            'Birthday Party': {type:'Birthday Party', name:'Birthday Party', _checklist:[{text:'Choose venue',done:false},{text:'Order cake',done:false},{text:'Send invitations',done:false},{text:'Plan decorations',done:false},{text:'Arrange gifts',done:false},{text:'Music/playlist',done:false}]},
+            'Happy Hour': {type:'Happy Hour', name:'Happy Hour', _checklist:[{text:'Pick bar/venue',done:false},{text:'Send invite',done:false},{text:'Confirm headcount',done:false}]}
+        };
+        const tmpl = templates[type] || {};
+        this.openEventForm();
+        setTimeout(() => {
+            if (tmpl.type) document.getElementById('eventType').value = tmpl.type;
+            if (tmpl.name) document.getElementById('eventName').value = tmpl.name;
+        }, 100);
+        this._pendingTemplate = tmpl;
     },
 
     _renderEventTimeline(sorted, ti) {
@@ -3383,6 +3488,7 @@ const app = {
                     </div>
                     <div class="sf-hl-actions">
                         <button onclick="app.editEvent('${e.id}')">Edit</button>
+                        <button onclick="app.duplicateEvent('${e.id}')">Duplicate</button>
                         ${e.status === 'Scheduled' ? `<button onclick="app.data.events.find(x=>x.id==='${e.id}').status='Completed'; app.persist(); app.renderEventDetail();">Mark Complete</button>` : ''}
                         <button onclick="if(confirm('Delete this event?')){app.deleteEvent('${e.id}')}" style="color:var(--sf-error);">Delete</button>
                     </div>
@@ -3458,13 +3564,12 @@ const app = {
                             </div>
                         </div>
                         <div class="card-body-flush">
-                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Instagram</th><th>Account</th><th>Evnt Stts</th></tr></thead><tbody>
-                            ${relatedContacts.map(c => { const cAcct = this.data.accounts.find(a => a.id === (c.accountId||c.account_id)); const evtStatus = (e.contactStatuses||{})[c.id] || 'Invited'; return `<tr>
+                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Reliability</th><th>RSVP</th></tr></thead><tbody>
+                            ${relatedContacts.map(c => { const evtStatus = (e.contactStatuses||{})[c.id] || 'Invited'; const rel = this._contactReliability(c.id); return `<tr>
                                 <td><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a></td>
                                 <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pc_number','tel',this)">${c.pc_number||c.mobile||''}</td>
                                 <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pe_email','email',this)">${c.pe_email||c.email||''}</td>
-                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','instagram','text',this)">${c.instagram||''}</td>
-                                <td>${cAcct ? cAcct.name : ''}</td>
+                                <td>${rel ? '<span style="font-size:11px;font-weight:600;color:' + (rel.pct >= 80 ? '#22c55e' : rel.pct >= 50 ? '#f59e0b' : '#ef4444') + ';">' + rel.pct + '% (' + rel.attended + '/' + rel.invited + ')</span>' : '<span style="font-size:11px;color:var(--sf-text-weak);">New</span>'}</td>
                                 <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>⏳ Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>✓ Attending</option><option value="Maybe" ${evtStatus==='Maybe'?'selected':''}>? Maybe</option><option value="Declined" ${evtStatus==='Declined'?'selected':''}>✕ Declined</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>✓ Attended</option></select></td>
                             </tr>`; }).join('')}
                         </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
