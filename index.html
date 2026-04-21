@@ -721,8 +721,12 @@ const firebaseAuth = firebase.auth();
 const firestore = firebase.firestore();
 firestore.enablePersistence({synchronizeTabs: true}).catch(() => {});
 
+const COLLECTIONS = ['contacts','accounts','activities','events','deals'];
+
 const cloudSync = {
     _pendingSync: false,
+    _listeners: [],
+    _uid: null,
 
     async signIn() {
         const provider = new firebase.auth.GoogleAuthProvider();
@@ -731,36 +735,96 @@ const cloudSync = {
 
     isSignedIn() { return !!firebaseAuth.currentUser; },
 
-    _userDoc() {
+    _basePath() {
         const user = firebaseAuth.currentUser;
         if (!user) return null;
-        return firestore.collection('users').doc(user.uid);
+        this._uid = user.uid;
+        return `users/${user.uid}`;
     },
 
-    async push(data) {
-        const doc = this._userDoc();
-        if (!doc) return false;
-        try {
-            await doc.set({data: data, updated_at: firebase.firestore.FieldValue.serverTimestamp()}, {merge: true});
-            return true;
-        } catch { return false; }
+    col(name) {
+        const p = this._basePath();
+        return p ? firestore.collection(`${p}/${name}`) : null;
     },
 
-    async pull() {
-        const doc = this._userDoc();
-        if (!doc) return null;
-        try {
-            const snap = await doc.get();
-            if (snap.exists && snap.data()?.data) return snap.data().data;
-        } catch {}
-        return null;
+    // Idempotent upsert: uses record ID as doc ID
+    async upsert(collection, record) {
+        const col = this.col(collection);
+        if (!col || !record.id) return record;
+        const clean = {...record};
+        clean.updated_at = new Date().toISOString();
+        // Remove undefined values (Firestore rejects them)
+        Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
+        try { await col.doc(record.id).set(clean, {merge: true}); } catch (e) { console.error('Upsert error:', e.message); }
+        return record;
     },
 
+    async remove(collection, id) {
+        const col = this.col(collection);
+        if (!col) return;
+        try { await col.doc(id).delete(); } catch {}
+    },
+
+    // Pull all collections from Firestore
+    async pullAll() {
+        const p = this._basePath();
+        if (!p) return null;
+        const data = {};
+        for (const c of COLLECTIONS) {
+            try {
+                const snap = await firestore.collection(`${p}/${c}`).get();
+                data[c] = snap.docs.map(d => ({...d.data(), id: d.id}));
+            } catch { data[c] = []; }
+        }
+        return data;
+    },
+
+    // Batch push all data to Firestore (for initial migration)
+    async pushAll(data) {
+        const p = this._basePath();
+        if (!p) return;
+        for (const colName of COLLECTIONS) {
+            const items = data[colName] || [];
+            // Batch in groups of 450 (Firestore limit is 500)
+            for (let i = 0; i < items.length; i += 450) {
+                const batch = firestore.batch();
+                items.slice(i, i + 450).forEach(item => {
+                    if (!item.id) return;
+                    const clean = {...item};
+                    Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
+                    batch.set(firestore.doc(`${p}/${colName}/${item.id}`), clean, {merge: true});
+                });
+                try { await batch.commit(); } catch (e) { console.error('Batch error:', colName, e.message); }
+            }
+        }
+    },
+
+    // Real-time listeners — changes from other devices appear instantly
+    startListening(onUpdate) {
+        this.stopListening();
+        const p = this._basePath();
+        if (!p) return;
+        for (const colName of COLLECTIONS) {
+            const unsub = firestore.collection(`${p}/${colName}`).onSnapshot(snap => {
+                const items = snap.docs.map(d => ({...d.data(), id: d.id}));
+                onUpdate(colName, items);
+            }, () => {});
+            this._listeners.push(unsub);
+        }
+    },
+
+    stopListening() { this._listeners.forEach(u => u()); this._listeners = []; },
+
+    // Debounced full push (fallback for bulk operations)
     debouncedPush(data) {
         if (this._pendingSync) clearTimeout(this._pendingSync);
-        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 3000);
+        this._pendingSync = setTimeout(() => { this.pushAll(data).catch(() => {}); this._pendingSync = false; }, 5000);
     }
 };
+
+// Shorthand helpers used throughout the app
+async function firestoreUpsert(collection, record) { return cloudSync.upsert(collection, record); }
+async function firestoreDelete(collection, id) { return cloudSync.remove(collection, id); }
 
 const db = {
     load() {
@@ -768,30 +832,8 @@ const db = {
     },
     save(data) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        cloudSync.debouncedPush(data);
     }
 };
-
-// Idempotent write helper: uses record ID as Firestore doc ID
-async function firestoreUpsert(collection, record) {
-    if (!cloudSync.isSignedIn()) return;
-    const userDoc = cloudSync._userDoc();
-    if (!userDoc) return;
-    const id = record.id || (collection.slice(0,3) + '-' + Date.now());
-    record.id = id;
-    record.updated_at = new Date().toISOString();
-    try {
-        await userDoc.collection(collection).doc(id).set(record, {merge: true});
-    } catch (e) { console.error('Firestore write error:', e); }
-    return record;
-}
-
-async function firestoreDelete(collection, id) {
-    if (!cloudSync.isSignedIn()) return;
-    const userDoc = cloudSync._userDoc();
-    if (!userDoc) return;
-    try { await userDoc.collection(collection).doc(id).delete(); } catch {}
-}
 
 const app = {
     currentView: 'dashboard',
@@ -1043,27 +1085,36 @@ const app = {
     },
 
     async cloudPull() {
+        if (!cloudSync.isSignedIn()) return;
         try {
-            const cloud = await cloudSync.pull();
+            const cloud = await cloudSync.pullAll();
             if (!cloud) return;
-            const localTs = localStorage.getItem(SYNC_TS_KEY) || '';
-            const local = db.load();
-            // If cloud has data and is newer or local is empty, use cloud
             const cloudCount = (cloud.contacts||[]).length + (cloud.accounts||[]).length;
-            const localCount = local ? (local.contacts||[]).length + (local.accounts||[]).length : 0;
-            if (cloudCount > 0 && cloudCount >= localCount) {
-                this.data = {
-                    contacts: cloud.contacts || [], accounts: cloud.accounts || [],
-                    deals: cloud.deals || [], activities: cloud.activities || [],
-                    emails: cloud.emails || [], referrals: cloud.referrals || [],
-                    dealContacts: cloud.dealContacts || [], events: cloud.events || []
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+            const localCount = this.data.contacts.length + this.data.accounts.length;
+            // Use cloud data if it has records, merge with local
+            if (cloudCount > 0) {
+                for (const col of COLLECTIONS) {
+                    if (cloud[col] && cloud[col].length) this.data[col] = cloud[col];
+                }
+                db.save(this.data);
                 this.updateSelectOptions();
                 this.render();
                 this.updateStatus('Synced', true);
+            } else if (localCount > 0) {
+                // First time: push local data to Firestore
+                this.updateStatus('Uploading to cloud...', true);
+                await cloudSync.pushAll(this.data);
+                this.updateStatus('Synced', true);
             }
-        } catch { /* offline, use local */ }
+            // Start real-time listeners for live sync between devices
+            cloudSync.startListening((colName, items) => {
+                if (items.length && JSON.stringify(this.data[colName]) !== JSON.stringify(items)) {
+                    this.data[colName] = items;
+                    db.save(this.data);
+                    this.render();
+                }
+            });
+        } catch { /* offline — Firestore persistence handles it */ }
     },
 
     loadData() {
@@ -1099,8 +1150,8 @@ const app = {
         this.data._lastModified = new Date().toISOString();
         db.save(this.data);
         if (!this._persistTimer) {
-            this.updateStatus('Syncing...', true);
-            this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 3000);
+            this.updateStatus('●', true);
+            this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 2000);
         }
     },
 
