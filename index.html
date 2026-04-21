@@ -981,6 +981,7 @@ const db = {
     }
 };
 
+function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 const app = {
     currentView: 'dashboard',
     currentRecord: null,
@@ -3399,9 +3400,9 @@ Tone: Professional but personal, not overly formal`;
         html += '</div></div>';
 
         html += '<div class="card"><div class="card-header">Notes & Details</div><div style="padding:12px;">';
-        if (d.techNotes) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Technical Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + d.techNotes + '</div></div>';
-        if (d.counterparties) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Counterparties</div><div style="font-size:12px;">' + d.counterparties + '</div></div>';
-        if (d.notes) html += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + d.notes + '</div></div>';
+        if (d.techNotes) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Technical Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + esc(d.techNotes) + '</div></div>';
+        if (d.counterparties) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Counterparties</div><div style="font-size:12px;">' + esc(d.counterparties) + '</div></div>';
+        if (d.notes) html += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + esc(d.notes) + '</div></div>';
         if (!d.techNotes && !d.counterparties && !d.notes) html += '<div style="font-size:12px;color:var(--sf-text-weak);">No notes yet. Click Edit to add.</div>';
         html += '</div></div>';
 
@@ -3767,7 +3768,7 @@ Tone: Professional but personal, not overly formal`;
             html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;opacity:0.85;font-weight:600;">' + (e.type||'Event') + '</div>';
             html += '<div style="font-size:18px;font-weight:800;margin:6px 0 4px;line-height:1.2;">' + (e.name||'Untitled') + '</div>';
             if (startD) html += '<div style="font-size:12px;opacity:0.9;">' + startD.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) + ' · ' + startD.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + '</div>';
-            if (e.address) html += '<div style="font-size:11px;opacity:0.75;margin-top:3px;">📍 ' + e.address + '</div>';
+            if (e.address) html += '<div style="font-size:11px;opacity:0.75;margin-top:3px;">📍 ' + esc(e.address) + '</div>';
             html += '</div>';
 
             html += '<div style="padding:12px 18px;">';
@@ -4786,8 +4787,8 @@ Tone: Professional but personal, not overly formal`;
             + '<div style="font-size:16px;font-weight:700;margin:4px 0;">' + evt.name + '</div></div>'
             + '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="background:none;border:none;font-size:18px;cursor:pointer;">✕</button></div>'
             + '<div style="font-size:12px;color:var(--sf-text-weak);margin-bottom:8px;">' + new Date(evt.start).toLocaleString('en-US',{weekday:'long',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) + (evt.end ? ' - ' + new Date(evt.end).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '') + '</div>'
-            + (evt.address ? '<div style="font-size:12px;margin-bottom:6px;">📍 ' + evt.address + '</div>' : '')
-            + (evt.description ? '<div style="font-size:12px;margin-bottom:8px;color:var(--sf-text-weak);white-space:pre-wrap;">' + evt.description.slice(0,300) + '</div>' : '')
+            + (evt.address ? '<div style="font-size:12px;margin-bottom:6px;">📍 ' + esc(evt.address) + '</div>' : '')
+            + (evt.description ? '<div style="font-size:12px;margin-bottom:8px;color:var(--sf-text-weak);white-space:pre-wrap;">' + esc(evt.description.slice(0,300)) + '</div>' : '')
             + (contact ? '<div style="margin-bottom:8px;padding:8px;background:var(--sf-bg);border-radius:6px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);margin-bottom:2px;">CRM CONTACT</div><a onclick="app.viewContact(\'' + contact.id + '\')" style="color:var(--sf-brand);font-weight:600;cursor:pointer;">' + contact.name + '</a><div style="font-size:11px;color:var(--sf-text-weak);">' + (contact.title||'') + '</div></div>' : '')
             + (attendeeList ? '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;margin-bottom:4px;">Attendees</div>' + attendeeList + '</div>' : '')
             + rsvpHtml
@@ -5045,7 +5046,7 @@ Tone: Professional but personal, not overly formal`;
             html += '<div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.' + viewFn + '(\'' + item.id + '\')" style="color:#0176d3; cursor:pointer;">' + item.name + '</a></div>';
             if (item.title) html += '<div style="color:#666;">' + item.title + '</div>';
             if (phone) html += '<div style="margin:4px 0;"><a href="#" onclick="event.preventDefault();app.logCallFromTap(\'' + item.id + '\',\'' + phone + '\');">📞 Call</a> · <a href="#" onclick="event.preventDefault();app.logTextFromTap(\'' + item.id + '\',\'' + phone + '\');">💬 Text</a></div>';
-            html += '<div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">' + item.address + '</div>';
+            html += '<div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">' + esc(item.address) + '</div>';
             html += '<div style="margin-top:4px;"><a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(item.address) + '" target="_blank" style="color:#0176d3;">Directions ↗</a></div>';
             html += '<div style="margin-top:4px;"><a href="#" onclick="event.preventDefault();app.mapShowNearby(\'' + item.id + '\');" style="color:#0176d3; font-size:11px;">Find nearby contacts</a></div>';
             html += '</div>';
@@ -5467,7 +5468,7 @@ Tone: Professional but personal, not overly formal`;
                     if (isOverdue) html += '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:700;">OVERDUE</span>';
                     html += '</div>';
                     if (a.dueDate) html += '<div style="font-size:10px;color:' + (isOverdue?'#ef4444':'var(--sf-text-weak)') + ';margin:2px 0;">📅 ' + a.dueDate + '</div>';
-                    if (a.notes) html += '<div style="font-size:10px;color:var(--sf-text-weak);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">' + a.notes.slice(0,60) + '</div>';
+                    if (a.notes) html += '<div style="font-size:10px;color:var(--sf-text-weak);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">' + esc(a.notes.slice(0,60)) + '</div>';
                     const tags = [];
                     if (con) tags.push('<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">👤 ' + con.name.split(' ')[0] + '</a>');
                     if (deal) tags.push('<a onclick="event.stopPropagation();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">💼 ' + (deal.name||'').slice(0,15) + '</a>');
@@ -5652,7 +5653,7 @@ Tone: Professional but personal, not overly formal`;
                 const isOverdue = !item.done && item.deadline && item.deadline < today;
                 html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
                     + '<input type="checkbox" ' + (item.done?'checked':'') + ' onchange="app.toggleFundItem(\'' + phase + '\',' + i + ',this.checked)" style="width:auto;min-height:auto;">'
-                    + '<span style="flex:1;' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + (isOverdue?'color:var(--sf-error);':'') + '">' + item.text + '</span>'
+                    + '<span style="flex:1;' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + (isOverdue?'color:var(--sf-error);':'') + '">' + esc(item.text) + '</span>'
                     + (item.deadline ? '<span style="font-size:10px;color:' + (isOverdue?'var(--sf-error)':'var(--sf-text-weak)') + ';">' + item.deadline + '</span>' : '')
                     + '</div>';
             });
@@ -6412,7 +6413,7 @@ Tone: Professional but personal, not overly formal`;
 
         const hl = (text, t) => {
             if (!text) return '';
-            let result = String(text);
+            let result = esc(String(text));
             for (const w of t) result = result.replace(new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<mark style="background:#fff3cd;padding:0;">$1</mark>');
             return result;
         };
