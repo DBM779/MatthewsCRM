@@ -10,8 +10,9 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ&libraries=marker,places&v=weekly&callback=Function.prototype"></script>
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ&libraries=marker,places,visualization&v=weekly&callback=Function.prototype"></script>
+    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
     <meta name="theme-color" content="#16325c">
@@ -216,26 +217,7 @@
         .related-list table {font-size: 13px;}
         .related-list td {padding: 6px 12px; font-size: 13px;}
         input[type="checkbox"] {width: auto; margin-right: 8px; cursor: pointer;}
-        .map-page {display: flex; height: calc(100vh - 120px); gap: 0; border-radius: 4px; overflow: hidden; border: 1px solid var(--sf-border-weak); box-shadow: 0 2px 2px rgba(0,0,0,0.05);}
-        .map-sidebar-panel {width: 320px; background: #fff; border-right: 1px solid var(--sf-border-weak); display: flex; flex-direction: column; flex-shrink: 0;}
-        .map-sidebar-header {padding: 12px 16px; border-bottom: 1px solid var(--sf-border-weak); background: var(--sf-bg-alt);}
-        .map-sidebar-header input {width: 100%; padding: 6px 10px; border: 1px solid var(--sf-border); border-radius: 4px; font-size: 13px;}
-        .map-sidebar-list {flex: 1; overflow-y: auto;}
-        .map-item {padding: 10px 16px; border-bottom: 1px solid var(--sf-border-weak); cursor: pointer; transition: background 0.1s; display: flex; gap: 10px; align-items: flex-start;}
-        .map-item:hover {background: var(--sf-bg);}
-        .map-item.active {background: #eef4fc; border-left: 3px solid var(--sf-brand);}
-        .map-item-icon {width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0;}
-        .map-item-icon.contact {background: #a094ed;}
-        .map-item-icon.account {background: #7f8de1;}
-        .map-item-info {flex: 1; min-width: 0;}
-        .map-item-name {font-weight: 600; font-size: 13px; color: var(--sf-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
-        .map-item-address {font-size: 11px; color: var(--sf-text-weak); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
-        .map-main-panel {flex: 1; position: relative;}
-        .map-main-panel #crmMap {width: 100%; height: 100%;}
         .map-loading {position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 14px; color: var(--sf-text-weak);}
-        .leaflet-popup-content {font-family: inherit; font-size: 13px;}
-        .leaflet-popup-content a {color: var(--sf-brand); font-weight: 600; cursor: pointer;}
-        @media (max-width: 768px) { .map-sidebar-panel { display: none; } }
         ::-webkit-scrollbar {width: 8px; height: 8px;}
         ::-webkit-scrollbar-track {background: transparent;}
         ::-webkit-scrollbar-thumb {background: #d1d5db; border-radius: 4px;}
@@ -360,9 +342,7 @@
             .modal-content {width: 95% !important; max-height: 90vh; padding: 12px !important;}
             .modal-content [style*="grid-template-columns:1fr 1fr"] {grid-template-columns: 1fr !important;}
             /* Map */
-            .map-page {flex-direction: column !important; height: auto !important;}
-            .map-sidebar-panel {width: 100% !important; max-height: 150px;}
-            .map-main-panel {min-height: 280px;}
+            .map-v2 {height: calc(100vh - 100px) !important;}
             /* General */
             h2 {font-size: 15px !important;}
             h3 {font-size: 12px !important;}
@@ -384,6 +364,48 @@
             .sf-app-tab span.obj-icon {display: none;}
             .sf-hl-fields {grid-template-columns: 1fr !important;}
         }
+        /* Map v2: full-screen with floating controls */
+        .map-v2 {position:relative; height:calc(100vh - 120px); border-radius:4px; overflow:hidden;}
+        .map-float {position:absolute; z-index:10;}
+        .map-search {top:10px; left:10px; right:10px; max-width:400px;}
+        .map-search input {width:100%; padding:10px 14px; border:none; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.2); font-size:14px; outline:none;}
+        .map-chips {top:54px; left:10px; display:flex; gap:4px; flex-wrap:wrap;}
+        .map-chip {padding:5px 12px; border-radius:16px; font-size:11px; font-weight:600; cursor:pointer; border:none; box-shadow:0 1px 4px rgba(0,0,0,0.15); transition:all 0.15s;}
+        .map-chip-off {background:#fff; color:var(--sf-text);}
+        .map-chip-on {background:var(--sf-brand); color:#fff;}
+        .map-btns {bottom:24px; right:10px; display:flex; flex-direction:column; gap:6px;}
+        .map-btn {width:40px; height:40px; border-radius:50%; border:none; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.2); cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center;}
+        .map-btn:active {background:var(--sf-bg);}
+        /* Bottom card (mobile pin tap) */
+        .map-card {position:absolute; bottom:0; left:0; right:0; background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -4px 20px rgba(0,0,0,0.15); padding:16px 20px; transform:translateY(100%); transition:transform 0.3s ease; z-index:20; max-height:50vh; overflow-y:auto;}
+        .map-card.show {transform:translateY(0);}
+        .map-card-handle {width:36px; height:4px; background:#d1d5db; border-radius:2px; margin:0 auto 12px;}
+        .map-card-name {font-size:18px; font-weight:700; margin-bottom:4px;}
+        .map-card-sub {font-size:12px; color:var(--sf-text-weak); margin-bottom:12px;}
+        .map-card-actions {display:flex; gap:12px; justify-content:center; margin-bottom:12px;}
+        .map-card-action {display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; text-decoration:none;}
+        .map-card-action-icon {width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:20px;}
+        .map-card-action-label {font-size:10px; color:var(--sf-text-weak);}
+        .map-btn.active {background:var(--sf-brand); color:#fff;}
+        .map-proximity-panel {position:absolute; bottom:80px; right:10px; background:#fff; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.2); padding:12px 16px; z-index:15; width:220px; display:none;}
+        .map-proximity-panel.show {display:block;}
+        .map-proximity-panel label {font-size:11px; font-weight:600; color:var(--sf-text-weak); display:block; margin-bottom:4px;}
+        .map-proximity-panel input[type=range] {width:100%; margin:4px 0;}
+        .map-proximity-panel .prox-value {font-size:13px; font-weight:700; text-align:center; margin:4px 0;}
+        .map-proximity-panel button {width:100%; padding:6px; border:none; border-radius:6px; background:var(--sf-brand); color:#fff; font-size:12px; font-weight:600; cursor:pointer; margin-top:6px;}
+        .map-saved-panel {position:absolute; top:54px; right:10px; background:#fff; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.2); padding:12px 16px; z-index:15; width:200px; display:none; max-height:300px; overflow-y:auto;}
+        .map-saved-panel.show {display:block;}
+        .map-saved-panel .saved-item {padding:8px; border-radius:6px; cursor:pointer; font-size:12px; display:flex; justify-content:space-between; align-items:center;}
+        .map-saved-panel .saved-item:hover {background:var(--sf-bg);}
+        .map-saved-panel .saved-item .del-sv {color:var(--sf-error); cursor:pointer; font-size:14px; opacity:0.5;}
+        .map-saved-panel .saved-item .del-sv:hover {opacity:1;}
+        .map-nearby-list {position:absolute; bottom:80px; left:10px; background:#fff; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.2); padding:12px 16px; z-index:15; width:260px; max-height:300px; overflow-y:auto; display:none;}
+        .map-nearby-list.show {display:block;}
+        .map-nearby-list .nearby-item {padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:12px; cursor:pointer;}
+        .map-nearby-list .nearby-item:last-child {border-bottom:none;}
+        .map-nearby-list .nearby-item:hover {color:var(--sf-brand);}
+        .map-nearby-list .nearby-dist {color:var(--sf-text-weak); font-size:10px;}
+        @media(max-width:768px){.map-v2{height:calc(100vh - 100px);} .map-search{max-width:none; right:10px;} .map-chips{top:50px;} .map-proximity-panel,.map-saved-panel,.map-nearby-list{width:calc(100% - 20px); left:10px; right:10px;}}
         .cal-grid {display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--sf-border-weak); border-radius:4px; overflow:hidden;}
         .cal-hdr {background:var(--sf-bg-alt); padding:6px; text-align:center; font-size:11px; font-weight:700; color:var(--sf-text-weak); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);}
         .cal-day {min-height:80px; padding:3px; border-right:1px solid var(--sf-border-weak); border-bottom:1px solid var(--sf-border-weak); background:#fff; font-size:11px; vertical-align:top; overflow:hidden;}
@@ -3398,89 +3420,107 @@ const app = {
     mapFilters: {type: 'all', tier: '', tag: '', text: ''},
     _mapAllItems: [],
 
+    _showEvents: false,
+
     renderMap() {
         const contactsWithAddr = this.data.contacts.filter(c => c.address && c.address.trim());
         const accountsWithAddr = this.data.accounts.filter(a => a.address && a.address.trim());
-        const cacheSize = Object.keys(this._loadGeocodeCache()).length;
+        const getDSLA = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((new Date()-new Date(la))/86400000); };
         const allItems = [
-            ...contactsWithAddr.map(c => ({...c, _type: 'contact', _initials: (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()})),
-            ...accountsWithAddr.map(a => ({...a, _type: 'account', _initials: (a.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}))
+            ...contactsWithAddr.map(c => ({...c, _type:'contact', _initials:(c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase(), _dsla: getDSLA(c)})),
+            ...accountsWithAddr.map(a => ({...a, _type:'account', _initials:(a.name||'').split(' ').filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase(), _dsla: 0}))
         ];
         this._mapAllItems = allItems;
-        const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
         const f = this.mapFilters;
 
+        const recentChipOn = f._recent ? 'map-chip-on' : 'map-chip-off';
         const html = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <div class="obj-icon obj-icon-map" style="width:32px; height:32px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;">M</div>
-                    <div>
-                        <div style="font-size:11px; color:var(--sf-text-weak);">Map</div>
-                        <h2 style="margin:0;">Contact Locations</h2>
-                        <div style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(this.data.contacts.length)} contacts total, ${this.fmt(contactsWithAddr.length)} with addresses · ${this.fmt(this.data.accounts.length)} accounts total, ${this.fmt(accountsWithAddr.length)} with addresses · ${cacheSize} geocoded</div>
-                    </div>
+            <div class="map-v2">
+                <div id="crmMap" style="width:100%;height:100%;"></div>
+                <div class="map-loading" id="mapLoadingMsg" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.9);padding:16px 24px;border-radius:8px;z-index:500;font-size:14px;">Loading map…</div>
+                <!-- Floating search -->
+                <div class="map-float map-search">
+                    <input type="text" id="mapSearchInput" placeholder="Search contacts, cities, states…" value="${f.text||''}" onkeydown="if(event.key==='Enter'){app.updateMapFilter('text',this.value);}">
                 </div>
-            </div>
-            <!-- Summary cards -->
-            <div class="stat-cards" style="margin-bottom:8px;">
-                <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','all'); document.querySelector('#mapTypeSelect').value='all';">
-                    <div class="label">All Locations</div>
-                    <div class="value">${this.fmt(allItems.length)}</div>
+                <!-- Filter chips -->
+                <div class="map-float map-chips">
+                    <button class="map-chip ${f.tier==='1-VIP'?'map-chip-on':'map-chip-off'}" onclick="app.updateMapFilter('tier', app.mapFilters.tier==='1-VIP'?'':'1-VIP')">VIP</button>
+                    <button class="map-chip ${f.tier==='2'?'map-chip-on':'map-chip-off'}" onclick="app.updateMapFilter('tier', app.mapFilters.tier==='2'?'':'2')">Tier 2</button>
+                    <button class="map-chip ${(f._ob||'')==='Client'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Client'?'':'Client'; app.applyMapFilters();">Clients</button>
+                    <button class="map-chip ${(f._ob||'')==='Friend'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Friend'?'':'Friend'; app.applyMapFilters();">Friends</button>
+                    <button class="map-chip ${(f._ob||'')==='Family'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Family'?'':'Family'; app.applyMapFilters();">Family</button>
+                    <button class="map-chip ${this._showEvents?'map-chip-on':'map-chip-off'}" onclick="app._showEvents=!app._showEvents; app.applyMapFilters();">Events</button>
+                    <button class="map-chip ${recentChipOn}" onclick="app.mapFilters._recent=!app.mapFilters._recent; app.applyMapFilters();">Recent 30D</button>
+                    ${f.text||f.tier||f._ob||f._recent ? '<button class="map-chip map-chip-off" onclick="app.clearMapFilters();">✕ Clear</button>' : ''}
+                    <span id="mapPinCount" style="font-size:11px; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,0.5); padding:4px;"></span>
                 </div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','contact'); document.querySelector('#mapTypeSelect').value='contact';">
-                    <div class="label">Contacts</div>
-                    <div class="value">${this.fmt(contactsWithAddr.length)}</div>
+                <!-- Action buttons -->
+                <div class="map-float map-btns">
+                    <button class="map-btn" onclick="app.mapNearMe();" title="Near me">📍</button>
+                    <button class="map-btn" id="mapHeatBtn" onclick="app.mapToggleHeatmap();" title="Heatmap">🌡️</button>
+                    <button class="map-btn" id="mapProxBtn" onclick="app.mapToggleProximity();" title="Proximity search">📏</button>
+                    <button class="map-btn" id="mapRouteBtn" onclick="app.mapToggleRoute();" title="Route planner">🗺️</button>
+                    <button class="map-btn" id="mapSaveBtn" onclick="app.mapToggleSaved();" title="Saved views">⭐</button>
+                    <button class="map-btn" onclick="app.clearMapFilters();" title="Reset">🔄</button>
                 </div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.updateMapFilter('type','account'); document.querySelector('#mapTypeSelect').value='account';">
-                    <div class="label">Accounts</div>
-                    <div class="value">${this.fmt(accountsWithAddr.length)}</div>
+                <!-- Proximity search panel -->
+                <div class="map-proximity-panel" id="mapProxPanel">
+                    <label>Radius (miles)</label>
+                    <input type="range" id="mapProxRadius" min="1" max="100" value="25" oninput="document.getElementById('mapProxVal').textContent=this.value+' mi'">
+                    <div class="prox-value" id="mapProxVal">25 mi</div>
+                    <button onclick="app.mapProximitySearch();">Find nearby contacts</button>
                 </div>
-            </div>
-            <!-- Filter bar -->
-            <div class="card" style="padding:10px 14px; margin-bottom:8px;">
-                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                    <input type="text" id="mapSearchInput" placeholder="Search name, city, state… (hit Enter)" value="${f.text}" onkeydown="if(event.key==='Enter'){app.updateMapFilter('text', this.value);}" style="flex:1; min-width:200px;">
-                    <button class="btn-small btn-primary" onclick="app.updateMapFilter('text', document.getElementById('mapSearchInput').value);">Search</button>
-                    <select id="mapFilterType" onchange="app.updateMapFilter('type', this.value)" style="min-width:100px;">
-                        <option value="all" ${f.type==='all'?'selected':''}>All Types</option>
-                        <option value="contact" ${f.type==='contact'?'selected':''}>Contacts Only</option>
-                        <option value="account" ${f.type==='account'?'selected':''}>Accounts Only</option>
-                    </select>
-                    <select id="mapFilterTier" onchange="app.updateMapFilter('tier', this.value)" style="min-width:90px;">
-                        <option value="">All Tiers</option>
-                        ${['1-VIP','2','3','4','5'].map(t => `<option value="${t}" ${f.tier===t?'selected':''}>${t}</option>`).join('')}
-                    </select>
-                    <select id="mapFilterTag" onchange="app.updateMapFilter('tag', this.value)" style="min-width:90px;">
-                        <option value="">All Tags</option>
-                        ${allTags.map(t => `<option value="${t}" ${f.tag===t?'selected':''}>${t}</option>`).join('')}
-                    </select>
-                    <button class="btn-small" onclick="app.clearMapFilters();">Clear</button>
-                    <button class="btn-small btn-primary" id="mapShowAllBtn" style="display:none;" onclick="app.showAllFilteredPins();">Show All Pins</button>
-                    <span id="mapPinCount" style="font-size:12px; color:var(--sf-text-weakest); margin-left:4px;"></span>
+                <!-- Saved views panel -->
+                <div class="map-saved-panel" id="mapSavedPanel">
+                    <div style="font-size:12px; font-weight:700; margin-bottom:8px;">Saved Views</div>
+                    <div id="mapSavedList"></div>
+                    <button style="width:100%; padding:6px; border:none; border-radius:6px; background:var(--sf-brand); color:#fff; font-size:12px; font-weight:600; cursor:pointer; margin-top:8px;" onclick="app.mapSaveCurrentView();">Save current view</button>
                 </div>
-            </div>
-            <div class="map-page">
-                <div class="map-sidebar-panel">
-                    <div class="map-sidebar-list" id="mapSidebarList">
-                        ${allItems.map((item, i) => `
-                            <div class="map-item" data-idx="${i}" data-name="${(item.name||'').toLowerCase()}" data-type="${item._type}" data-tier="${item.tier||''}" data-addr="${(item.address||'').toLowerCase()}" data-tags="${(item.tags||'').toLowerCase()}" onclick="app.focusMapItem(${i})">
-                                <div class="map-item-icon ${item._type}">${item._initials}</div>
-                                <div class="map-item-info">
-                                    <div class="map-item-name">${item.name}</div>
-                                    <div class="map-item-address">${item.address}</div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-                <div class="map-main-panel">
-                    <div id="crmMap"></div>
-                    <div class="map-loading" id="mapLoadingMsg" style="background:rgba(255,255,255,0.9); padding:20px; border-radius:8px; text-align:center; z-index:500;">Loading map…</div>
+                <!-- Nearby contacts list -->
+                <div class="map-nearby-list" id="mapNearbyList"></div>
+                <!-- Bottom card (mobile) -->
+                <div class="map-card" id="mapCard">
+                    <div class="map-card-handle"></div>
+                    <div id="mapCardContent"></div>
                 </div>
             </div>
         `;
         document.getElementById('content').innerHTML = html;
         setTimeout(() => this.initMapWithMarkers(allItems), 100);
+    },
+
+    mapNearMe() {
+        if (!navigator.geolocation) { alert('Geolocation not available'); return; }
+        navigator.geolocation.getCurrentPosition(pos => {
+            if (this.mapInstance) {
+                this.mapInstance.setCenter({lat: pos.coords.latitude, lng: pos.coords.longitude});
+                this.mapInstance.setZoom(13);
+            }
+        }, () => alert('Location access denied'));
+    },
+
+    showMapCard(item) {
+        const card = document.getElementById('mapCard');
+        const content = document.getElementById('mapCardContent');
+        if (!card || !content) return;
+        const phone = item.pc_number||item.mobile||item.wc_number||item.phone||'';
+        const email = item.pe_email||item.we_email||'';
+        const isContact = item._type === 'contact';
+        const dsla = item._dsla;
+        const dslaColor = dsla <= 30 ? 'var(--sf-success)' : dsla <= 90 ? 'var(--sf-warning)' : 'var(--sf-error)';
+        content.innerHTML = `
+            <div class="map-card-name">${item.name}</div>
+            <div class="map-card-sub">${item.title||item.type||''} ${item.address ? '· '+item.address : ''} ${isContact && dsla < 999 ? `· <span style="color:${dslaColor};font-weight:600;">${dsla}D</span>` : ''}</div>
+            <div class="map-card-actions">
+                ${phone ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${item.id}','${phone}');" class="map-card-action"><div class="map-card-action-icon" style="background:#e8f5e9;">📞</div><div class="map-card-action-label">Call</div></a>` : ''}
+                ${phone ? `<a href="#" onclick="event.preventDefault(); app.logTextFromTap('${item.id}','${phone}');" class="map-card-action"><div class="map-card-action-icon" style="background:#e3f2fd;">💬</div><div class="map-card-action-label">Text</div></a>` : ''}
+                ${email ? `<a href="mailto:${email}" class="map-card-action"><div class="map-card-action-icon" style="background:#e8eaf6;">📧</div><div class="map-card-action-label">Email</div></a>` : ''}
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.address||'')}" target="_blank" class="map-card-action"><div class="map-card-action-icon" style="background:#fff3e0;">🧭</div><div class="map-card-action-label">Navigate</div></a>
+                <a href="#" onclick="event.preventDefault(); app.${isContact?'viewContact':'viewAccount'}('${item.id}');" class="map-card-action"><div class="map-card-action-icon" style="background:#f3f4f6;">👤</div><div class="map-card-action-label">View</div></a>
+            </div>
+        `;
+        card.classList.add('show');
+        card.onclick = (e) => { if (e.target === card || e.target.classList.contains('map-card-handle')) card.classList.remove('show'); };
     },
 
     updateMapFilter(key, val) {
@@ -3506,72 +3546,102 @@ const app = {
         return true;
     },
 
+    _mapClusterer: null,
+
     applyMapFilters() {
         if (!this.mapInstance) return;
         let visibleCount = 0;
-        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
-            const idx = parseInt(el.getAttribute('data-idx'));
-            const item = this._mapAllItems[idx];
-            el.style.display = (item && this._itemPassesFilter(item)) ? '' : 'none';
-        });
+        const f = this.mapFilters;
+        const visibleMarkers = [];
         const bounds = new google.maps.LatLngBounds();
         this.mapMarkers.forEach(m => {
-            if (this._itemPassesFilter(m.item)) {
-                m.marker.setMap(this.mapInstance);
+            let show = this._itemPassesFilter(m.item);
+            if (show && f._ob && !(m.item.obligation||'').includes(f._ob)) show = false;
+            if (show && f._recent && m.item._type === 'contact') {
+                const dsla = m.item._dsla || 999;
+                if (dsla > 30) show = false;
+            }
+            if (show) {
+                m.marker.setMap(null);
+                visibleMarkers.push(m.marker);
                 bounds.extend(m.coords);
                 visibleCount++;
             } else {
                 m.marker.setMap(null);
             }
         });
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        if (window.markerClusterer && visibleMarkers.length > 0) {
+            this._mapClusterer = new markerClusterer.MarkerClusterer({map: this.mapInstance, markers: visibleMarkers});
+        } else {
+            visibleMarkers.forEach(m => m.setMap(this.mapInstance));
+        }
+        if (this._showEvents && this._eventMarkers) {
+            this._eventMarkers.forEach(m => { m.setMap(this.mapInstance); visibleCount++; bounds.extend(m.getPosition()); });
+        } else if (this._eventMarkers) {
+            this._eventMarkers.forEach(m => m.setMap(null));
+        }
         const countEl = document.getElementById('mapPinCount');
-        if (countEl) countEl.textContent = `${visibleCount} of ${this.mapMarkers.length} pins shown`;
-        const hasFilter = this.mapFilters.text || this.mapFilters.tier || this.mapFilters.tag || this.mapFilters.type !== 'all';
-        if (hasFilter && visibleCount > 0) this.mapInstance.fitBounds(bounds);
+        if (countEl) countEl.textContent = `${visibleCount} pins`;
+        const hasFilter = f.text || f.tier || f.tag || f._ob || f._recent || f.type !== 'all';
+        if (hasFilter && visibleCount > 0 && visibleCount < 200) this.mapInstance.fitBounds(bounds);
     },
 
     _infoWindow: null,
     _createGoogleMarker(item, coords, map) {
-        const color = item._type === 'contact' ? '#a094ed' : '#7f8de1';
-        const pin = document.createElement('div');
-        pin.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;">${item._initials}</div>`;
-        const marker = new google.maps.Marker({position: coords, map: map, title: item.name, icon: {url: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="' + color + '" stroke="white" stroke-width="2"/><text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial">' + item._initials + '</text></svg>'), scaledSize: new google.maps.Size(28,28)}});
         const isContact = item._type === 'contact';
-        const viewFn = isContact ? 'viewContact' : 'viewAccount';
-        let detail = '';
-        if (isContact) {
-            if (item.pc_number||item.mobile) detail += `<div><a href="tel:${item.pc_number||item.mobile}">${item.pc_number||item.mobile}</a></div>`;
-            if (item.pe_email||item.we_email) detail += `<div><a href="mailto:${item.pe_email||item.we_email}">${item.pe_email||item.we_email}</a></div>`;
-        } else {
-            if (item.type) detail += `<div>${item.type}</div>`;
-            if (item.industry) detail += `<div>${item.industry}</div>`;
-        }
+        const dsla = item._dsla || 0;
+        const baseColor = isContact ? (item.tier === '1-VIP' ? '#166534' : item.tier === '2' ? '#1e40af' : '#a094ed') : '#7f8de1';
+        const opacity = isContact ? Math.max(0.3, 1 - (dsla / 200)) : 1;
+        const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="${baseColor}" fill-opacity="${opacity}" stroke="white" stroke-width="2"/><text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial">${item._initials}</text></svg>`;
+        const marker = new google.maps.Marker({position: coords, map, title: item.name, icon: {url: 'data:image/svg+xml,' + encodeURIComponent(svgIcon), scaledSize: new google.maps.Size(28,28)}, optimized: true});
+        marker._crmItem = item;
+        marker._crmCoords = coords;
         marker.addListener('click', () => {
+            if (this._routeMode) { this._addRouteWaypoint(item, coords); return; }
+            if (window.innerWidth <= 768) { this.showMapCard(item); return; }
             if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
-            this._infoWindow.setContent(`<div style="font-size:13px; max-width:250px;">
-                <div style="font-size:10px; text-transform:uppercase; color:#888;">${isContact?'Contact':'Account'}</div>
-                <div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.${viewFn}('${item.id}')" style="color:#0176d3; cursor:pointer;">${item.name}</a></div>
-                ${detail}
-                <div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">${item.address}</div>
-                <div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}" target="_blank" style="color:#0176d3;">Directions ↗</a></div>
-            </div>`);
-            this._infoWindow.open({anchor: marker, map: map});
+            const phone = item.pc_number||item.mobile||item.wc_number||'';
+            const dslaColor = dsla <= 30 ? '#2e844a' : dsla <= 90 ? '#fe9339' : '#ba0517';
+            const dslaHtml = (isContact && dsla && dsla < 999) ? ' · <span style="color:' + dslaColor + '">' + dsla + 'D</span>' : '';
+            const typeLabel = isContact ? 'Contact' : 'Account';
+            const viewFn = isContact ? 'viewContact' : 'viewAccount';
+            let html = '<div style="font-size:13px; max-width:260px;">';
+            html += '<div style="font-size:10px; text-transform:uppercase; color:#888;">' + typeLabel + dslaHtml + '</div>';
+            html += '<div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.' + viewFn + '(\'' + item.id + '\')" style="color:#0176d3; cursor:pointer;">' + item.name + '</a></div>';
+            if (item.title) html += '<div style="color:#666;">' + item.title + '</div>';
+            if (phone) html += '<div style="margin:4px 0;"><a href="#" onclick="event.preventDefault();app.logCallFromTap(\'' + item.id + '\',\'' + phone + '\');">📞 Call</a> · <a href="#" onclick="event.preventDefault();app.logTextFromTap(\'' + item.id + '\',\'' + phone + '\');">💬 Text</a></div>';
+            html += '<div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">' + item.address + '</div>';
+            html += '<div style="margin-top:4px;"><a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(item.address) + '" target="_blank" style="color:#0176d3;">Directions ↗</a></div>';
+            html += '<div style="margin-top:4px;"><a href="#" onclick="event.preventDefault();app.mapShowNearby(\'' + item.id + '\');" style="color:#0176d3; font-size:11px;">Find nearby contacts</a></div>';
+            html += '</div>';
+            this._infoWindow.setContent(html);
+            this._infoWindow.open({anchor: marker, map});
         });
         return marker;
     },
 
+    _eventMarkers: [],
+    _heatmapLayer: null,
+    _proximityCircle: null,
+    _routeWaypoints: [],
+
     async initMapWithMarkers(items) {
         this.mapMarkers = [];
+        this._eventMarkers = [];
         if (!window.google?.maps?.Map) { const el = document.getElementById('mapLoadingMsg'); if (el) el.textContent = 'Loading Google Maps...'; setTimeout(() => this.initMapWithMarkers(items), 1000); return; }
         const mapEl = document.getElementById('crmMap');
         if (!mapEl) return;
-        const map = new google.maps.Map(mapEl, {center: {lat: 39.8283, lng: -98.5795}, zoom: 4, gestureHandling: 'greedy'});
+
+        const savedView = this._loadSavedMapState();
+        const center = savedView?.center || {lat: 32.7767, lng: -96.7970};
+        const zoom = savedView?.zoom || 5;
+        const map = new google.maps.Map(mapEl, {center, zoom, gestureHandling: 'greedy', mapTypeControl: false, streetViewControl: false, fullscreenControl: false});
         this.mapInstance = map;
 
         const loadingEl = document.getElementById('mapLoadingMsg');
         const cache = this._loadGeocodeCache();
 
-        // Step 1: Immediately create markers for ALL cached addresses
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (!item.address) continue;
@@ -3585,7 +3655,22 @@ const app = {
             this.applyMapFilters();
         }
 
-        // Step 2: Geocode any uncached addresses and add pins as they resolve
+        // Create event markers
+        const eventsWithAddr = (this.data.events || []).filter(e => e.address && e.status === 'Scheduled');
+        for (const evt of eventsWithAddr) {
+            const coords = cache[(evt.address||'').toLowerCase().trim()];
+            if (!coords) continue;
+            const svgIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#c2410c" stroke="white" stroke-width="2"/><text x="14" y="19" text-anchor="middle" fill="white" font-size="14" font-family="Arial">📅</text></svg>';
+            const marker = new google.maps.Marker({position: coords, title: evt.subject || evt.name || 'Event', icon: {url: 'data:image/svg+xml,' + encodeURIComponent(svgIcon), scaledSize: new google.maps.Size(28,28)}, optimized: true});
+            marker.addListener('click', () => {
+                if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
+                this._infoWindow.setContent('<div style="font-size:13px;max-width:240px;"><div style="font-size:10px;text-transform:uppercase;color:#c2410c;">Event</div><div style="font-weight:700;margin:4px 0;">' + (evt.subject||evt.name||'') + '</div><div style="color:#666;">' + (evt.start||'').slice(0,10) + '</div><div style="color:#888;margin-top:4px;">' + (evt.address||'') + '</div></div>');
+                this._infoWindow.open({anchor: marker, map});
+            });
+            this._eventMarkers.push(marker);
+        }
+
+        // Geocode uncached addresses
         const uncached = items.filter((item, i) => item.address && !this.mapMarkers.some(m => m.idx === i));
         if (uncached.length > 0) {
             const countEl = document.getElementById('mapPinCount');
@@ -3609,98 +3694,272 @@ const app = {
             if (loadingEl) loadingEl.style.display = 'none';
             this.applyMapFilters();
         }
+
+        // Auto-detect location on first load
+        if (!savedView && navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                if (this.mapInstance && this.mapMarkers.length < 3) {
+                    this.mapInstance.setCenter({lat: pos.coords.latitude, lng: pos.coords.longitude});
+                    this.mapInstance.setZoom(10);
+                }
+            }, () => {});
+        }
+
+        // Save map state on idle
+        map.addListener('idle', () => {
+            const c = map.getCenter();
+            localStorage.setItem('matthewsCRM_mapState', JSON.stringify({center: {lat: c.lat(), lng: c.lng()}, zoom: map.getZoom()}));
+        });
     },
 
     _focusedIdx: null,
 
     async focusMapItem(idx) {
-        // highlight sidebar item
-        document.querySelectorAll('.map-item').forEach(el => el.classList.remove('active'));
-        const sideItem = document.querySelector(`.map-item[data-idx="${idx}"]`);
-        if (sideItem) { sideItem.classList.add('active'); sideItem.scrollIntoView({block: 'nearest'}); }
-
-        // Hide any Google Maps fallback iframe
-        const fallbackIframe = document.getElementById('crmMapFallbackIframe');
-        if (fallbackIframe) { fallbackIframe.style.display = 'none'; document.getElementById('crmMap').style.display = ''; }
-
         let entry = this.mapMarkers.find(m => m.idx === idx);
-
-        // If no marker yet, geocode on demand and create one
         if (!entry) {
             const item = this._mapAllItems[idx];
             if (!item || !item.address) return;
-            if (sideItem) sideItem.querySelector('.map-item-address').textContent = 'Geocoding…';
             const coords = await this.geocodeAddress(item.address);
-            if (!coords) {
-                // Geocoding failed — show Google Maps embed inline
-                if (sideItem) sideItem.querySelector('.map-item-address').textContent = item.address;
-                const mapDiv = document.getElementById('crmMap');
-                if (mapDiv) {
-                    mapDiv.style.display = 'none';
-                    let iframe = document.getElementById('crmMapFallbackIframe');
-                    if (!iframe) {
-                        iframe = document.createElement('iframe');
-                        iframe.id = 'crmMapFallbackIframe';
-                        iframe.style.cssText = 'width:100%;height:100%;border:none;';
-                        mapDiv.parentElement.appendChild(iframe);
-                    }
-                    iframe.src = `https://www.google.com/maps?q=${encodeURIComponent(item.address)}&output=embed`;
-                    iframe.style.display = '';
-                }
-                return;
-            }
+            if (!coords) return;
             const marker = this._createGoogleMarker(item, coords, this.mapInstance);
             entry = {marker, coords, item, idx};
             this.mapMarkers.push(entry);
-            if (sideItem) sideItem.querySelector('.map-item-address').textContent = item.address;
         }
-
-        // Show ONLY this one pin on the map
         this._focusedIdx = idx;
-        this.mapMarkers.forEach(m => { m.marker.map = (m === entry) ? this.mapInstance : null; });
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        this.mapMarkers.forEach(m => m.marker.setMap(m === entry ? this.mapInstance : null));
         this.mapInstance.setCenter(entry.coords);
         this.mapInstance.setZoom(15);
         google.maps.event.trigger(entry.marker, 'click');
-
-        // Update pin count and show "Show All" button
         const countEl = document.getElementById('mapPinCount');
-        if (countEl) countEl.textContent = `Showing: ${entry.item.name}`;
-        const showAllBtn = document.getElementById('mapShowAllBtn');
-        if (showAllBtn) showAllBtn.style.display = '';
+        if (countEl) countEl.textContent = `Focused: ${entry.item.name}`;
     },
 
     // Call this to go back to showing all filtered pins (e.g. after focusing one)
     clearMapFilters() {
         this.mapFilters = {type: 'all', tier: '', tag: '', text: ''};
         this._focusedIdx = null;
+        this._showEvents = false;
         const search = document.getElementById('mapSearchInput');
-        const type = document.getElementById('mapFilterType');
-        const tier = document.getElementById('mapFilterTier');
-        const tag = document.getElementById('mapFilterTag');
-        const showAllBtn = document.getElementById('mapShowAllBtn');
         if (search) search.value = '';
-        if (type) type.value = 'all';
-        if (tier) tier.value = '';
-        if (tag) tag.value = '';
-        if (showAllBtn) showAllBtn.style.display = 'none';
-        document.querySelectorAll('.map-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.map-proximity-panel,.map-saved-panel,.map-nearby-list').forEach(el => el.classList.remove('show'));
+        if (this._heatmapLayer) { this._heatmapLayer.setMap(null); this._heatmapLayer = null; }
+        if (this._proximityCircle) { this._proximityCircle.setMap(null); this._proximityCircle = null; }
+        this._routeWaypoints = [];
         this.applyMapFilters();
-        this.mapInstance.setView([39.8283, -98.5795], 4);
+        if (this.mapInstance) { this.mapInstance.setCenter({lat: 32.7767, lng: -96.7970}); this.mapInstance.setZoom(5); }
+        this.renderMap();
     },
 
     showAllFilteredPins() {
         this._focusedIdx = null;
-        const showAllBtn = document.getElementById('mapShowAllBtn');
-        if (showAllBtn) showAllBtn.style.display = 'none';
-        document.querySelectorAll('.map-item').forEach(el => el.classList.remove('active'));
         this.applyMapFilters();
     },
 
-    filterMapSidebar(term) {
-        const lower = term.toLowerCase();
-        document.querySelectorAll('#mapSidebarList .map-item').forEach(el => {
-            el.style.display = el.getAttribute('data-name').includes(lower) ? '' : 'none';
+    _loadSavedMapState() {
+        try { return JSON.parse(localStorage.getItem('matthewsCRM_mapState')); } catch { return null; }
+    },
+
+    _haversineDistance(lat1, lng1, lat2, lng2) {
+        const R = 3959;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    },
+
+    mapToggleHeatmap() {
+        if (this._heatmapLayer) {
+            this._heatmapLayer.setMap(null);
+            this._heatmapLayer = null;
+            document.getElementById('mapHeatBtn')?.classList.remove('active');
+            return;
+        }
+        if (!window.google?.maps?.visualization) return;
+        const points = this.mapMarkers.filter(m => m.item._type === 'contact').map(m => ({location: new google.maps.LatLng(m.coords.lat, m.coords.lng), weight: m.item.tier === '1-VIP' ? 3 : m.item.tier === '2' ? 2 : 1}));
+        if (points.length === 0) return;
+        this._heatmapLayer = new google.maps.visualization.HeatmapLayer({data: points, map: this.mapInstance, radius: 40, opacity: 0.6});
+        document.getElementById('mapHeatBtn')?.classList.add('active');
+    },
+
+    mapToggleProximity() {
+        const panel = document.getElementById('mapProxPanel');
+        if (panel) panel.classList.toggle('show');
+        document.getElementById('mapSavedPanel')?.classList.remove('show');
+        document.getElementById('mapNearbyList')?.classList.remove('show');
+    },
+
+    mapProximitySearch() {
+        const radius = parseInt(document.getElementById('mapProxRadius')?.value || '25');
+        const center = this.mapInstance.getCenter();
+        const lat = center.lat(), lng = center.lng();
+        if (this._proximityCircle) this._proximityCircle.setMap(null);
+        this._proximityCircle = new google.maps.Circle({center: {lat, lng}, radius: radius * 1609.34, map: this.mapInstance, fillColor: '#0176d3', fillOpacity: 0.08, strokeColor: '#0176d3', strokeWeight: 1});
+        let count = 0;
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        const visibleMarkers = [];
+        this.mapMarkers.forEach(m => {
+            const dist = this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng);
+            if (dist <= radius) {
+                m.marker.setMap(null);
+                visibleMarkers.push(m.marker);
+                count++;
+            } else {
+                m.marker.setMap(null);
+            }
         });
+        if (window.markerClusterer && visibleMarkers.length > 0) {
+            this._mapClusterer = new markerClusterer.MarkerClusterer({map: this.mapInstance, markers: visibleMarkers});
+        } else {
+            visibleMarkers.forEach(m => m.setMap(this.mapInstance));
+        }
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `${count} within ${radius} mi`;
+        this.mapInstance.fitBounds(this._proximityCircle.getBounds());
+        document.getElementById('mapProxPanel')?.classList.remove('show');
+    },
+
+    mapToggleRoute() {
+        if (this._routeMode) {
+            this._routeMode = false;
+            document.getElementById('mapRouteBtn')?.classList.remove('active');
+            if (this._routeWaypoints.length >= 2) this.mapOpenRoute();
+            this._routeWaypoints = [];
+            if (this._routeLine) { this._routeLine.setMap(null); this._routeLine = null; }
+            this._routeMarkerNums?.forEach(m => m.setMap(null));
+            this._routeMarkerNums = [];
+            this.applyMapFilters();
+            return;
+        }
+        this._routeMode = true;
+        this._routeWaypoints = [];
+        this._routeMarkerNums = [];
+        document.getElementById('mapRouteBtn')?.classList.add('active');
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = 'Route mode: tap pins to add stops. Tap 🗺️ to finish.';
+    },
+
+    _routeMode: false,
+    _routeLine: null,
+    _routeMarkerNums: [],
+
+    _addRouteWaypoint(item, coords) {
+        if (!this._routeMode) return false;
+        this._routeWaypoints.push({item, coords});
+        const num = this._routeWaypoints.length;
+        const label = new google.maps.Marker({position: coords, map: this.mapInstance, label: {text: String(num), color: '#fff', fontSize: '12px', fontWeight: 'bold'}, icon: {path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: '#c2410c', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2}, zIndex: 1000 + num});
+        this._routeMarkerNums.push(label);
+        if (this._routeWaypoints.length >= 2) {
+            const path = this._routeWaypoints.map(w => w.coords);
+            if (this._routeLine) this._routeLine.setMap(null);
+            this._routeLine = new google.maps.Polyline({path, map: this.mapInstance, strokeColor: '#c2410c', strokeWeight: 3, strokeOpacity: 0.7});
+        }
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `Route: ${num} stop${num>1?'s':''} selected`;
+        return true;
+    },
+
+    mapOpenRoute() {
+        if (this._routeWaypoints.length < 2) return;
+        const origin = this._routeWaypoints[0];
+        const dest = this._routeWaypoints[this._routeWaypoints.length - 1];
+        const waypoints = this._routeWaypoints.slice(1, -1).map(w => encodeURIComponent(w.item.address || w.coords.lat + ',' + w.coords.lng)).join('|');
+        let url = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeURIComponent(origin.item.address || origin.coords.lat + ',' + origin.coords.lng) + '&destination=' + encodeURIComponent(dest.item.address || dest.coords.lat + ',' + dest.coords.lng);
+        if (waypoints) url += '&waypoints=' + waypoints;
+        url += '&travelmode=driving';
+        window.open(url, '_blank');
+    },
+
+    mapToggleSaved() {
+        const panel = document.getElementById('mapSavedPanel');
+        if (panel) {
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) this._renderSavedViews();
+        }
+        document.getElementById('mapProxPanel')?.classList.remove('show');
+        document.getElementById('mapNearbyList')?.classList.remove('show');
+    },
+
+    _renderSavedViews() {
+        const list = document.getElementById('mapSavedList');
+        if (!list) return;
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        if (views.length === 0) { list.innerHTML = '<div style="font-size:11px; color:var(--sf-text-weak); padding:8px 0;">No saved views yet.</div>'; return; }
+        list.innerHTML = views.map((v, i) => '<div class="saved-item" onclick="app.mapLoadView(' + i + ')"><span>' + v.name + '</span><span class="del-sv" onclick="event.stopPropagation();app.mapDeleteView(' + i + ');">✕</span></div>').join('');
+    },
+
+    mapSaveCurrentView() {
+        if (!this.mapInstance) return;
+        const name = prompt('Name this view:');
+        if (!name) return;
+        const c = this.mapInstance.getCenter();
+        const view = {name, center: {lat: c.lat(), lng: c.lng()}, zoom: this.mapInstance.getZoom(), filters: {...this.mapFilters}};
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        views.push(view);
+        localStorage.setItem('matthewsCRM_savedMapViews', JSON.stringify(views));
+        this._renderSavedViews();
+    },
+
+    mapLoadView(idx) {
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        const v = views[idx];
+        if (!v) return;
+        this.mapFilters = {...v.filters};
+        this.mapInstance.setCenter(v.center);
+        this.mapInstance.setZoom(v.zoom);
+        this.applyMapFilters();
+        document.getElementById('mapSavedPanel')?.classList.remove('show');
+        this.renderMap();
+    },
+
+    mapDeleteView(idx) {
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        views.splice(idx, 1);
+        localStorage.setItem('matthewsCRM_savedMapViews', JSON.stringify(views));
+        this._renderSavedViews();
+    },
+
+    mapShowNearby(contactId) {
+        const entry = this.mapMarkers.find(m => m.item.id === contactId);
+        if (!entry) return;
+        const lat = entry.coords.lat, lng = entry.coords.lng;
+        const nearby = this.mapMarkers
+            .filter(m => m.item.id !== contactId && m.item._type === 'contact')
+            .map(m => ({...m, dist: this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng)}))
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 15);
+        const panel = document.getElementById('mapNearbyList');
+        if (!panel) return;
+        let html = '<div style="font-size:12px; font-weight:700; margin-bottom:8px;">Near ' + entry.item.name + '</div>';
+        if (nearby.length === 0) { html += '<div style="font-size:11px;color:var(--sf-text-weak);">No nearby contacts found.</div>'; }
+        else { nearby.forEach(n => { html += '<div class="nearby-item" onclick="app.focusMapItem(' + n.idx + ')"><div>' + n.item.name + '</div><div class="nearby-dist">' + n.dist.toFixed(1) + ' mi · ' + (n.item.mailing_city||n.item.MailingCity||'') + '</div></div>'; }); }
+        html += '<div style="margin-top:8px;"><button style="width:100%;padding:6px;border:none;border-radius:6px;background:var(--sf-brand);color:#fff;font-size:12px;font-weight:600;cursor:pointer;" onclick="app.mapIntroduce(\'' + contactId + '\')">Suggest introductions</button></div>';
+        panel.innerHTML = html;
+        panel.classList.add('show');
+    },
+
+    mapIntroduce(contactId) {
+        const entry = this.mapMarkers.find(m => m.item.id === contactId);
+        if (!entry) return;
+        const lat = entry.coords.lat, lng = entry.coords.lng;
+        const nearby = this.mapMarkers
+            .filter(m => m.item.id !== contactId && m.item._type === 'contact')
+            .map(m => ({...m, dist: this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng)}))
+            .filter(n => n.dist <= 25)
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 10);
+        if (nearby.length === 0) { alert('No contacts within 25 miles for introductions.'); return; }
+        const panel = document.getElementById('mapNearbyList');
+        if (!panel) return;
+        let html = '<div style="font-size:12px; font-weight:700; margin-bottom:8px;">Introduce ' + entry.item.name + ' to:</div>';
+        nearby.forEach(n => {
+            const shared = [];
+            if (n.item.industry && n.item.industry === entry.item.industry) shared.push(n.item.industry);
+            if (n.item.obligation && entry.item.obligation && n.item.obligation === entry.item.obligation) shared.push(n.item.obligation);
+            html += '<div class="nearby-item" onclick="app.focusMapItem(' + n.idx + ')"><div>' + n.item.name + ' <span class="nearby-dist">(' + n.dist.toFixed(1) + ' mi)</span></div>' + (shared.length ? '<div style="font-size:10px;color:var(--sf-brand);">Shared: ' + shared.join(', ') + '</div>' : '') + '</div>';
+        });
+        panel.innerHTML = html;
+        panel.classList.add('show');
     },
 
     renderReferrals() {
