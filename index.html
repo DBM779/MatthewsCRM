@@ -2834,6 +2834,11 @@ const app = {
         const totalRevenue = active.reduce((s,a) => s + (a.revenue||0), 0);
         const totalEBITDA = active.reduce((s,a) => s + (a.ebitda||0), 0);
         const grossMOIC = totalInvested > 0 ? (totalCurrent / totalInvested) : 0;
+        const exitedVal = exited.reduce((s,a) => s + (a.currentVal||0), 0);
+        const exitedInvested = exited.reduce((s,a) => s + (a.invested||0), 0);
+        const totalValue = totalCurrent + exitedVal;
+        const tvpi = totalInvested > 0 ? (totalValue / totalInvested) : 0;
+        const dpi = totalInvested > 0 ? (exitedVal / totalInvested) : 0;
 
         let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
             + '<h2 style="margin:0;">Portfolio Dashboard</h2>'
@@ -2847,6 +2852,8 @@ const app = {
             + '<div class="pipeline-stat"><div class="ps-value">$' + totalInvested.toFixed(0) + 'M</div><div class="ps-label">Total Invested</div></div>'
             + '<div class="pipeline-stat"><div class="ps-value">$' + totalCurrent.toFixed(0) + 'M</div><div class="ps-label">Current Value</div></div>'
             + '<div class="pipeline-stat"><div class="ps-value">' + grossMOIC.toFixed(1) + 'x</div><div class="ps-label">Gross MOIC</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + tvpi.toFixed(2) + 'x</div><div class="ps-label">TVPI</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + dpi.toFixed(2) + 'x</div><div class="ps-label">DPI</div></div>'
             + '<div class="pipeline-stat"><div class="ps-value">$' + totalRevenue.toFixed(0) + 'M</div><div class="ps-label">Portfolio Revenue</div></div>'
             + '<div class="pipeline-stat"><div class="ps-value">$' + totalEBITDA.toFixed(0) + 'M</div><div class="ps-label">Portfolio EBITDA</div></div>'
             + '</div>';
