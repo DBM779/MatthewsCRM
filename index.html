@@ -1235,31 +1235,28 @@ Tone: Professional but personal, not overly formal`;
 
     async connectGmail() {
         try {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
-            provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-            provider.addScope('https://www.googleapis.com/auth/calendar.events');
-            let result;
-            if (firebaseAuth.currentUser) {
-                result = await firebaseAuth.currentUser.reauthenticateWithPopup(provider);
-            } else {
-                result = await firebaseAuth.signInWithPopup(provider);
-            }
-            const token = result.credential?.accessToken;
-            if (token) {
-                this._gmailToken = token;
-                this._gmailTokenExpiry = Date.now() + 3600000;
-                localStorage.setItem('matthewsCRM_gmailToken', token);
-                localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
-                this.updateStatus('Gmail connected', true);
-                this.render();
-            } else {
-                alert('No access token received. Please try again.');
-            }
+            const token = await getAuthToken();
+            if (!token) { alert('Please sign in first.'); return; }
+            const res = await fetch('https://us-central1-tmc-crm-f3728.cloudfunctions.net/gmailAuth', {
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            const data = await res.json();
+            if (!data.url) { alert('Could not get auth URL.'); return; }
+            // Open popup for Google consent
+            const popup = window.open(data.url, 'gmail_auth', 'width=500,height=600');
+            // Listen for token from popup
+            window.addEventListener('message', (e) => {
+                if (e.data?.gmailToken) {
+                    this._gmailToken = e.data.gmailToken;
+                    this._gmailTokenExpiry = Date.now() + ((e.data.expiresIn||3600) * 1000);
+                    localStorage.setItem('matthewsCRM_gmailToken', e.data.gmailToken);
+                    localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                    this.updateStatus('Gmail connected', true);
+                    this.render();
+                }
+            }, {once: true});
         } catch(e) {
-            if (e.code === 'auth/popup-blocked') alert('Popup blocked. Allow popups for this site and try again.');
-            else if (e.code === 'auth/cancelled-popup-request' || e.code === 'auth/popup-closed-by-user') {}
-            else alert('Error: ' + (e.code || e.message));
+            alert('Gmail connect error: ' + e.message);
         }
     },
 

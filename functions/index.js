@@ -138,6 +138,48 @@ exports.bulk = functions.runWith(runtimeOpts).https.onRequest(async (req, res) =
 });
 
 // Health check / setup verification
+// Gmail OAuth - server-side token exchange
+exports.gmailAuth = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  const user = await verifyAuth(req, res);
+  if (!user) return;
+
+  if (req.method === 'GET') {
+    // Return OAuth URL for user to visit
+    const clientId = '952660161996-el5663ja1ns7q1mg7h90fm471am7kqgd.apps.googleusercontent.com';
+    const redirectUri = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/gmailCallback';
+    const scope = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events';
+    const state = user.uid;
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=${state}&prompt=consent`;
+    res.json({ url });
+  }
+});
+
+// Gmail OAuth callback - receives token from Google
+exports.gmailCallback = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
+  // Google redirects here with token in hash fragment
+  // Since hash fragments aren't sent to server, we use a page to extract it
+  res.send(`<!DOCTYPE html><html><body><script>
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    const token = params.get('access_token');
+    const expiresIn = params.get('expires_in');
+    if (token) {
+      window.opener ? window.opener.postMessage({gmailToken: token, expiresIn}, '*') : null;
+      document.body.innerHTML = '<h2>Connected! You can close this window.</h2>';
+      localStorage.setItem('matthewsCRM_gmailToken', token);
+      localStorage.setItem('matthewsCRM_gmailExpiry', Date.now() + (parseInt(expiresIn||3600) * 1000));
+      setTimeout(() => window.close(), 2000);
+    } else {
+      document.body.innerHTML = '<h2>Error connecting. Please try again.</h2><pre>' + hash + '</pre>';
+    }
+  </script></body></html>`);
+});
+
 exports.health = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
