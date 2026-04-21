@@ -9,6 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
     <meta name="theme-color" content="#16325c">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='30' fill='%2316325c'/><text x='90' y='125' font-size='110' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>M</text></svg>">
     <title>Matthews CRM</title>
     <style>
         /* === Salesforce Lightning Experience theme === */
@@ -313,27 +315,43 @@
         /* Mobile responsive */
         @media (max-width: 768px) {
             body {flex-direction: column;}
-            .mobile-header {display: flex;}
-            .sidebar {position: fixed; left: -260px; top: 0; bottom: 0; z-index: 300; width: 240px; transition: left 0.3s ease;}
-            .sidebar.open {left: 0;}
-            .topbar {display: none;}
+            .sf-global-header {padding: 0 10px; height: 48px;}
+            .sf-app-title .sub {display: none;}
+            .sf-global-search {display: none;}
+            .sf-app-nav {height: 38px; padding: 0 8px; -webkit-overflow-scrolling: touch;}
+            .sf-app-tab {padding: 0 10px; font-size: 12px; gap: 4px;}
+            .sf-app-tab .obj-icon {width: 16px; height: 16px; font-size: 9px;}
+            .mobile-header {display: none !important;}
+            .sidebar {display: none !important;}
             .main {width: 100%;}
-            .content {padding: 12px;}
-            .stat-cards {grid-template-columns: repeat(2, 1fr); gap: 8px;}
-            .stat-card .value {font-size: 22px;}
-            .stat-card .label {font-size: 10px;}
+            .content {padding: 10px;}
+            .stat-cards {grid-template-columns: repeat(4, 1fr) !important; gap: 6px;}
+            .stat-card {padding: 6px !important;}
+            .stat-card .value {font-size: 16px !important;}
+            .stat-card .label {font-size: 8px !important;}
             .kanban-board {flex-direction: column;}
             .kanban-column {flex: none; width: 100%;}
-            table {font-size: 12px;}
-            th, td {padding: 8px 6px;}
-            .detail-container {flex-direction: column;}
-            .detail-sidebar {width: 100%; position: static; max-height: none;}
+            .compact-table td {font-size: 11px !important; padding: 0 4px !important;}
+            .compact-table th {font-size: 10px !important; padding: 2px 4px !important;}
+            .detail-container, [style*="display:flex"][style*="gap:12px"][style*="align-items:flex-start"] {flex-direction: column !important;}
+            .detail-sidebar, [style*="width:380px"], [style*="width:360px"], [style*="width:320px"] {width: 100% !important; position: static !important;}
+            .sf-highlight {padding: 10px 12px;}
+            .sf-hl-fields {grid-template-columns: 1fr 1fr !important; gap: 8px !important;}
+            .sf-hl-title {font-size: 16px !important;}
+            .sf-hl-actions {flex-wrap: wrap; gap: 4px;}
+            .sf-hl-actions button {font-size: 11px; padding: 3px 8px;}
             .modal-content {width: 95%; max-height: 90vh; padding: 16px;}
-            .map-container {flex-direction: column; height: auto;}
-            .map-sidebar {width: 100%; border-right: none; border-bottom: 1px solid #e5e7eb; max-height: 200px;}
-            h2 {font-size: 18px;}
-            .search-box {width: 100%;}
-            .search-box input {width: 100%;}
+            .map-page {flex-direction: column; height: auto !important;}
+            .map-sidebar-panel {width: 100% !important; max-height: 200px;}
+            .map-main-panel {min-height: 300px;}
+            h2 {font-size: 16px;}
+            .related-list table th, .related-list table td {font-size: 11px; padding: 4px 6px;}
+        }
+        @media (max-width: 480px) {
+            .stat-cards {grid-template-columns: repeat(3, 1fr) !important;}
+            .sf-app-tab span.obj-icon {display: none;}
+            .sf-hl-fields {grid-template-columns: 1fr !important;}
+            .sf-hl-actions {justify-content: center;}
         }
     </style>
 </head>
@@ -4333,6 +4351,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         else if (h && h !== 'sync') { app.currentView = h; app.render(); }
     });
 });
+    // Register service worker for offline support
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
     </script>
 </body>
 </html>
