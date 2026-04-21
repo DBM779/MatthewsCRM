@@ -7082,6 +7082,8 @@ Tone: Professional but personal, not overly formal`;
                     <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
                     <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
                     <div><div class="sf-hl-field-label">Tier</div><div class="sf-hl-field-value">${c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Instagram</div><div class="sf-hl-field-value">${c.instagram ? `<a href="https://instagram.com/${esc(c.instagram.replace('@',''))}" target="_blank" style="color:var(--sf-brand);">@${esc(c.instagram.replace('@',''))}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">LinkedIn</div><div class="sf-hl-field-value">${c.linkedin ? `<a href="${esc(c.linkedin)}" target="_blank" style="color:var(--sf-brand);">Profile ↗</a>` : '—'}</div></div>
                 </div>
             </div>
 
