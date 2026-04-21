@@ -2360,7 +2360,7 @@ Tone: Professional but personal, not overly formal`;
         return s.dir === 'desc' ? sorted.reverse() : sorted;
     },
 
-    contactFilters: {tier: '', text: ''},
+    contactFilters: {tier: '', text: '', dsla: '', _ob: '', company: ''},
     _contactCols: null,
     _allContactCols: [
         {key:'name', label:'Name', editable:true, type:'text'},
@@ -2768,6 +2768,7 @@ Tone: Professional but personal, not overly formal`;
         let filtered = this.data.contacts;
         if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
         if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
+        if (f.company) filtered = filtered.filter(c => (c.accountId||c.account_id) === f.company);
         if (f.text) {
             const lt = f.text.toLowerCase();
             filtered = filtered.filter(c => {
@@ -2850,7 +2851,8 @@ Tone: Professional but personal, not overly formal`;
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
                 <input type="text" placeholder="Search contacts…" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
                 ${f.dsla ? `<span style="font-size:11px;padding:3px 8px;border-radius:3px;background:var(--sf-brand);color:#fff;font-weight:600;">${f.dsla==='active'?'Active ≤30D':f.dsla==='cooling'?'Cooling 30-90D':'Cold 90D+'}</span>` : ''}
-                ${f.text || f.tier || f._ob || f.dsla ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
+                ${f.company ? `<span style="font-size:11px;padding:3px 8px;border-radius:3px;background:#7f8de1;color:#fff;font-weight:600;">${(this.data.accounts.find(a=>a.id===f.company)||{}).name||'Account'}</span>` : ''}
+                ${f.text || f.tier || f._ob || f.dsla || f.company ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card" style="overflow:hidden;">
@@ -2930,7 +2932,7 @@ Tone: Professional but personal, not overly formal`;
         this.renderContacts();
     },
     clearContactFilters() {
-        this.contactFilters = {tier: '', text: '', dsla: '', _ob: ''};
+        this.contactFilters = {tier: '', text: '', dsla: '', _ob: '', company: ''};
         localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
         this.renderContacts();
     },
@@ -6020,9 +6022,11 @@ Tone: Professional but personal, not overly formal`;
         };
         if (id) {
             const idx = this.data.referrals.findIndex(r => r.id === id);
-            if (idx >= 0) this.data.referrals[idx] = {...this.data.referrals[idx], ...referral};
+            if (idx >= 0) { this.data.referrals[idx] = {...this.data.referrals[idx], ...referral}; firestoreUpsert('referrals', this.data.referrals[idx]); }
         } else {
-            this.data.referrals.push({...referral, id: 'ref-' + Date.now(), created_at: new Date().toISOString()});
+            const newRef = {...referral, id: 'ref-' + Date.now(), created_at: new Date().toISOString()};
+            this.data.referrals.push(newRef);
+            firestoreUpsert('referrals', newRef);
         }
         this.persist();
         this.closeModal('modalReferral');
@@ -6031,7 +6035,7 @@ Tone: Professional but personal, not overly formal`;
 
     deleteReferral(id) {
         if (!confirm('Delete this referral?')) return;
-        this.data.referrals = this.data.referrals.filter(r => r.id !== id);
+        this.data.referrals = this.data.referrals.filter(r => r.id !== id); firestoreDelete('referrals', id);
         this.persist(); this.render();
     },
 
@@ -6118,13 +6122,13 @@ Tone: Professional but personal, not overly formal`;
         this.autoLinkEmail(email);
         if (id) {
             const idx = this.data.emails.findIndex(x => x.id === id);
-            if (idx >= 0) this.data.emails[idx] = {...this.data.emails[idx], ...email};
+            if (idx >= 0) { this.data.emails[idx] = {...this.data.emails[idx], ...email}; firestoreUpsert('emails', this.data.emails[idx]); }
         } else {
             const newEmail = {...email, id: 'eml-' + Date.now(), created_at: new Date().toISOString()};
             this.autoLinkEmail(newEmail);
             this.data.emails.push(newEmail);
-            // auto-create activity for email tracking
-            this.data.activities.push({
+            firestoreUpsert('emails', newEmail);
+            const newAct = {
                 id: 'act-' + Date.now() + '-e',
                 type: 'Email',
                 subject: 'Email: ' + (email.subject || '(no subject)'),
@@ -6135,7 +6139,9 @@ Tone: Professional but personal, not overly formal`;
                 status: 'Closed',
                 notes: (email.from_addr ? 'From: ' + email.from_addr + ' ' : '') + (email.to_addr ? 'To: ' + email.to_addr : ''),
                 createdAt: new Date().toISOString()
-            });
+            };
+            this.data.activities.push(newAct);
+            firestoreUpsert('activities', newAct);
         }
         this.persist();
         this.closeModal('modalEmail');
@@ -6144,7 +6150,7 @@ Tone: Professional but personal, not overly formal`;
 
     deleteEmail(id) {
         if (!confirm('Delete this email record?')) return;
-        this.data.emails = this.data.emails.filter(e => e.id !== id);
+        this.data.emails = this.data.emails.filter(e => e.id !== id); firestoreDelete('emails', id);
         this.persist(); this.render();
     },
 
