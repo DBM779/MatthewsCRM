@@ -3216,7 +3216,7 @@ Tone: Professional but personal, not overly formal`;
                     <button class="btn-primary" onclick="app.openContactForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Contact</button>
                 </div>
             </div>
-            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(8, 1fr);">
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(10, 1fr);">
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','')">
                     <div class="label" style="font-size:9px;">Total</div>
                     <div class="value" style="font-size:18px;">${this.fmt(this.data.contacts.length)}</div>
@@ -3238,7 +3238,7 @@ Tone: Professional but personal, not overly formal`;
                     <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Client')).length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Service Provider'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Service Provider'?'':'Service Provider'}'; app.renderContacts();">
-                    <div class="label" style="font-size:9px;">Service</div>
+                    <div class="label" style="font-size:9px;">Service Provider</div>
                     <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Service Provider')).length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Family'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Family'?'':'Family'}'; app.renderContacts();">
