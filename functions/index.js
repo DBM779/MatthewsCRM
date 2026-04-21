@@ -1,54 +1,147 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
-const db = admin.firestore();
+const { pool, initDb } = require('./db');
 
-// Auto-update last_activity_at on contact when activity is created
-exports.onActivityCreate = functions.firestore
-  .document('users/{uid}/activities/{actId}')
-  .onCreate(async (snap, context) => {
-    const act = snap.data();
-    const uid = context.params.uid;
-    const contactId = act.contactId || act.contact_id;
-    if (!contactId) return;
-    const today = new Date().toISOString().split('T')[0];
-    try {
-      await db.collection('users').doc(uid).collection('contacts').doc(contactId).update({
-        la: today,
-        updated_at: admin.firestore.FieldValue.serverTimestamp()
-      });
-    } catch (e) { console.log('LA update skipped:', e.message); }
-  });
+// Verify Firebase Auth token
+async function verifyAuth(req, res) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) { res.status(401).json({error:'Unauthorized'}); return null; }
+  try {
+    return await admin.auth().verifyIdToken(auth.split('Bearer ')[1]);
+  } catch { res.status(401).json({error:'Invalid token'}); return null; }
+}
 
-// Daily backup to Cloud Storage (runs at 2am UTC)
-exports.dailyBackup = functions.pubsub.schedule('0 2 * * *').onRun(async () => {
-  const usersSnap = await db.collection('users').get();
-  for (const userDoc of usersSnap.docs) {
-    const data = userDoc.data();
-    const bucket = admin.storage().bucket();
-    const date = new Date().toISOString().split('T')[0];
-    const file = bucket.file(`backups/${userDoc.id}/${date}.json`);
-    await file.save(JSON.stringify(data), {contentType: 'application/json'});
+// Generic CRUD API for any table
+exports.api = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  const user = await verifyAuth(req, res);
+  if (!user) return;
+
+  await initDb();
+
+  const parts = req.path.split('/').filter(Boolean);
+  const table = parts[0];
+  const id = parts[1];
+  const allowed = ['contacts','accounts','deals','activities','events','investors','connections','referrals','emails','deal_contacts','audit_log','activity_checklist','activity_comments','activity_attachments','event_guests','event_budget','event_checklist','event_potluck','deal_ic_votes','deal_dd_status','investor_comms','contact_files','ig_messages'];
+
+  if (!table || !allowed.includes(table)) { res.status(400).json({error:'Invalid table: ' + table}); return; }
+
+  try {
+    if (req.method === 'GET' && !id) {
+      // List all records
+      const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY created_at DESC`);
+      res.json(rows);
+
+    } else if (req.method === 'GET' && id) {
+      // Get single record
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = $1`, [id]);
+      if (!rows.length) { res.status(404).json({error:'Not found'}); return; }
+      res.json(rows[0]);
+
+    } else if (req.method === 'POST') {
+      // Create record
+      const data = req.body;
+      const keys = Object.keys(data);
+      const vals = Object.values(data);
+      const placeholders = keys.map((_, i) => '$' + (i + 1));
+      const { rows } = await pool.query(
+        `INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders.join(',')}) RETURNING *`,
+        vals
+      );
+      res.status(201).json(rows[0]);
+
+    } else if (req.method === 'PUT' && id) {
+      // Update record
+      const data = req.body;
+      data.updated_at = new Date().toISOString();
+      const keys = Object.keys(data);
+      const vals = Object.values(data);
+      const sets = keys.map((k, i) => `${k} = $${i + 1}`);
+      vals.push(id);
+      const { rows } = await pool.query(
+        `UPDATE ${table} SET ${sets.join(',')} WHERE id = $${vals.length} RETURNING *`,
+        vals
+      );
+      if (!rows.length) { res.status(404).json({error:'Not found'}); return; }
+      res.json(rows[0]);
+
+    } else if (req.method === 'DELETE' && id) {
+      // Delete record
+      await pool.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+      res.json({deleted: true});
+
+    } else {
+      res.status(405).json({error:'Method not allowed'});
+    }
+  } catch (e) {
+    console.error('API error:', e.message);
+    res.status(500).json({error: e.message});
   }
-  console.log('Daily backup complete');
 });
 
-// Weekly digest: find VIP contacts needing follow-up (runs Monday 8am UTC)
-exports.weeklyDigest = functions.pubsub.schedule('0 8 * * 1').onRun(async () => {
-  const usersSnap = await db.collection('users').get();
-  const today = new Date();
-  for (const userDoc of usersSnap.docs) {
-    const data = userDoc.data()?.data;
-    if (!data?.contacts) continue;
-    const vips = (data.contacts || []).filter(c => {
-      if (c.tier !== '1-VIP') return false;
-      if (!c.la) return true;
-      const days = Math.floor((today - new Date(c.la)) / 86400000);
-      return days >= 30;
-    });
-    if (vips.length) {
-      console.log(`User ${userDoc.id}: ${vips.length} VIPs need follow-up: ${vips.map(c=>c.name).join(', ')}`);
-      // Future: send email notification here
+// Bulk data endpoint for initial load and migration
+exports.bulk = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  const user = await verifyAuth(req, res);
+  if (!user) return;
+
+  await initDb();
+
+  try {
+    if (req.method === 'GET') {
+      // Load all data at once
+      const tables = ['contacts','accounts','deals','activities','events','investors','connections','referrals','emails','deal_contacts'];
+      const data = {};
+      for (const t of tables) {
+        const { rows } = await pool.query(`SELECT * FROM ${t} ORDER BY created_at DESC`);
+        data[t] = rows;
+      }
+      res.json(data);
+
+    } else if (req.method === 'POST') {
+      // Bulk import
+      const data = req.body;
+      let imported = 0;
+      for (const [table, records] of Object.entries(data)) {
+        if (!Array.isArray(records)) continue;
+        for (const record of records) {
+          const keys = Object.keys(record);
+          const vals = Object.values(record);
+          const placeholders = keys.map((_, i) => '$' + (i + 1));
+          try {
+            await pool.query(
+              `INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders.join(',')}) ON CONFLICT (id) DO NOTHING`,
+              vals
+            );
+            imported++;
+          } catch (e) { console.log('Skip:', table, record.id, e.message); }
+        }
+      }
+      res.json({imported});
     }
+  } catch (e) {
+    console.error('Bulk error:', e.message);
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Health check / setup verification
+exports.health = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    await initDb();
+    const { rows } = await pool.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+    res.json({ status: 'ok', tables: rows.map(r => r.tablename) });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
   }
 });
