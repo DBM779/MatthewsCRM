@@ -4184,17 +4184,27 @@ const app = {
                 const el = document.getElementById('gmailEmails');
                 if (!el) return;
                 if (!emails.length) { el.innerHTML = '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">No emails found</div>'; return; }
+                // Update Last Activity from most recent email date
+                if (emails.length && emails[0].date) {
+                    const emailDate = new Date(emails[0].date).toISOString().split('T')[0];
+                    const contact = this.data.contacts.find(x => x.id === c.id);
+                    if (contact && (!contact.la || emailDate > contact.la)) {
+                        contact.la = emailDate;
+                        this.persist();
+                    }
+                }
                 el.innerHTML = emails.map(e => {
                     const fromName = (e.from||'').replace(/<.*>/,'').trim() || e.from;
                     const dateStr = e.date ? new Date(e.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-                    return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                    const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${e.id}`;
+                    return `<a href="${gmailLink}" target="_blank" style="display:block; padding:8px 4px; border-bottom:1px solid var(--sf-border-weak); text-decoration:none; color:inherit; border-radius:4px; transition:background 0.1s;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">
                         <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${e.subject}</div>
+                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; color:var(--sf-brand);">${e.subject}</div>
                             <span style="font-size:10px; color:var(--sf-text-weakest); margin-left:8px; white-space:nowrap;">${dateStr}</span>
                         </div>
                         <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${fromName}</div>
                         <div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${e.snippet}</div>
-                    </div>`;
+                    </a>`;
                 }).join('');
             });
         }
