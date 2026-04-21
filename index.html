@@ -7,6 +7,8 @@
     <link rel="preconnect" href="https://unpkg.com">
     <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -412,7 +414,7 @@
         <div class="sf-global-right">
             <span class="status-indicator status-online" id="statusIndicator" title="Ready"></span>
             <span id="statusText" style="font-size:12px; color:#fff; opacity:0.9;">Ready</span>
-            <div class="sf-avatar" title="Dave Matthews">DM</div>
+            <div class="sf-avatar" title="Dave Matthews" onclick="if(!cloudSync.isSignedIn()){cloudSync.signIn().then(()=>{app.cloudPull();app.updateStatus('Synced',true);})}" style="cursor:pointer;">DM</div>
         </div>
     </div>
     <!-- SF app navigation tabs -->
@@ -694,14 +696,43 @@
 const STORAGE_KEY = 'matthewsCRM';
 
 const FIREBASE_DB_URL = 'https://tmc-crm-f3728-default-rtdb.firebaseio.com';
-const FIREBASE_API_KEY = 'AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ';
+
+// Initialize Firebase Auth
+const firebaseApp = firebase.initializeApp({
+    apiKey: 'AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ',
+    authDomain: 'tmc-crm-f3728.firebaseapp.com',
+    databaseURL: FIREBASE_DB_URL,
+    projectId: 'tmc-crm-f3728'
+});
+const firebaseAuth = firebase.auth();
 
 const cloudSync = {
     _pendingSync: false,
+    _uid: null,
+
+    async getToken() {
+        const user = firebaseAuth.currentUser;
+        if (!user) return null;
+        this._uid = user.uid;
+        return await user.getIdToken();
+    },
+
+    async signIn() {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({prompt: 'select_account'});
+        try {
+            await firebaseAuth.signInWithPopup(provider);
+            return true;
+        } catch { return false; }
+    },
+
+    isSignedIn() { return !!firebaseAuth.currentUser; },
 
     async push(data) {
+        const token = await this.getToken();
+        if (!token) return false;
         try {
-            const res = await fetch(`${FIREBASE_DB_URL}/crm.json?auth=${FIREBASE_API_KEY}`, {
+            const res = await fetch(`${FIREBASE_DB_URL}/users/${this._uid}/crm.json?auth=${token}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({data: data, updated_at: new Date().toISOString()})
@@ -711,8 +742,10 @@ const cloudSync = {
     },
 
     async pull() {
+        const token = await this.getToken();
+        if (!token) return null;
         try {
-            const res = await fetch(`${FIREBASE_DB_URL}/crm.json?auth=${FIREBASE_API_KEY}`);
+            const res = await fetch(`${FIREBASE_DB_URL}/users/${this._uid}/crm.json?auth=${token}`);
             if (!res.ok) return null;
             const result = await res.json();
             if (result && result.data) return result.data;
@@ -823,6 +856,15 @@ const app = {
     _migrated: false,
 
     async init() {
+        // 0. Wait for Firebase Auth state
+        await new Promise(resolve => {
+            firebaseAuth.onAuthStateChanged(user => {
+                if (user) this.updateStatus('Signed in', true);
+                resolve();
+            });
+            setTimeout(resolve, 1500); // Don't wait more than 1.5s
+        });
+
         // 1. Load data from localStorage (instant)
         this.loadData();
 
@@ -864,8 +906,8 @@ const app = {
         // 5. Gmail init
         setTimeout(() => this.initGmail(), 200);
 
-        // 6. Cloud sync in background (doesn't block UI)
-        setTimeout(() => this.cloudPull(), 500);
+        // 6. Cloud sync in background (only if signed in)
+        setTimeout(() => { if (cloudSync.isSignedIn()) this.cloudPull(); }, 500);
 
         // 6. Geocoding much later
         setTimeout(() => this.bgGeocodeAll(), 10000);
