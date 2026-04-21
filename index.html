@@ -463,6 +463,8 @@
                 <div class="form-group"><label>PE@ (Personal Email)</label><input type="email" id="contactPeEmail"></div>
                 <div class="form-group"><label>WE@ (Work Email)</label><input type="email" id="contactWeEmail"></div>
                 <div class="form-group"><label>Lead Source</label><select id="contactLeadSource"><option value="">--None--</option><option value="Web">Web</option><option value="Phone">Phone Inquiry</option><option value="Referral">Referral</option><option value="Partner">Partner</option><option value="Event">Event</option><option value="Cold Call">Cold Call</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Referred By</label><input type="text" id="contactReferredBy" placeholder="Contact name"></div>
+                <div class="form-group"><label>Pinned</label><select id="contactPinned"><option value="">No</option><option value="⭐">⭐ Yes</option></select></div>
                 <div class="form-group"><label>PC# (Personal Cell)</label><input type="tel" id="contactPcNumber"></div>
                 <div class="form-group"><label>WC# (Work Cell)</label><input type="tel" id="contactWcNumber"></div>
                 <div class="form-group"><label>Mobile</label><input type="tel" id="contactMobile"></div>
@@ -735,6 +737,12 @@ const app = {
 
     fmt(n) { return Number(n).toLocaleString(); },
 
+    contactCompleteness(c) {
+        const fields = ['name','pc_number','wc_number','pe_email','we_email','address','title','tier','obligation','birthdate','instagram','linkedin','general_notes'];
+        const filled = fields.filter(f => c[f] && String(c[f]).trim()).length;
+        return Math.round((filled / fields.length) * 100);
+    },
+
     fmtPhone(p) {
         if (!p) return p;
         const d = p.replace(/\D/g, '');
@@ -991,6 +999,8 @@ const app = {
             birthdate: document.getElementById('contactBirthdate').value || null,
             title: document.getElementById('contactTitle').value || null,
             lead_source: document.getElementById('contactLeadSource').value || null,
+            referred_by: document.getElementById('contactReferredBy').value || null,
+            pinned: document.getElementById('contactPinned').value || null,
             assistant_name: document.getElementById('contactAssistantName').value || null,
             assistant_phone: document.getElementById('contactAssistantPhone').value || null,
             instagram: document.getElementById('contactInstagram').value || null,
@@ -1415,6 +1425,18 @@ const app = {
                         </div>
                     </div>
 
+                    <!-- Pinned Contacts -->
+                    ${(() => { const pinned = this.data.contacts.filter(c => c.pinned); return pinned.length ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">⭐ Pinned Contacts</div>
+                        <div style="padding:0 16px;">
+                            ${pinned.map(c => `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.pc_number||c.mobile||''}</span></div>
+                                <span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>
+                            </div>`).join('')}
+                        </div>
+                    </div>` : ''; })()}
+
                     <!-- Contacts Needing Attention -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days since last activity)</span></div>
@@ -1565,6 +1587,9 @@ const app = {
         {key:'obligation', label:'Obligation', editable:true, type:'multi-obligation'},
         {key:'notes', label:'Notes', editable:true, type:'text'},
         {key:'general_notes', label:'*Notes', editable:true, type:'text'},
+        {key:'referred_by', label:'Referred By', editable:true, type:'text'},
+        {key:'_completeness', label:'Profile %', editable:false},
+        {key:'pinned', label:'Pinned', editable:true, type:'select', options:['','⭐']},
     ],
     _getContactCols() {
         if (!this._contactCols) {
@@ -1901,7 +1926,7 @@ const app = {
 
         const sorted = this._applySortToList(filtered.map(c => {
             const cpy = this.data.accounts.find(a => a.id === (c.accountId || c.account_id));
-            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity ?? 9999};
+            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity ?? 9999, _completeness: this.contactCompleteness(c)};
         }), 'contacts');
 
         const html = `
@@ -1992,6 +2017,9 @@ const app = {
                                     else if (col.key === 'we_email' && c.we_email) val = `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>`;
                                     else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
                                     else if (col.key === 'la') { const raw = c.la || c.last_activity_display; if (raw) { const bd = new Date(raw.includes('T') ? raw : raw+'T12:00:00'); if (!isNaN(bd)) val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); else val = raw; } }
+                                    else if (col.key === '_completeness') { const pct = c._completeness; const color = pct >= 80 ? 'var(--sf-success)' : pct >= 50 ? 'var(--sf-warning)' : 'var(--sf-error)'; val = `<span style="color:${color}; font-weight:600;">${pct}%</span>`; }
+                                    else if (col.key === 'pinned') val = c.pinned || '';
+                                    else if (col.key === 'referred_by') val = c.referred_by || '';
                                     else val = c[col.key] || '';
                                     return `<td ${editable} style="${cursor}" title="${col.editable ? 'Double-click to edit' : ''}">${val}</td>`;
                                 }).join('')}<td style="position:relative;"><button class="btn-small" onclick="app.toggleRowMenu('${c.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_${c.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.editContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.viewContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.deleteContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error); white-space:nowrap;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td></tr>`;
@@ -2013,6 +2041,7 @@ const app = {
                         </div>
                         <div class="ml-right">
                             <div class="ml-badge" style="background:${c.tier==='1-VIP'?'#dcfce7':c.tier==='2'?'#dbeafe':'#f3f4f6'}; color:${tierColor};">${c.tier||'5'}</div>
+                            ${c.pinned ? '<div style="font-size:10px; text-align:center; margin-top:2px;">⭐</div>' : ''}
                         </div>
                     </div>`;
                 }).join('')}
@@ -3530,6 +3559,8 @@ const app = {
         document.getElementById('contactVip').value = '';
         document.querySelectorAll('.obligation-cb').forEach(cb => cb.checked = false);
         document.getElementById('contactLeadSource').value = '';
+        document.getElementById('contactReferredBy').value = '';
+        document.getElementById('contactPinned').value = '';
     },
     openContactForm() {
         this._clearContactForm();
@@ -3561,6 +3592,8 @@ const app = {
         document.getElementById('contactBirthdate').value = c.birthdate || '';
         document.getElementById('contactTitle').value = c.title || '';
         document.getElementById('contactLeadSource').value = c.lead_source || '';
+        document.getElementById('contactReferredBy').value = c.referred_by || '';
+        document.getElementById('contactPinned').value = c.pinned || '';
         document.getElementById('contactAssistantName').value = c.assistant_name || '';
         document.getElementById('contactAssistantPhone').value = c.assistant_phone || '';
         document.getElementById('contactInstagram').value = c.instagram || '';
@@ -3707,6 +3740,8 @@ const app = {
                             ${sfField('PE@', c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : null, 'pe_email', 'email')}
                             ${sfField('WE@', c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : null, 'we_email', 'email')}
                             ${sfField('Lead Source', c.lead_source, 'lead_source')}
+                            ${sfField('Referred By', c.referred_by, 'referred_by')}
+                            ${sfField('Profile Completeness', (() => { const pct = this.contactCompleteness(c); const color = pct >= 80 ? 'var(--sf-success)' : pct >= 50 ? 'var(--sf-warning)' : 'var(--sf-error)'; return `<span style="color:${color}; font-weight:600;">${pct}%</span> <span style="font-size:11px; color:var(--sf-text-weakest);">complete</span>`; })())}
                             ${sfField('PC#', c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : null, 'pc_number', 'tel')}
                             ${sfField('WC#', c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : null, 'wc_number', 'tel')}
                             ${sfField('Mobile', c.mobile ? `<a href="tel:${c.mobile}" style="color:var(--sf-brand);">${c.mobile}</a>` : null, 'mobile', 'tel')}
