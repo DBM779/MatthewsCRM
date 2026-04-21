@@ -1178,17 +1178,18 @@ Tone: Professional but personal, not overly formal`;
                 client_id: this.GMAIL_CLIENT_ID,
                 scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
                 callback: (resp) => {
+                    if (resp.error) { alert('Gmail auth error: ' + resp.error); return; }
                     if (resp.access_token) {
                         this._gmailToken = resp.access_token;
                         this._gmailTokenExpiry = Date.now() + (resp.expires_in * 1000);
                         localStorage.setItem('matthewsCRM_gmailToken', resp.access_token);
                         localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
                         this.updateStatus('Gmail connected', true);
-                        if (this.currentView === 'contactDetail') this.renderContactDetail();
-                        if (this.currentView === 'calendar') this.renderCalendar();
+                        this.render();
                     }
-                }
-            }); } catch(e) { console.log('GIS init error:', e); }
+                },
+                error_callback: (err) => { alert('Gmail error: ' + (err.type || err.message || JSON.stringify(err))); }
+            }); } catch(e) { alert('GIS init error: ' + e.message); }
         }
         const saved = localStorage.getItem('matthewsCRM_gmailToken');
         const exp = parseInt(localStorage.getItem('matthewsCRM_gmailExpiry') || '0');
