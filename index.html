@@ -3217,9 +3217,21 @@ Tone: Professional but personal, not overly formal`;
                 </div>
             </div>
             <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(10, 1fr);">
-                <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','')">
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.clearContactFilters();">
                     <div class="label" style="font-size:9px;">Total</div>
                     <div class="value" style="font-size:18px;">${this.fmt(this.data.contacts.length)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Client'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Client'?'':'Client'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Client</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Client')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Colleague'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Colleague'?'':'Colleague'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Colleague</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Colleague')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Service Provider'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Service Provider'?'':'Service Provider'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Service Provider</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Service Provider')).length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
                     <div class="label" style="font-size:9px;">1-VIP</div>
@@ -3228,18 +3240,6 @@ Tone: Professional but personal, not overly formal`;
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
                     <div class="label" style="font-size:9px;">Tier 2</div>
                     <div class="value" style="font-size:18px; color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
-                </div>
-                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Colleague'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Colleague'?'':'Colleague'}'; app.renderContacts();">
-                    <div class="label" style="font-size:9px;">Colleague</div>
-                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Colleague')).length}</div>
-                </div>
-                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Client'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Client'?'':'Client'}'; app.renderContacts();">
-                    <div class="label" style="font-size:9px;">Client</div>
-                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Client')).length}</div>
-                </div>
-                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Service Provider'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Service Provider'?'':'Service Provider'}'; app.renderContacts();">
-                    <div class="label" style="font-size:9px;">Service Provider</div>
-                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Service Provider')).length}</div>
                 </div>
                 <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Family'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Family'?'':'Family'}'; app.renderContacts();">
                     <div class="label" style="font-size:9px;">Family</div>
