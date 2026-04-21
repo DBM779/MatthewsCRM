@@ -530,6 +530,7 @@
                 <div class="form-group"><label>Website</label><input type="url" id="accountWebsite"></div>
                 <div class="form-group"><label>Address</label><input type="text" id="accountAddress"></div>
                 <div class="form-group"><label>Type</label><select id="accountType"><option value="Client">Client</option><option value="Prospect">Prospect</option><option value="Partner">Partner</option><option value="Own Company">Own Company</option><option value="Vendor">Vendor</option><option value="Other">Other</option></select></div>
+                <div class="form-group"><label>Drive Link</label><input type="url" id="accountDriveLink" placeholder="Google Drive URL for account folder"></div>
                 <div class="form-group"><label>Notes</label><textarea id="accountNotes"></textarea></div>
                 <div class="modal-footer"><button type="button" onclick="app.closeModal('modalAccount')">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
             </form>
@@ -548,6 +549,7 @@
                 <div class="form-group"><label>Sector</label><input type="text" id="dealSector"></div>
                 <div class="form-group"><label>Probability (%)</label><input type="number" id="dealProbability" min="0" max="100"></div>
                 <div class="form-group"><label>Close Date</label><input type="date" id="dealCloseDate"></div>
+                <div class="form-group"><label>Drive Link</label><input type="url" id="dealDriveLink" placeholder="Google Drive URL for deal folder/model"></div>
                 <div class="form-group"><label>Fee Structure</label><input type="text" id="dealFeeStructure" placeholder="e.g. $50K retainer + 1.5% success fee"></div>
                 <div class="form-group"><label>Counterparties</label><input type="text" id="dealCounterparties" placeholder="Potential buyers/investors, comma-separated"></div>
                 </div>
@@ -1288,6 +1290,7 @@ const app = {
             website: document.getElementById('accountWebsite').value || null,
             address: document.getElementById('accountAddress').value || null,
             type: document.getElementById('accountType').value,
+            driveLink: document.getElementById('accountDriveLink').value || null,
             notes: document.getElementById('accountNotes').value || null
         };
 
@@ -1314,6 +1317,7 @@ const app = {
             sector: document.getElementById('dealSector').value || null,
             probability: parseInt(document.getElementById('dealProbability').value) || 0,
             closeDate: document.getElementById('dealCloseDate').value || null,
+            driveLink: document.getElementById('dealDriveLink').value || null,
             feeStructure: document.getElementById('dealFeeStructure').value || null,
             counterparties: document.getElementById('dealCounterparties').value || null,
             continuationVehicle: [...document.querySelectorAll('.cv-cb:checked')].map(cb => cb.value).join(', ') || null,
@@ -2155,6 +2159,58 @@ const app = {
         }
     },
 
+    // === Quick Links (reusable for contacts, accounts, deals) ===
+    addQuickLink(type, recordId) {
+        const name = prompt('Link name (e.g. "OneNote - Project Notes", "LBO Model"):');
+        if (!name) return;
+        const url = prompt('URL (Google Drive link, OneNote link, any URL):');
+        if (!url) return;
+        const arr = type === 'contact' ? this.data.contacts : type === 'account' ? this.data.accounts : this.data.deals;
+        const record = arr.find(r => r.id === recordId);
+        if (!record) return;
+        if (!record.quickLinks) record.quickLinks = [];
+        record.quickLinks.push({name, url, added: new Date().toISOString()});
+        this.persist();
+        const col = type === 'contact' ? 'contacts' : type === 'account' ? 'accounts' : 'deals';
+        firestoreUpsert(col, record);
+        this.render();
+    },
+
+    removeQuickLink(type, recordId, idx) {
+        const arr = type === 'contact' ? this.data.contacts : type === 'account' ? this.data.accounts : this.data.deals;
+        const record = arr.find(r => r.id === recordId);
+        if (!record || !record.quickLinks) return;
+        record.quickLinks.splice(idx, 1);
+        this.persist();
+        const col = type === 'contact' ? 'contacts' : type === 'account' ? 'accounts' : 'deals';
+        firestoreUpsert(col, record);
+        this.render();
+    },
+
+    renderQuickLinks(type, record) {
+        const links = record.quickLinks || [];
+        return `<div class="related-list card" style="margin-bottom:12px;">
+            <div class="card-header">
+                <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#4285f4;">🔗</span>
+                Quick Links <span class="related-count">(${links.length})</span>
+                <button class="btn-small" style="margin-left:auto;" onclick="app.addQuickLink('${type}','${record.id}')">Add Link</button>
+            </div>
+            <div style="padding:8px 16px;">
+            ${links.length ? links.map((l, i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                <a href="${l.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">🔗 ${l.name}</a>
+                <div style="display:flex; gap:4px;">
+                    <button class="btn-small" onclick="navigator.clipboard.writeText('${l.url.replace(/'/g,"\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1000);" style="padding:1px 6px; font-size:10px;">Copy</button>
+                    <button class="btn-small" onclick="app.removeQuickLink('${type}','${record.id}',${i})" style="padding:1px 6px; font-size:10px; color:var(--sf-error);">✕</button>
+                </div>
+            </div>`).join('') : '<div style="font-size:12px; color:var(--sf-text-weak);">No links yet. Add Drive folders, OneNote pages, or any URL.</div>'}
+            </div>
+        </div>`;
+    },
+
+    searchGoogleDrive(query) {
+        window.open(`https://drive.google.com/drive/search?q=${encodeURIComponent(query)}`, '_blank');
+    },
+
     addContactFile(contactId) {
         const name = prompt('File name:');
         if (!name) return;
@@ -2532,7 +2588,11 @@ const app = {
                         ${this.data.deals.filter(d => d.stage === stage).map(d => `
                             <div class="kanban-card" onclick="app.editDeal('${d.id}')">
                                 <div class="kanban-card-title">${d.name}</div>
-                                <div class="kanban-card-meta">$${d.value}M · ${d.probability}%</div>
+                                <div class="kanban-card-meta">$${d.value}M · ${d.probability}%${d.continuationVehicle ? ' · '+d.continuationVehicle.split(',')[0] : ''}</div>
+                                <div style="display:flex; gap:4px; margin-top:4px;">
+                                    ${d.driveLink ? `<a href="${d.driveLink}" target="_blank" onclick="event.stopPropagation();" style="font-size:10px; color:var(--sf-brand);">📁 Drive</a>` : ''}
+                                    <a href="#" onclick="event.stopPropagation(); event.preventDefault(); app.searchGoogleDrive('${(d.name||'').replace(/'/g,"\\'")}');" style="font-size:10px; color:var(--sf-brand);">🔍 Search</a>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
@@ -4005,6 +4065,11 @@ const app = {
         if (totalCount > this._searchResults.length) {
             html += `<div onclick="app.fullSearch('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; text-align:center; cursor:pointer; font-size:12px; color:var(--sf-brand); font-weight:600; background:var(--sf-bg);">View all ${totalCount} results →</div>`;
         }
+        html += `<div onclick="app.searchGoogleDrive('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--sf-border-weak); background:var(--sf-bg-alt);">
+            <span style="font-size:16px;">🔍</span> <span style="color:var(--sf-brand); font-weight:500;">Search Google Drive for "${term}"</span>
+        </div>`;
+        if (false) {
+        }
 
         dd.innerHTML = html;
         dd.style.display = 'block';
@@ -4238,6 +4303,7 @@ const app = {
                             </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No events.</div>'}
                             </div>
                         </div>
+                        ${this.renderQuickLinks('contact', c)}
                         <div class="related-list card">
                             <div class="card-header">
                                 <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
@@ -4451,6 +4517,7 @@ const app = {
         document.getElementById('accountWebsite').value = '';
         document.getElementById('accountAddress').value = '';
         document.getElementById('accountType').value = 'Prospect';
+        document.getElementById('accountDriveLink').value = '';
         document.getElementById('accountNotes').value = '';
         this.openModal('modalAccount');
     },
@@ -4464,6 +4531,7 @@ const app = {
         document.getElementById('accountWebsite').value = account.website || '';
         document.getElementById('accountAddress').value = account.address || '';
         document.getElementById('accountType').value = account.type || 'Prospect';
+        document.getElementById('accountDriveLink').value = account.driveLink || '';
         document.getElementById('accountNotes').value = account.notes || '';
         this.openModal('modalAccount');
     },
@@ -4584,6 +4652,7 @@ const app = {
         document.getElementById('dealSector').value = '';
         document.getElementById('dealProbability').value = '';
         document.getElementById('dealCloseDate').value = '';
+        document.getElementById('dealDriveLink').value = '';
         document.getElementById('dealFeeStructure').value = '';
         document.getElementById('dealCounterparties').value = '';
         document.getElementById('dealTechNotes').value = '';
@@ -4603,6 +4672,7 @@ const app = {
         document.getElementById('dealSector').value = deal.sector || '';
         document.getElementById('dealProbability').value = deal.probability || '';
         document.getElementById('dealCloseDate').value = deal.closeDate || '';
+        document.getElementById('dealDriveLink').value = deal.driveLink || '';
         document.getElementById('dealFeeStructure').value = deal.feeStructure || '';
         document.getElementById('dealCounterparties').value = deal.counterparties || '';
         document.getElementById('dealTechNotes').value = deal.techNotes || '';
