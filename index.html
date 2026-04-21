@@ -920,7 +920,7 @@ const cloudSync = {
             try {
                 const snap = await firestore.collection(`${p}/${c}`).get();
                 data[c] = snap.docs.map(d => ({...d.data(), id: d.id}));
-            } catch { data[c] = []; }
+            } catch { data[c] = null; }
         }
         return data;
     },
@@ -1447,7 +1447,11 @@ Tone: Professional but personal, not overly formal`;
                     emails: saved.emails || [],
                     referrals: saved.referrals || [],
                     dealContacts: saved.dealContacts || [],
-                    events: saved.events || []
+                    events: saved.events || [],
+                    investors: saved.investors || [],
+                    _connections: saved._connections || [],
+                    _auditLog: saved._auditLog || [],
+                    _fund: saved._fund || null
                 };
             } else {
                 this.data = this.getSeedData();
@@ -1519,7 +1523,13 @@ Tone: Professional but personal, not overly formal`;
         if (d.emails) { this.data.emails = [...this.data.emails, ...d.emails]; }
         if (d.referrals) { this.data.referrals = [...this.data.referrals, ...d.referrals]; }
         if (d.events) { this.data.events = [...this.data.events, ...d.events]; }
+        if (d.dealContacts) { this.data.dealContacts = [...this.data.dealContacts, ...d.dealContacts]; }
+        if (d.investors) { this.data.investors = [...(this.data.investors||[]), ...d.investors]; }
+        if (d._connections) { this.data._connections = [...(this.data._connections||[]), ...d._connections]; }
+        if (d._auditLog) { this.data._auditLog = [...(this.data._auditLog||[]), ...d._auditLog].slice(0,500); }
+        if (d._fund) { this.data._fund = d._fund; }
         this.persist();
+        if (cloudSync.isSignedIn()) cloudSync.pushAll(this.data).catch(() => {});
         this.updateSelectOptions();
         this.render();
         this.bgGeocodeAll();
@@ -1892,7 +1902,7 @@ Tone: Professional but personal, not overly formal`;
             {id: 'act-3', type: 'Meeting', subject: 'Discovery call', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-22', status: 'Open', notes: '', createdAt: new Date().toISOString()}
         ];
 
-        return {contacts, accounts, deals, activities, emails: [], referrals: [], dealContacts: []};
+        return {contacts, accounts, deals, activities, emails: [], referrals: [], dealContacts: [], events: [], investors: [], _connections: [], _auditLog: [], _fund: null};
     },
 
     navigate(view) {
@@ -3551,7 +3561,7 @@ Tone: Professional but personal, not overly formal`;
             status: document.getElementById('eventStatus').value,
             start: document.getElementById('eventStart').value || null,
             end: document.getElementById('eventEnd').value || null,
-            location: document.getElementById('eventAddress').value || null,
+            address: document.getElementById('eventAddress').value || null,
             accountId: document.getElementById('eventAccount').value || null,
             contactId: document.getElementById('eventContact').value || null,
             attendees: document.getElementById('eventAttendees').value || null,
@@ -4298,6 +4308,7 @@ Tone: Professional but personal, not overly formal`;
         const evt = this.data.events.find(x => x.id === eventId);
         if (!evt) return;
         evt[field] = value || null;
+        firestoreUpsert('events', evt);
         this.persist();
         this.renderEventDetail();
     },
@@ -4324,6 +4335,7 @@ Tone: Professional but personal, not overly formal`;
         const contact = this.data.contacts.find(c => c.id === contactId);
         if (!contact) return;
         contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
         this.persist();
         this.renderEventDetail();
     },
@@ -7596,6 +7608,8 @@ app.navigate = function(view) {
     }
 };
 
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
+window.addEventListener('beforeunload', () => { if (app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
 document.addEventListener('DOMContentLoaded', async () => {
     // Auto-sync: if #sync in URL, fetch data from local sync server
     if (location.hash === '#sync') {
