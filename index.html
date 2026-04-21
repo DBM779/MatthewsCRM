@@ -9,6 +9,7 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
     <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ&libraries=marker,places&v=weekly&callback=Function.prototype"></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -710,67 +711,54 @@
 // === Data layer: localStorage + Firebase cloud sync ===
 const STORAGE_KEY = 'matthewsCRM';
 
-const FIREBASE_DB_URL = 'https://tmc-crm-f3728-default-rtdb.firebaseio.com';
-
-// Initialize Firebase Auth
+// Initialize Firebase
 const firebaseApp = firebase.initializeApp({
     apiKey: 'AIzaSyA_IapeHu77M0gt1GY6wbwqeweNdoHibAQ',
     authDomain: 'tmc-crm-f3728.firebaseapp.com',
-    databaseURL: FIREBASE_DB_URL,
     projectId: 'tmc-crm-f3728'
 });
 const firebaseAuth = firebase.auth();
+const firestore = firebase.firestore();
+firestore.enablePersistence({synchronizeTabs: true}).catch(() => {});
 
 const cloudSync = {
     _pendingSync: false,
-    _uid: null,
-
-    async getToken() {
-        const user = firebaseAuth.currentUser;
-        if (!user) return null;
-        this._uid = user.uid;
-        return await user.getIdToken();
-    },
 
     async signIn() {
         const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({prompt: 'select_account'});
-        try {
-            await firebaseAuth.signInWithPopup(provider);
-            return true;
-        } catch { return false; }
+        try { await firebaseAuth.signInWithPopup(provider); return true; } catch { return false; }
     },
 
     isSignedIn() { return !!firebaseAuth.currentUser; },
 
+    _userDoc() {
+        const user = firebaseAuth.currentUser;
+        if (!user) return null;
+        return firestore.collection('users').doc(user.uid);
+    },
+
     async push(data) {
-        const token = await this.getToken();
-        if (!token) return false;
+        const doc = this._userDoc();
+        if (!doc) return false;
         try {
-            const res = await fetch(`${FIREBASE_DB_URL}/users/${this._uid}/crm.json?auth=${token}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({data: data, updated_at: new Date().toISOString()})
-            });
-            return res.ok;
+            await doc.set({data: data, updated_at: firebase.firestore.FieldValue.serverTimestamp()}, {merge: true});
+            return true;
         } catch { return false; }
     },
 
     async pull() {
-        const token = await this.getToken();
-        if (!token) return null;
+        const doc = this._userDoc();
+        if (!doc) return null;
         try {
-            const res = await fetch(`${FIREBASE_DB_URL}/users/${this._uid}/crm.json?auth=${token}`);
-            if (!res.ok) return null;
-            const result = await res.json();
-            if (result && result.data) return result.data;
+            const snap = await doc.get();
+            if (snap.exists && snap.data()?.data) return snap.data().data;
         } catch {}
         return null;
     },
 
     debouncedPush(data) {
         if (this._pendingSync) clearTimeout(this._pendingSync);
-        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 5000);
+        this._pendingSync = setTimeout(() => { this.push(data); this._pendingSync = false; }, 3000);
     }
 };
 
