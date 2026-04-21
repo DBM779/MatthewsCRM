@@ -1407,6 +1407,21 @@ Tone: Professional but personal, not overly formal`;
                 await cloudSync.pushAll(this.data);
                 this.updateStatus('Synced', true);
             }
+            // Load meta data (investors, fund, connections, audit log)
+            try {
+                const metaCol = cloudSync.col('meta');
+                if (metaCol) {
+                    const metaDoc = await metaCol.doc('appMeta').get();
+                    if (metaDoc.exists) {
+                        const m = metaDoc.data();
+                        if (m.investors?.length && !this.data.investors?.length) this.data.investors = m.investors;
+                        if (m._fund && !this.data._fund) this.data._fund = m._fund;
+                        if (m._connections?.length && !this.data._connections?.length) this.data._connections = m._connections;
+                        if (m._auditLog?.length && !this.data._auditLog?.length) this.data._auditLog = m._auditLog;
+                        db.save(this.data);
+                    }
+                }
+            } catch {}
             // Start real-time listeners for live sync between devices
             cloudSync.startListening((colName, items) => {
                 if (items.length && JSON.stringify(this.data[colName]) !== JSON.stringify(items)) {
@@ -1475,6 +1490,23 @@ Tone: Professional but personal, not overly formal`;
             this.updateStatus('●', true);
             this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 2000);
         }
+        this._syncMeta();
+    },
+
+    _syncMetaTimer: null,
+    _syncMeta() {
+        clearTimeout(this._syncMetaTimer);
+        this._syncMetaTimer = setTimeout(() => {
+            const col = cloudSync.col('meta');
+            if (!col) return;
+            const meta = {};
+            if (this.data.investors?.length) meta.investors = this.data.investors;
+            if (this.data._fund) meta._fund = this.data._fund;
+            if (this.data._connections?.length) meta._connections = this.data._connections;
+            if (this.data._auditLog?.length) meta._auditLog = this.data._auditLog.slice(0, 200);
+            const clean = JSON.parse(JSON.stringify(meta));
+            col.doc('appMeta').set(clean, {merge: true}).catch(() => {});
+        }, 3000);
     },
 
     importJsonData(jsonData) {
@@ -6613,7 +6645,7 @@ Tone: Professional but personal, not overly formal`;
                             ${deals.length ? `<table><thead><tr><th>Process Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
                                 ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')">
                                     <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
-                                    <td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td>
+                                    <td><span class="badge stage-${(d.stage||'').replace(/\s/g,'').toLowerCase()}">${d.stage||''}</span></td>
                                     <td>$${(d.value||0).toFixed(1)}M</td>
                                     <td>${d.closeDate || d.close_date || '—'}</td>
                                 </tr>`).join('')}
@@ -6995,12 +7027,12 @@ Tone: Professional but personal, not overly formal`;
                     </div>
                     <div id="adContacts">
                         ${contacts.length ? `<table><thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Tier</th></tr></thead><tbody>
-                            ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:#3b82f6; font-weight:500;">${c.name}</td><td>${c.email||''}</td><td>${c.mobile||''}</td><td><span class="badge tier-${c.tier.replace('-','').toLowerCase()}">${c.tier}</span></td></tr>`).join('')}
+                            ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:#3b82f6; font-weight:500;">${c.name}</td><td>${c.email||''}</td><td>${c.mobile||''}</td><td><span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span></td></tr>`).join('')}
                         </tbody></table>` : '<p class="text-muted">No contacts linked to this account</p>'}
                     </div>
                     <div id="adDeals" style="display:none;">
                         ${deals.length ? `<table><thead><tr><th>Deal</th><th>Stage</th><th>Value</th><th>Close Date</th></tr></thead><tbody>
-                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${d.stage.replace(/\s/g,'').toLowerCase()}">${d.stage}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
+                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${(d.stage||'').replace(/\s/g,'').toLowerCase()}">${d.stage||''}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
                         </tbody></table>` : '<p class="text-muted">No deals for this account</p>'}
                     </div>
                     <div id="adActivities" style="display:none;">
@@ -7026,7 +7058,7 @@ Tone: Professional but personal, not overly formal`;
                                 ${['Oncor Account #','Appliance Models','Room Dimensions','Property Notes','Insurance Policy #','HOA Contact','Mortgage Lender','Property Tax ID'].map(label => {
                                     const key = 'asset_' + label.toLowerCase().replace(/[^a-z0-9]/g,'_');
                                     const val = (a.assets||{})[key] || '';
-                                    return `<div><div style="font-size:11px; color:var(--sf-text-weak); margin-bottom:2px;">${label}</div><div style="font-size:13px; cursor:pointer; min-height:20px; ${!val?'color:var(--sf-text-weakest);':''}" onclick="const v=prompt('${label}:','${val.replace(/'/g,"\\'")}'); if(v!==null){const acct=app.data.accounts.find(x=>x.id==='${a.id}'); if(!acct.assets) acct.assets={}; acct.assets['${key}']=v; app.persist(); firestoreUpsert('accounts',acct); app.renderAccountDetail();}">${val || 'Click to add'}</div></div>`;
+                                    return `<div><div style="font-size:11px; color:var(--sf-text-weak); margin-bottom:2px;">${label}</div><div style="font-size:13px; cursor:pointer; min-height:20px; ${!val?'color:var(--sf-text-weakest);':''}" onclick="const v=prompt('${label.replace(/'/g,"\\'")}:','${val.replace(/'/g,"\\'")}'); if(v!==null){const acct=app.data.accounts.find(x=>x.id==='${a.id}'); if(!acct.assets) acct.assets={}; acct.assets['${key}']=v; app.persist(); firestoreUpsert('accounts',acct); app.renderAccountDetail();}">${val || 'Click to add'}</div></div>`;
                                 }).join('')}
                             </div>
                         </div>
