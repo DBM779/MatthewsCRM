@@ -4,8 +4,11 @@ const pool = new Pool({
   user: 'postgres',
   password: 'Davimatt311414!',
   database: 'matthews_crm',
-  host: '/cloudsql/tmc-crm-f3728:us-central1:crm-db',
+  host: process.env.NODE_ENV === 'production' ? '/cloudsql/tmc-crm-f3728:us-central1:crm-db' : '/cloudsql/tmc-crm-f3728:us-central1:crm-db',
+  connectionTimeoutMillis: 10000,
 });
+
+pool.on('error', (err) => { console.error('Pool error:', err.message); });
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS accounts (

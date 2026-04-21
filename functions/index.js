@@ -3,6 +3,9 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 const { pool, initDb } = require('./db');
 
+// Set Cloud SQL instance for all functions
+const runtimeOpts = { memory: '256MB', timeoutSeconds: 60 };
+
 // Verify Firebase Auth token
 async function verifyAuth(req, res) {
   const auth = req.headers.authorization;
@@ -13,7 +16,7 @@ async function verifyAuth(req, res) {
 }
 
 // Generic CRUD API for any table
-exports.api = functions.https.onRequest(async (req, res) => {
+exports.api = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -85,7 +88,7 @@ exports.api = functions.https.onRequest(async (req, res) => {
 });
 
 // Bulk data endpoint for initial load and migration
-exports.bulk = functions.https.onRequest(async (req, res) => {
+exports.bulk = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -135,7 +138,7 @@ exports.bulk = functions.https.onRequest(async (req, res) => {
 });
 
 // Health check / setup verification
-exports.health = functions.https.onRequest(async (req, res) => {
+exports.health = functions.runWith(runtimeOpts).https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
     await initDb();
