@@ -2,7 +2,7 @@
   "name": "functions",
   "description": "Matthews CRM Cloud Functions",
   "scripts": {"serve": "firebase emulators:start --only functions", "deploy": "firebase deploy --only functions"},
-  "engines": {"node": "18"},
+  "engines": {"node": "22"},
   "main": "index.js",
   "dependencies": {
     "firebase-admin": "^11.8.0",
