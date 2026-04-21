@@ -387,6 +387,12 @@
         .mobile-list-item .ml-sub {font-size: 11px; color: var(--sf-text-weak); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
         .mobile-list-item .ml-right {text-align: right; flex-shrink: 0;}
         .mobile-list-item .ml-badge {display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600;}
+        .mobile-list-item .ml-actions {display: flex; gap: 8px; margin-top: 4px;}
+        .mobile-list-item .ml-action {display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-size: 15px; text-decoration: none;}
+        .ml-action-call {background: #e8f5e9; color: #2e7d32;}
+        .ml-action-text {background: #e8f5e9; color: #2e7d32;}
+        .ml-action-email {background: #e8eaf6; color: #3949ab;}
+        .ml-action-ig {background: #fce4ec; color: #c2185b;}
     </style>
 </head>
 <body>
@@ -2068,15 +2074,22 @@ const app = {
                 ${sorted.map(c => {
                     const initials = (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
                     const tierColor = c.tier === '1-VIP' ? '#166534' : c.tier === '2' ? '#1e40af' : '#94a3b8';
-                    return `<div class="mobile-list-item" onclick="app.viewContact('${c.id}')">
-                        <div class="ml-avatar" style="background:${tierColor};">${initials}</div>
-                        <div class="ml-info">
-                            <div class="ml-name">${c.name}</div>
-                            <div class="ml-sub">${c.pc_number||c.mobile||''} ${c._company ? '· '+c._company : ''}</div>
+                    const phone = c.pc_number||c.mobile||c.wc_number||c.phone||'';
+                    const email = c.pe_email||c.we_email||'';
+                    return `<div class="mobile-list-item">
+                        <div class="ml-avatar" style="background:${tierColor};" onclick="app.viewContact('${c.id}')">${initials}</div>
+                        <div class="ml-info" onclick="app.viewContact('${c.id}')">
+                            <div class="ml-name">${c.pinned?'⭐ ':''}${c.name}</div>
+                            <div class="ml-sub">${c._company||''} ${c.obligation ? '· '+c.obligation.split(',')[0].trim() : ''}</div>
+                            <div class="ml-actions">
+                                ${phone ? `<a href="tel:${phone}" class="ml-action ml-action-call" onclick="event.stopPropagation();">📞</a>` : ''}
+                                ${phone ? `<a href="sms:${phone}" class="ml-action ml-action-text" onclick="event.stopPropagation();">💬</a>` : ''}
+                                ${email ? `<a href="mailto:${email}" class="ml-action ml-action-email" onclick="event.stopPropagation();">📧</a>` : ''}
+                                ${c.instagram ? `<a href="https://instagram.com/${c.instagram.replace('@','')}" target="_blank" class="ml-action ml-action-ig" onclick="event.stopPropagation();">📷</a>` : ''}
+                            </div>
                         </div>
-                        <div class="ml-right">
+                        <div class="ml-right" onclick="app.viewContact('${c.id}')">
                             <div class="ml-badge" style="background:${c.tier==='1-VIP'?'#dcfce7':c.tier==='2'?'#dbeafe':'#f3f4f6'}; color:${tierColor};">${c.tier||'5'}</div>
-                            ${c.pinned ? '<div style="font-size:10px; text-align:center; margin-top:2px;">⭐</div>' : ''}
                         </div>
                     </div>`;
                 }).join('')}
@@ -2218,7 +2231,18 @@ const app = {
                 </div>
             </div>
         `;
-        document.getElementById('content').innerHTML = html;
+        // Mobile accounts list
+        const mobileAccts = `<div class="mobile-list">${sorted.map(a => `<div class="mobile-list-item" onclick="app.viewAccount('${a.id}')">
+            <div class="ml-avatar" style="background:#7f8de1;">${(a.name||'').split(' ').filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase()||'A'}</div>
+            <div class="ml-info">
+                <div class="ml-name">${a.name}</div>
+                <div class="ml-sub">${a.type||''} ${a.industry ? '· '+a.industry : ''}</div>
+            </div>
+            <div class="ml-right">
+                <div style="font-size:12px; font-weight:600; color:var(--sf-brand);">${a._conCount} 👤</div>
+            </div>
+        </div>`).join('')}</div>`;
+        document.getElementById('content').innerHTML = html + mobileAccts;
     },
 
     renderDeals() {
@@ -2432,6 +2456,24 @@ const app = {
                         </tbody>
                     </table>
                 </div>
+            </div>
+            <!-- Mobile event list -->
+            <div class="mobile-list">
+                ${sorted.map(e => {
+                    const ti = {Meeting:'📅',Conference:'🏛️',Lunch:'🍽️',Dinner:'🍷',Call:'📞',Presentation:'📊',Networking:'🤝',Other:'📋'};
+                    const startStr = e.start ? new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+                    return `<div class="mobile-list-item" onclick="app.viewEvent('${e.id}')">
+                        <div class="ml-avatar" style="background:#fff3e0; color:#e65100; font-size:18px;">${ti[e.type]||'📋'}</div>
+                        <div class="ml-info">
+                            <div class="ml-name">${e.name||'(no name)'}</div>
+                            <div class="ml-sub">${startStr} ${e.address ? '· '+e.address : ''}</div>
+                        </div>
+                        <div class="ml-right">
+                            <div style="font-size:11px; color:${e.status==='Scheduled'?'var(--sf-brand)':'var(--sf-success)'}; font-weight:600;">${e.status||''}</div>
+                            <div style="font-size:10px; color:var(--sf-text-weakest);">${e._contactCount||0} 👤</div>
+                        </div>
+                    </div>`;
+                }).join('')}
             </div>
         `;
         document.getElementById('content').innerHTML = html;
