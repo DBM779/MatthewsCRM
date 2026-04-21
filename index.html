@@ -1837,6 +1837,78 @@ const app = {
                     </div>
                 </div>
             </div>
+
+            <!-- TODAY'S ACTION PLAN -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px; border-left:4px solid var(--sf-brand);">
+                <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:15px;">📋 Today's Action Plan</div>
+                <div style="padding:12px 16px;">
+                    ${(() => {
+                        const getDSLA2 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                        const reachOut = this.data.contacts.filter(c => c.tier === '1-VIP' && getDSLA2(c) >= 14 && getDSLA2(c) < 90).sort((a,b) => getDSLA2(b)-getDSLA2(a)).slice(0,5);
+                        const todayEvents = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start.slice(0,10) === todayStr);
+                        const bdaySoon = this.data.contacts.filter(c => {
+                            if (!c.birthdate) return false;
+                            const bd = new Date(c.birthdate);
+                            const ty = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+                            if (ty < today) ty.setFullYear(ty.getFullYear()+1);
+                            return (ty - today) / 86400000 <= 7 && (ty - today) / 86400000 >= 0;
+                        });
+                        let actions = [];
+                        if (todayEvents.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-brand); margin-bottom:6px;">📅 Today's Events</div>${todayEvents.map(e => `<div style="padding:4px 0; font-size:13px;"><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${e.name}</a> <span style="color:var(--sf-text-weak); font-size:11px;">${e.start ? new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : ''}</span></div>`).join('')}</div>`);
+                        if (reachOut.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:6px;">📞 Reach Out Today</div>${reachOut.map(c => { const phone = c.pc_number||c.mobile||c.wc_number||''; return `<div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><div style="display:flex; gap:6px; align-items:center;"><span style="font-size:11px; color:var(--sf-error);">${getDSLA2(c)}D</span>${phone ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${phone}');" style="font-size:14px; text-decoration:none;">📞</a><a href="#" onclick="event.preventDefault(); app.logTextFromTap('${c.id}','${phone}');" style="font-size:14px; text-decoration:none;">💬</a>` : ''}</div></div>`; }).join('')}</div>`);
+                        if (bdaySoon.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:6px;">🎂 Birthdays This Week</div>${bdaySoon.map(c => `<div style="padding:4px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a> <span style="font-size:11px; color:var(--sf-text-weak);">${new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></div>`).join('')}</div>`);
+                        if (!actions.length) actions.push('<div style="text-align:center; padding:12px; color:var(--sf-text-weak); font-size:13px;">✅ You\'re all caught up!</div>');
+                        return actions.join('');
+                    })()}
+                </div>
+            </div>
+
+            <!-- RELATIONSHIP HEALTH -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:12px;">
+                ${(() => {
+                    const getDSLA3 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                    const active = this.data.contacts.filter(c => getDSLA3(c) <= 30).length;
+                    const warming = this.data.contacts.filter(c => getDSLA3(c) > 30 && getDSLA3(c) <= 90).length;
+                    const cold = this.data.contacts.filter(c => getDSLA3(c) > 90).length;
+                    const total = this.data.contacts.length || 1;
+                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:4px;">Active (≤30D)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-success);">${active}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(active/total*100)}%</div>
+                    </div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-warning); margin-bottom:4px;">Cooling (30-90D)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-warning);">${warming}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(warming/total*100)}%</div>
+                    </div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:4px;">Cold (90D+)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-error);">${cold}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(cold/total*100)}%</div>
+                    </div>`;
+                })()}
+            </div>
+
+            <!-- THIS WEEK -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📊 This Week</div>
+                <div style="padding:12px 16px;">
+                    ${(() => {
+                        const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate()-7);
+                        const weekStr = weekAgo.toISOString().split('T')[0];
+                        const weekActs = this.data.activities.filter(a => (a.dueDate||a.due_date||a.createdAt||'') >= weekStr);
+                        const byType = {};
+                        weekActs.forEach(a => { byType[a.type] = (byType[a.type]||0)+1; });
+                        const ti = {Call:'📞',Text:'💬',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+                        const uniq = new Set(weekActs.map(a => a.contactId||a.contact_id).filter(Boolean)).size;
+                        return `<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px;">
+                            <div><span style="font-size:20px; font-weight:600;">${weekActs.length}</span> <span style="font-size:12px; color:var(--sf-text-weak);">activities</span></div>
+                            <div><span style="font-size:20px; font-weight:600;">${uniq}</span> <span style="font-size:12px; color:var(--sf-text-weak);">contacts touched</span></div>
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">${Object.entries(byType).map(([t,n]) => `<span style="background:var(--sf-bg); padding:3px 8px; border-radius:12px; font-size:11px;">${ti[t]||''} ${t}: ${n}</span>`).join('')}</div>`;
+                    })()}
+                </div>
+            </div>
         `;
         document.getElementById('content').innerHTML = html;
     },
