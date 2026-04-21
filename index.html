@@ -1196,10 +1196,27 @@ Tone: Professional but personal, not overly formal`;
         if (saved && exp > Date.now()) { this._gmailToken = saved; this._gmailTokenExpiry = exp; }
     },
 
-    connectGmail() {
-        if (!this._gmailClient) { this.initGmail(); }
-        if (this._gmailClient) { this._gmailClient.requestAccessToken(); }
-        else { alert('Google library still loading. Please wait a moment and try again.'); }
+    async connectGmail() {
+        try {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+            provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+            provider.addScope('https://www.googleapis.com/auth/calendar.events');
+            const result = await firebaseAuth.signInWithPopup(provider);
+            const credential = result.credential;
+            if (credential && credential.accessToken) {
+                this._gmailToken = credential.accessToken;
+                this._gmailTokenExpiry = Date.now() + 3600000;
+                localStorage.setItem('matthewsCRM_gmailToken', credential.accessToken);
+                localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                this.updateStatus('Gmail connected', true);
+                this.render();
+            }
+        } catch(e) {
+            if (e.code === 'auth/popup-blocked') alert('Popup blocked. Please allow popups for this site.');
+            else if (e.code === 'auth/cancelled-popup-request') {}
+            else alert('Gmail connect error: ' + (e.message || e.code));
+        }
     },
 
     isGmailConnected() { return this._gmailToken && this._gmailTokenExpiry > Date.now(); },
