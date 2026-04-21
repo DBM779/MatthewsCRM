@@ -618,7 +618,8 @@
                 </div>
                 <div class="form-group"><label>Mailing Address</label><input type="text" id="contactAddress"></div>
                 <div class="form-group"><label>Last Activity</label><input type="date" id="contactLA"></div>
-                <div class="form-group"><label>Instagram</label><input type="text" id="contactInstagram"></div>
+                <div class="form-group"><label>Instagram Handle</label><input type="text" id="contactInstagram" placeholder="@handle"></div>
+                <div class="form-group"><label>Facebook Profile URL</label><input type="url" id="contactFacebook" placeholder="https://facebook.com/..."></div>
                 <div class="form-group"><label>LinkedIn URL</label><input type="url" id="contactLinkedin"></div>
                 <div class="form-group"><label>LinkedIn Profile</label><input type="text" id="contactLinkedinProfile"></div>
                 <div class="form-group"><label>LISN Profile</label><input type="text" id="contactLisnProfile"></div>
@@ -1537,6 +1538,133 @@ Tone: Professional but personal, not overly formal`;
         return {accounts: (d.accounts||[]).length, contacts: (d.contacts||[]).length, deals: (d.deals||[]).length, activities: (d.activities||[]).length};
     },
 
+    _fuzzyMatch(name1, name2) {
+        if (!name1 || !name2) return false;
+        const a = name1.toLowerCase().trim(), b = name2.toLowerCase().trim();
+        if (a === b) return true;
+        if (a.includes(b) || b.includes(a)) return true;
+        const aParts = a.split(/\s+/), bParts = b.split(/\s+/);
+        if (aParts.length >= 2 && bParts.length >= 2 && aParts[0] === bParts[0] && aParts[aParts.length-1] === bParts[bParts.length-1]) return true;
+        return false;
+    },
+
+    async importInstagramData(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading Instagram data...</div>';
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            let matched = 0, created = 0, messages = 0;
+
+            const followers = data.followers || data.relationships_followers || [];
+            const following = data.following || data.relationships_following || [];
+            const inbox = data.inbox || data.messages || [];
+
+            const allUsers = [];
+            const extract = (list, key) => {
+                (Array.isArray(list) ? list : list[key] || []).forEach(item => {
+                    const val = item.string_list_data || item.value || item;
+                    const name = typeof val === 'string' ? val : (val[0]?.value || val.username || item.username || item.name || '');
+                    const href = typeof val === 'object' && val[0]?.href ? val[0].href : '';
+                    const ts = typeof val === 'object' && val[0]?.timestamp ? val[0].timestamp : null;
+                    if (name) allUsers.push({name: name.replace(/_/g,' '), username: name, href, ts});
+                });
+            };
+            extract(followers, 'relationships_followers');
+            extract(following, 'relationships_following');
+
+            const seen = new Set();
+            allUsers.forEach(u => {
+                if (seen.has(u.username)) return;
+                seen.add(u.username);
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, u.name) || (c.instagram && c.instagram.replace('@','').toLowerCase() === u.username.toLowerCase()));
+                if (existing) {
+                    if (!existing.instagram) existing.instagram = u.username;
+                    matched++;
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name: u.name, instagram: u.username, tier: '5', tags: 'Instagram Import', createdAt: new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    created++;
+                }
+            });
+
+            if (Array.isArray(inbox)) {
+                inbox.forEach(thread => {
+                    const participants = thread.participants || [];
+                    const msgs = thread.messages || thread.conversation || [];
+                    const otherName = participants.find(p => p.name !== 'You')?.name || participants[0]?.name || '';
+                    const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, otherName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === otherName.toLowerCase()));
+                    if (contact && msgs.length) {
+                        if (!contact.ig_messages) contact.ig_messages = [];
+                        msgs.slice(0, 50).forEach(m => {
+                            const msgText = m.content || m.text || '';
+                            const sender = m.sender_name || m.sender || '';
+                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : (m.timestamp ? new Date(m.timestamp * 1000).toISOString() : '');
+                            if (msgText) {
+                                contact.ig_messages.push({from: sender, text: msgText.slice(0, 500), date: ts});
+                                messages++;
+                            }
+                        });
+                        contact.ig_messages = contact.ig_messages.slice(-100);
+                        firestoreUpsert('contacts', contact);
+                    }
+                });
+            }
+
+            this.persist();
+            this.updateSelectOptions();
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Instagram import complete: ' + matched + ' matched, ' + created + ' new contacts, ' + messages + ' messages imported</div>';
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Instagram data download.</div>';
+        }
+    },
+
+    async importFacebookData(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading Facebook data...</div>';
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            let matched = 0, created = 0;
+
+            const friends = data.friends || data.friends_v2 || [];
+            const friendsList = Array.isArray(friends) ? friends : (friends.friends || friends.friends_v2 || []);
+
+            friendsList.forEach(f => {
+                const name = f.name || (f.friend_display_name) || '';
+                const ts = f.timestamp ? new Date(f.timestamp * 1000).toISOString() : '';
+                if (!name) return;
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name));
+                if (existing) {
+                    if (!existing.facebook && f.profile_uri) existing.facebook = f.profile_uri;
+                    matched++;
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-fb-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, facebook: f.profile_uri || null, tier: '5', tags: 'Facebook Import', createdAt: ts || new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    created++;
+                }
+            });
+
+            const profile = data.profile || data.profile_v2 || {};
+            if (profile.birthday) {
+                const me = this.data.contacts.find(c => c.name && c.name.includes('Matthews'));
+                if (me && !me.birthdate) me.birthdate = profile.birthday;
+            }
+
+            this.persist();
+            this.updateSelectOptions();
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Facebook import complete: ' + matched + ' matched, ' + created + ' new contacts created</div>';
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Facebook data download.</div>';
+        }
+    },
+
     async bgGeocodeAll() {
         const cache = this._loadGeocodeCache();
         const items = [...this.data.contacts, ...this.data.accounts, ...this.data.events].filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
@@ -1599,6 +1727,7 @@ Tone: Professional but personal, not overly formal`;
             assistant_name: document.getElementById('contactAssistantName').value || null,
             assistant_phone: document.getElementById('contactAssistantPhone').value || null,
             instagram: document.getElementById('contactInstagram').value || null,
+            facebook: document.getElementById('contactFacebook').value || null,
             linkedin: document.getElementById('contactLinkedin').value || null,
             linkedin_profile: document.getElementById('contactLinkedinProfile').value || null,
             lisn_profile: document.getElementById('contactLisnProfile').value || null,
@@ -2396,6 +2525,7 @@ Tone: Professional but personal, not overly formal`;
         {key:'la', label:'LA', editable:false},
         {key:'_dsla', label:'DSLA', editable:false},
         {key:'instagram', label:'Instagram', editable:true, type:'text'},
+        {key:'facebook', label:'Facebook', editable:true, type:'url'},
         {key:'linkedin', label:'LinkedIn', editable:true, type:'url'},
         {key:'obligation', label:'Obligation', editable:true, type:'multi-obligation'},
         {key:'notes', label:'Notes', editable:true, type:'text'},
@@ -6338,6 +6468,16 @@ Tone: Professional but personal, not overly formal`;
                     <button class="btn-primary" onclick="app.openModal('modalJsonImport')">Restore from JSON Backup</button>
                 </div>
 
+                <h3 style="margin-top:24px;">Social Media Import</h3>
+                <div style="font-size:12px; color:var(--sf-text-weak); margin-bottom:8px;">Import your Instagram and Facebook data exports (JSON format). Go to Settings → Download Your Information on each platform.</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <button class="btn-primary" onclick="document.getElementById('igImportFile').click();">📷 Import Instagram Data</button>
+                    <input type="file" id="igImportFile" accept=".json,.zip" style="display:none;" onchange="app.importInstagramData(this.files[0])">
+                    <button class="btn-primary" onclick="document.getElementById('fbImportFile').click();">📘 Import Facebook Data</button>
+                    <input type="file" id="fbImportFile" accept=".json,.zip" style="display:none;" onchange="app.importFacebookData(this.files[0])">
+                </div>
+                <div id="socialImportStatus"></div>
+
                 <h3 style="margin-top:24px;">iPhone Sync</h3>
                 <div style="font-size:13px; line-height:1.6; background:var(--sf-bg); padding:12px; border-radius:4px;">
                     <strong>Import from iPhone:</strong> Mac Contacts → select all (Cmd+A) → drag to desktop → Import vCard above.<br>
@@ -6595,6 +6735,7 @@ Tone: Professional but personal, not overly formal`;
         document.getElementById('contactAssistantName').value = c.assistant_name || '';
         document.getElementById('contactAssistantPhone').value = c.assistant_phone || '';
         document.getElementById('contactInstagram').value = c.instagram || '';
+        document.getElementById('contactFacebook').value = c.facebook || '';
         document.getElementById('contactLinkedin').value = c.linkedin || '';
         document.getElementById('contactLinkedinProfile').value = c.linkedin_profile || '';
         document.getElementById('contactLisnProfile').value = c.lisn_profile || '';
@@ -6761,7 +6902,8 @@ Tone: Professional but personal, not overly formal`;
                         </div>
                         <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social</h3>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
-                            ${sfField('Instagram', c.instagram, 'instagram')}
+                            ${sfField('Instagram', c.instagram ? `<a href="https://instagram.com/${esc(c.instagram.replace('@',''))}" target="_blank" style="color:var(--sf-brand);">@${esc(c.instagram.replace('@',''))}</a>` : null, 'instagram')}
+                            ${sfField('Facebook', c.facebook ? `<a href="${esc(c.facebook)}" target="_blank" style="color:var(--sf-brand);">Profile ↗</a>` : null, 'facebook', 'url')}
                             ${sfField('LinkedIn', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">${c.linkedin}</a>` : null, 'linkedin', 'url')}
                             ${sfField('Tags', c.tags ? c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ') : null, 'tags')}
                         </div>
@@ -6785,6 +6927,20 @@ Tone: Professional but personal, not overly formal`;
                                     + '<button class="btn-small" onclick="app.removeConnection(\'' + c.id + '\',\'' + cn.id + '\')" style="font-size:10px;color:var(--sf-error);">✕</button></div>';
                             }).join('') + '</div>';
                         })()}
+
+                        ${(c.ig_messages && c.ig_messages.length) ? `
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">📷 Instagram Messages (${c.ig_messages.length})</h3>
+                        <div style="max-height:300px; overflow-y:auto;">
+                            ${c.ig_messages.slice(-20).reverse().map(m => `
+                                <div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:12px;">
+                                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                        <span style="font-weight:600; color:${m.from === c.name || m.from === (c.instagram||'').replace('@','') ? 'var(--sf-brand)' : 'var(--sf-text)'};">${esc(m.from)}</span>
+                                        <span style="font-size:10px; color:var(--sf-text-weakest);">${m.date ? new Date(m.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}) : ''}</span>
+                                    </div>
+                                    <div style="color:var(--sf-text-weak);">${esc(m.text)}</div>
+                                </div>
+                            `).join('')}
+                        </div>` : ''}
                     </div>
                 </div>
 
