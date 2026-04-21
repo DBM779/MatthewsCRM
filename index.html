@@ -1173,34 +1173,15 @@ Tone: Professional but personal, not overly formal`;
                 window.history.replaceState(null, '', window.location.pathname);
             }
         }
-        if (!window.google?.accounts?.oauth2) return;
-        try { this._gmailClient = google.accounts.oauth2.initTokenClient({
-            client_id: this.GMAIL_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
-            callback: (resp) => {
-                if (resp.access_token) {
-                    this._gmailToken = resp.access_token;
-                    this._gmailTokenExpiry = Date.now() + (resp.expires_in * 1000);
-                    localStorage.setItem('matthewsCRM_gmailToken', resp.access_token);
-                    localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
-                    this.updateStatus('Gmail connected', true);
-                    if (this.currentView === 'contactDetail') this.renderContactDetail();
-                }
-            }
-        }); } catch(e) { console.log('GIS init failed:', e); }
+        // GIS library disabled — using manual OAuth redirect instead
         const saved = localStorage.getItem('matthewsCRM_gmailToken');
         const exp = parseInt(localStorage.getItem('matthewsCRM_gmailExpiry') || '0');
         if (saved && exp > Date.now()) { this._gmailToken = saved; this._gmailTokenExpiry = exp; }
     },
 
     connectGmail() {
-        // Try GIS library first, fall back to manual OAuth
-        try {
-            if (this._gmailClient) { this._gmailClient.requestAccessToken(); return; }
-        } catch(e) { console.log('GIS failed, using manual OAuth:', e); }
-        // Manual OAuth fallback
         const clientId = this.GMAIL_CLIENT_ID;
-        const redirectUri = 'https://tmc-crm-f3728.web.app';
+        const redirectUri = 'https://tmc-crm-f3728.web.app/';
         const scope = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events';
         const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + encodeURIComponent(clientId) + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=token&scope=' + encodeURIComponent(scope) + '&prompt=consent';
         window.location.href = url;
