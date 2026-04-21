@@ -1578,6 +1578,8 @@ Tone: Professional but personal, not overly formal`;
                 });
             };
 
+            const results = {matched: [], created: [], messages: 0};
+
             // Handle Instagram contacts_contact_info format (synced phone contacts)
             if (data.contacts_contact_info && Array.isArray(data.contacts_contact_info)) {
                 data.contacts_contact_info.forEach(entry => {
@@ -1590,15 +1592,16 @@ Tone: Professional but personal, not overly formal`;
                     if (!name) return;
                     const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name) || (phone && (c.pc_number === phone || c.mobile === phone || c.wc_number === phone || c.phone === phone)));
                     if (existing) {
-                        if (phone && !existing.pc_number && !existing.mobile) existing.mobile = phone;
-                        if (email && !existing.pe_email && !existing.we_email) existing.pe_email = email;
-                        matched++;
+                        const enriched = [];
+                        if (phone && !existing.pc_number && !existing.mobile) { existing.mobile = phone; enriched.push('phone'); }
+                        if (email && !existing.pe_email && !existing.we_email) { existing.pe_email = email; enriched.push('email'); }
+                        results.matched.push({name: existing.name, enriched});
                         firestoreUpsert('contacts', existing);
                     } else {
                         const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, mobile: phone || null, pe_email: email || null, tier: '5', tags: 'Instagram Contacts', createdAt: new Date().toISOString()};
                         this.data.contacts.push(newC);
                         firestoreUpsert('contacts', newC);
-                        created++;
+                        results.created.push({name, phone: phone||'', email: email||''});
                     }
                 });
             }
@@ -1668,21 +1671,38 @@ Tone: Professional but personal, not overly formal`;
                 const displayName = u.username.replace(/[._]/g, ' ');
                 const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, displayName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === u.username.toLowerCase()));
                 if (existing) {
-                    if (!existing.instagram) existing.instagram = u.username;
-                    matched++;
+                    const enriched = [];
+                    if (!existing.instagram) { existing.instagram = u.username; enriched.push('instagram'); }
+                    results.matched.push({name: existing.name, enriched});
                     firestoreUpsert('contacts', existing);
                 } else {
                     const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name: displayName, instagram: u.username, tier: '5', tags: 'Instagram Import', createdAt: new Date().toISOString()};
                     this.data.contacts.push(newC);
                     firestoreUpsert('contacts', newC);
-                    created++;
+                    results.created.push({name: displayName, phone: '', email: '', ig: u.username});
                 }
             });
 
             this.persist();
             this.updateSelectOptions();
-            const debugInfo = allUsers.length === 0 ? ' (File keys: ' + Object.keys(typeof data === 'object' && !Array.isArray(data) ? data : {_array: true}).join(', ') + ')' : '';
-            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:' + (matched+created > 0 ? 'var(--sf-success)' : 'var(--sf-warning)') + ';font-weight:600;">✓ Instagram import: ' + matched + ' matched, ' + created + ' new contacts, ' + messages + ' messages' + esc(debugInfo) + '</div>';
+            const total = results.matched.length + results.created.length;
+            const debugInfo = total === 0 ? ' (File keys: ' + Object.keys(typeof data === 'object' && !Array.isArray(data) ? data : {_array: true}).join(', ') + ')' : '';
+            let rhtml = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+            rhtml += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:' + (total > 0 ? 'var(--sf-success)' : 'var(--sf-warning)') + ';">✓ Instagram Import: ' + results.matched.length + ' matched, ' + results.created.length + ' new, ' + results.messages + ' messages' + esc(debugInfo) + '</div>';
+            if (results.matched.length) {
+                rhtml += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-brand);margin-bottom:4px;">MATCHED TO EXISTING (' + results.matched.length + ')</div>';
+                rhtml += '<div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.matched.forEach(m => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(m.name) + (m.enriched.length ? ' <span style="color:var(--sf-success);">+ ' + m.enriched.join(', ') + '</span>' : ' <span style="color:var(--sf-text-weak);">(no new data)</span>') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            if (results.created.length) {
+                rhtml += '<div><div style="font-size:11px;font-weight:700;color:#7e22ce;margin-bottom:4px;">NEW CONTACTS CREATED (' + results.created.length + ')</div>';
+                rhtml += '<div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.created.forEach(c => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(c.name) + (c.ig ? ' <span style="color:var(--sf-text-weak);">@' + esc(c.ig) + '</span>' : '') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            rhtml += '</div>';
+            if (status) status.innerHTML = rhtml;
         } catch(e) {
             if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Instagram data download.</div>';
         }
