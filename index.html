@@ -3037,6 +3037,49 @@ const app = {
         });
         html += '</ul></div></div>';
 
+        // Investment Committee Tracker
+        const icVotes = d._icVotes || [];
+        html += '<div class="card"><div class="card-header">Investment Committee <button class="btn-small" style="float:right;" onclick="app.addICVote(\'' + d.id + '\')">+ Record Vote</button></div><div style="padding:12px;">';
+        if (icVotes.length) {
+            icVotes.forEach(v => {
+                const vColor = v.vote === 'Approve' ? '#22c55e' : v.vote === 'Reject' ? '#ef4444' : '#f59e0b';
+                html += '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<span style="width:8px;height:8px;border-radius:50%;background:' + vColor + ';"></span>'
+                    + '<span style="font-weight:600;min-width:100px;">' + (v.member||'') + '</span>'
+                    + '<span style="padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;background:' + vColor + '22;color:' + vColor + ';">' + v.vote + '</span>'
+                    + '<span style="color:var(--sf-text-weak);flex:1;">' + (v.notes||'') + '</span>'
+                    + '<span style="color:var(--sf-text-weak);">' + (v.date||'').slice(0,10) + '</span></div>';
+            });
+            const approvals = icVotes.filter(v => v.vote === 'Approve').length;
+            const rejections = icVotes.filter(v => v.vote === 'Reject').length;
+            html += '<div style="margin-top:8px;font-size:11px;font-weight:600;">Result: <span style="color:#22c55e;">' + approvals + ' Approve</span> / <span style="color:#ef4444;">' + rejections + ' Reject</span> / <span style="color:#f59e0b;">' + (icVotes.length-approvals-rejections) + ' Conditional</span></div>';
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No IC votes recorded yet.</div>'; }
+        html += '</div></div>';
+
+        // Due Diligence Framework
+        const ddCategories = {
+            'Financial': ['Historical financials reviewed','Financial model built','Quality of earnings analysis','Working capital analysis','Debt/cap structure reviewed'],
+            'Legal': ['NDA executed','LOI/term sheet signed','Legal counsel engaged','Material contracts reviewed','Litigation check complete','IP review'],
+            'Operations': ['Management meetings conducted','Customer interviews','Supplier analysis','IT/systems review','Insurance review'],
+            'Market': ['Market sizing complete','Competitive landscape mapped','Regulatory environment assessed','Growth drivers identified'],
+            'Tax & Structure': ['Tax structure reviewed','Entity structure confirmed','Transfer pricing analysis','Tax due diligence report']
+        };
+        const ddStatus = d._ddStatus || {};
+        html += '<div class="card" style="grid-column:1/-1;"><div class="card-header">Due Diligence Framework</div><div style="padding:12px;">';
+        Object.entries(ddCategories).forEach(([cat, items]) => {
+            const done = items.filter((_,i) => ddStatus[cat+'_'+i]).length;
+            const pct = Math.round(done/items.length*100);
+            html += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+                + '<span style="font-size:12px;font-weight:700;">' + cat + '</span>'
+                + '<span style="font-size:11px;color:' + (pct===100?'var(--sf-success)':pct>=50?'var(--sf-warning)':'var(--sf-text-weak)') + ';font-weight:600;">' + pct + '% (' + done + '/' + items.length + ')</span></div>';
+            html += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin-bottom:6px;overflow:hidden;"><div style="width:' + pct + '%;background:' + (pct===100?'#22c55e':pct>=50?'#f59e0b':'#3b82f6') + ';border-radius:2px;"></div></div>';
+            items.forEach((item,i) => {
+                html += '<div style="padding:2px 0;font-size:12px;"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ' + (ddStatus[cat+'_'+i]?'checked':'') + ' onchange="app.toggleDD(\'' + d.id + '\',\'' + cat + '_' + i + '\',this.checked)"> ' + item + '</label></div>';
+            });
+            html += '</div>';
+        });
+        html += '</div></div>';
+
         html += '<div class="card"><div class="card-header">Key Contacts <button class="btn-small" style="float:right;" onclick="app.addDealContact(\'' + d.id + '\')">+ Add</button></div><div style="padding:12px;">';
         if (contacts.length) {
             contacts.forEach(c => {
@@ -3082,6 +3125,28 @@ const app = {
 
         html += '</div>';
         document.getElementById('content').innerHTML = html;
+    },
+
+    addICVote(dealId) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        const member = prompt('IC member name:');
+        if (!member) return;
+        const vote = prompt('Vote (Approve/Reject/Conditional):', 'Approve') || 'Approve';
+        const notes = prompt('Notes/conditions:', '') || '';
+        if (!d._icVotes) d._icVotes = [];
+        d._icVotes.push({member, vote, notes, date: new Date().toISOString()});
+        this.logChange('deal', dealId, d.name, [{field:'IC Vote', from:'', to: member + ': ' + vote}]);
+        this.persist();
+        this._renderDealDetail();
+    },
+
+    toggleDD(dealId, key, checked) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        if (!d._ddStatus) d._ddStatus = {};
+        d._ddStatus[key] = checked;
+        this.persist();
     },
 
     toggleDealCheck(dealId, key, checked) {
