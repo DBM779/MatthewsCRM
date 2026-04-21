@@ -549,6 +549,7 @@
         <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">P</span>Processes</div>
         <div class="sf-app-tab" data-view="reports" onclick="app.navigate('reports')"><span class="obj-icon obj-icon-report">R</span>Reports</div>
         <div class="sf-app-tab" data-view="investors" onclick="app.navigate('investors')"><span class="obj-icon" style="background:#0ea5e9;">$</span>Investors</div>
+        <div class="sf-app-tab" data-view="fundlaunch" onclick="app.navigate('fundlaunch')"><span class="obj-icon" style="background:#7e22ce;">🚀</span>Fund</div>
         <div class="sf-app-tab" data-view="settings" onclick="app.navigate('settings')"><span class="obj-icon obj-icon-setting">S</span>Setup</div>
     </div>
 
@@ -674,6 +675,11 @@
                 <div class="form-group"><label>Close Date</label><input type="date" id="dealCloseDate"></div>
                 <div class="form-group"><label>Drive Link</label><input type="url" id="dealDriveLink" placeholder="Google Drive URL for deal folder/model"></div>
                 <div class="form-group"><label>Fee Structure</label><input type="text" id="dealFeeStructure" placeholder="e.g. $50K retainer + 1.5% success fee"></div>
+                <div class="form-group"><label>Asking Price ($K)</label><input type="number" id="dealAskingPrice" step="1"></div>
+                <div class="form-group"><label>SDE ($K/yr)</label><input type="number" id="dealSDE" step="1" oninput="const ap=document.getElementById('dealAskingPrice').value;if(ap&&this.value){document.getElementById('dealMultiple').textContent=(ap/this.value).toFixed(1)+'x';}"></div>
+                <div class="form-group"><label>SDE Multiple</label><span id="dealMultiple" style="font-size:14px;font-weight:700;">—</span></div>
+                <div class="form-group"><label>Owner Involvement</label><select id="dealOwnerInvolvement"><option value="">Select…</option><option value="Full-time">Full-time (absentee risk)</option><option value="Part-time">Part-time</option><option value="Semi-absentee">Semi-absentee</option><option value="Absentee">Absentee (manager-run)</option></select></div>
+                <div class="form-group"><label>Listing URL</label><input type="url" id="dealListingURL" placeholder="BizBuySell or broker link"></div>
                 <div class="form-group"><label>Counterparties</label><input type="text" id="dealCounterparties" placeholder="Potential buyers/investors, comma-separated"></div>
                 </div>
                 <div class="form-group"><label>Continuation Vehicle</label><div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
@@ -1636,6 +1642,10 @@ Tone: Professional but personal, not overly formal`;
             closeDate: document.getElementById('dealCloseDate').value || null,
             driveLink: document.getElementById('dealDriveLink').value || null,
             feeStructure: document.getElementById('dealFeeStructure').value || null,
+            askingPrice: parseFloat(document.getElementById('dealAskingPrice').value) || null,
+            sde: parseFloat(document.getElementById('dealSDE').value) || null,
+            ownerInvolvement: document.getElementById('dealOwnerInvolvement').value || null,
+            listingURL: document.getElementById('dealListingURL').value || null,
             counterparties: document.getElementById('dealCounterparties').value || null,
             continuationVehicle: [...document.querySelectorAll('.cv-cb:checked')].map(cb => cb.value).join(', ') || null,
             techNotes: document.getElementById('dealTechNotes').value || null,
@@ -1899,6 +1909,7 @@ Tone: Professional but personal, not overly formal`;
             case 'tasks': this.renderTaskBoard(); break;
             case 'reports': this.renderReports(); break;
             case 'investors': this.renderInvestors(); break;
+            case 'fundlaunch': this.renderFundLaunch(); break;
             case 'settings': this.renderSettings(); break;
         }
     },
@@ -3259,6 +3270,9 @@ Tone: Professional but personal, not overly formal`;
             + (d.feeStructure ? '<div class="deal-metric"><div class="deal-metric-label">Fee Structure</div><div class="deal-metric-value" style="font-size:13px;">' + d.feeStructure + '</div></div>' : '')
             + (d.sector ? '<div class="deal-metric"><div class="deal-metric-label">Sector</div><div class="deal-metric-value" style="font-size:13px;">' + d.sector + '</div></div>' : '')
             + (d.continuationVehicle ? '<div class="deal-metric"><div class="deal-metric-label">Continuation Vehicle</div><div class="deal-metric-value" style="font-size:13px;">' + d.continuationVehicle + '</div></div>' : '')
+            + (d.askingPrice ? '<div class="deal-metric"><div class="deal-metric-label">Asking Price</div><div class="deal-metric-value">$' + d.askingPrice + 'K</div></div>' : '')
+            + (d.sde ? '<div class="deal-metric"><div class="deal-metric-label">SDE</div><div class="deal-metric-value">$' + d.sde + 'K/yr' + (d.askingPrice ? ' <span style="font-size:11px;color:var(--sf-text-weak);">(' + (d.askingPrice/d.sde).toFixed(1) + 'x)</span>' : '') + '</div></div>' : '')
+            + (d.ownerInvolvement ? '<div class="deal-metric"><div class="deal-metric-label">Owner Involvement</div><div class="deal-metric-value" style="font-size:13px;">' + d.ownerInvolvement + '</div></div>' : '')
             + (d.source ? '<div class="deal-metric"><div class="deal-metric-label">Deal Source</div><div class="deal-metric-value" style="font-size:13px;">' + d.source + (d.sourceContact ? ' <span style="color:var(--sf-text-weak);font-size:11px;">via ' + d.sourceContact + '</span>' : '') + '</div></div>' : '')
             + '</div>';
 
@@ -5442,6 +5456,349 @@ Tone: Professional but personal, not overly formal`;
         this.renderTaskBoard();
     },
 
+    _fundView: 'overview',
+
+    _fundDefaults() {
+        if (!this.data._fund) this.data._fund = {
+            name: 'Matthews Capital Partners',
+            entity: 'Series LLC',
+            state: 'Texas',
+            targetLaunch: '2026-09-01',
+            targetSize: 0.5,
+            sbaLenders: [],
+            serviceProviders: [],
+            documents: [],
+            monthlyReports: [],
+            hundredDayPlan: []
+        };
+        if (!this.data._fund.phases) this.data._fund.phases = {
+            'Entity Formation': [
+                {text:'Decide: amend existing LLC or form new Series LLC',done:false,deadline:'2026-05-15'},
+                {text:'Draft operating agreement',done:false,deadline:'2026-05-31'},
+                {text:'File with Texas Secretary of State',done:false,deadline:'2026-06-01'},
+                {text:'Obtain EIN from IRS',done:false,deadline:'2026-06-05'},
+                {text:'Designate registered agent in Texas',done:false,deadline:'2026-06-01'},
+                {text:'Open business bank account',done:false,deadline:'2026-06-15'},
+                {text:'Set up business credit card',done:false,deadline:'2026-06-15'},
+                {text:'Obtain business insurance (E&O, general liability)',done:false,deadline:'2026-06-30'}
+            ],
+            'SBA Loan Preparation': [
+                {text:'Write business plan',done:false,deadline:'2026-06-15'},
+                {text:'Prepare personal financial statement',done:false,deadline:'2026-06-15'},
+                {text:'Gather 3 years personal tax returns',done:false,deadline:'2026-06-01'},
+                {text:'Build resume/CV highlighting relevant experience',done:false,deadline:'2026-06-10'},
+                {text:'Research SBA 7(a) lenders in DFW',done:false,deadline:'2026-06-15'},
+                {text:'Submit SBA pre-qualification with 3+ lenders',done:false,deadline:'2026-06-30'},
+                {text:'Determine equity injection amount (10-20%)',done:false,deadline:'2026-06-30'}
+            ],
+            'Deal Sourcing': [
+                {text:'Define acquisition criteria (revenue, SDE, industry, geography)',done:false,deadline:'2026-05-15'},
+                {text:'Create profiles on BizBuySell and BusinessBroker.net',done:false,deadline:'2026-05-20'},
+                {text:'Reach out to 10+ business brokers in DFW',done:false,deadline:'2026-06-15'},
+                {text:'Join SCORE and local business acquisition networks',done:false,deadline:'2026-06-01'},
+                {text:'Set up deal alert notifications on listing platforms',done:false,deadline:'2026-05-25'},
+                {text:'Review 50+ target businesses',done:false,deadline:'2026-08-01'},
+                {text:'Submit 3-5 LOIs',done:false,deadline:'2026-08-15'},
+                {text:'Enter exclusivity on target acquisition',done:false,deadline:'2026-08-31'}
+            ],
+            'Due Diligence & Close': [
+                {text:'Engage acquisition attorney',done:false,deadline:'2026-07-15'},
+                {text:'Engage CPA for tax due diligence',done:false,deadline:'2026-07-15'},
+                {text:'Complete financial DD (3yr tax returns, SDE verification)',done:false,deadline:'2026-08-15'},
+                {text:'Complete customer concentration analysis',done:false,deadline:'2026-08-15'},
+                {text:'Assess key person risk and transition plan',done:false,deadline:'2026-08-15'},
+                {text:'Review lease terms and transferability',done:false,deadline:'2026-08-15'},
+                {text:'Finalize SBA loan approval',done:false,deadline:'2026-08-31'},
+                {text:'Execute purchase agreement',done:false,deadline:'2026-09-01'},
+                {text:'Close acquisition',done:false,deadline:'2026-09-15'}
+            ],
+            'Post-Acquisition (100 Days)': [
+                {text:'Week 1-2: Meet all employees individually',done:false,deadline:''},
+                {text:'Week 1-2: Review all customer contracts and relationships',done:false,deadline:''},
+                {text:'Week 1-2: Assess cash flow and immediate needs',done:false,deadline:''},
+                {text:'Week 3-4: Implement financial controls and reporting',done:false,deadline:''},
+                {text:'Week 3-4: Stabilize operations and retain key employees',done:false,deadline:''},
+                {text:'Month 2: Identify quick wins (cost savings, pricing)',done:false,deadline:''},
+                {text:'Month 2: Begin customer outreach and relationship building',done:false,deadline:''},
+                {text:'Month 3: Launch first growth initiative',done:false,deadline:''},
+                {text:'Month 3: Set 12-month KPI targets',done:false,deadline:''}
+            ]
+        };
+        return this.data._fund;
+    },
+
+    renderFundLaunch() {
+        const fund = this._fundDefaults();
+        const v = this._fundView;
+        const today = new Date().toISOString().slice(0,10);
+        const launchDate = new Date(fund.targetLaunch);
+        const daysToLaunch = Math.ceil((launchDate - new Date()) / 86400000);
+
+        let totalItems = 0, doneItems = 0;
+        Object.values(fund.phases).forEach(items => { totalItems += items.length; doneItems += items.filter(i => i.done).length; });
+        const overallPct = totalItems > 0 ? Math.round(doneItems / totalItems * 100) : 0;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div><div style="font-size:11px;color:var(--sf-text-weak);">Private Equity Fund</div><h2 style="margin:0;">' + (fund.name||'Fund Launch') + '</h2></div>'
+            + '<div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='overview'?'active':'') + '" onclick="app._fundView=\'overview\';app.renderFundLaunch();">Overview</button>'
+            + '<button class="cal-view-tab ' + (v==='sba'?'active':'') + '" onclick="app._fundView=\'sba\';app.renderFundLaunch();">SBA Loans</button>'
+            + '<button class="cal-view-tab ' + (v==='docs'?'active':'') + '" onclick="app._fundView=\'docs\';app.renderFundLaunch();">Documents</button>'
+            + '<button class="cal-view-tab ' + (v==='providers'?'active':'') + '" onclick="app._fundView=\'providers\';app.renderFundLaunch();">Advisors</button>'
+            + '<button class="cal-view-tab ' + (v==='accounting'?'active':'') + '" onclick="app._fundView=\'accounting\';app.renderFundLaunch();">Accounting</button>'
+            + '</div></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value" style="color:' + (daysToLaunch <= 30 ? '#ef4444' : daysToLaunch <= 90 ? '#f59e0b' : '#3b82f6') + ';">' + daysToLaunch + '</div><div class="ps-label">Days to Launch</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + overallPct + '%</div><div class="ps-label">Complete</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + doneItems + '/' + totalItems + '</div><div class="ps-label">Tasks Done</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (fund.sbaLenders||[]).length + '</div><div class="ps-label">SBA Lenders</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (fund.serviceProviders||[]).length + '</div><div class="ps-label">Advisors</div></div>'
+            + '</div>';
+
+        html += '<div style="display:flex;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-bottom:16px;"><div style="width:' + overallPct + '%;background:linear-gradient(90deg,#7e22ce,#a855f7);border-radius:4px;"></div></div>';
+
+        if (v === 'overview') html += this._renderFundOverview(fund, today);
+        else if (v === 'sba') html += this._renderSBALenders(fund);
+        else if (v === 'docs') html += this._renderFundDocs(fund);
+        else if (v === 'providers') html += this._renderServiceProviders(fund);
+        else if (v === 'accounting') html += this._renderFundAccounting(fund);
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    _renderFundOverview(fund, today) {
+        let html = '';
+        Object.entries(fund.phases).forEach(([phase, items]) => {
+            const done = items.filter(i => i.done).length;
+            const pct = Math.round(done / items.length * 100);
+            const overdue = items.filter(i => !i.done && i.deadline && i.deadline < today).length;
+            const phaseColors = {'Entity Formation':'#3b82f6','SBA Loan Preparation':'#22c55e','Deal Sourcing':'#8b5cf6','Due Diligence & Close':'#f59e0b','Post-Acquisition (100 Days)':'#ef4444'};
+            const color = phaseColors[phase] || '#6b7280';
+            html += '<div class="card" style="margin-bottom:10px;' + (pct === 100 ? 'opacity:0.7;' : '') + '">'
+                + '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">'
+                + '<span style="display:flex;align-items:center;gap:8px;"><span style="width:10px;height:10px;border-radius:50%;background:' + color + ';"></span>' + phase + '</span>'
+                + '<span style="font-size:11px;color:' + (pct===100?'var(--sf-success)':'var(--sf-text-weak)') + ';font-weight:600;">' + pct + '% (' + done + '/' + items.length + ')' + (overdue ? ' · <span style="color:var(--sf-error);">' + overdue + ' overdue</span>' : '') + '</span>'
+                + '</div><div style="padding:4px 12px;">';
+            html += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin:6px 0 8px;overflow:hidden;"><div style="width:' + pct + '%;background:' + color + ';border-radius:2px;"></div></div>';
+            items.forEach((item, i) => {
+                const isOverdue = !item.done && item.deadline && item.deadline < today;
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<input type="checkbox" ' + (item.done?'checked':'') + ' onchange="app.toggleFundItem(\'' + phase + '\',' + i + ',this.checked)" style="width:auto;min-height:auto;">'
+                    + '<span style="flex:1;' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + (isOverdue?'color:var(--sf-error);':'') + '">' + item.text + '</span>'
+                    + (item.deadline ? '<span style="font-size:10px;color:' + (isOverdue?'var(--sf-error)':'var(--sf-text-weak)') + ';">' + item.deadline + '</span>' : '')
+                    + '</div>';
+            });
+            html += '<div style="padding:4px 0;"><button class="btn-small" onclick="app.addFundItem(\'' + phase + '\')">+ Add item</button></div>';
+            html += '</div></div>';
+        });
+        return html;
+    },
+
+    toggleFundItem(phase, idx, checked) {
+        const fund = this.data._fund;
+        if (fund.phases[phase] && fund.phases[phase][idx]) {
+            fund.phases[phase][idx].done = checked;
+            this.persist();
+        }
+    },
+
+    addFundItem(phase) {
+        const text = prompt('New task:');
+        if (!text) return;
+        const deadline = prompt('Deadline (YYYY-MM-DD, or leave blank):', '') || '';
+        this.data._fund.phases[phase].push({text, done: false, deadline});
+        this.persist();
+        this.renderFundLaunch();
+    },
+
+    _renderSBALenders(fund) {
+        let html = '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">SBA Lender Pipeline <button class="btn-small" onclick="app.addSBALender()">+ Add Lender</button></div><div style="padding:0;">';
+        if ((fund.sbaLenders||[]).length) {
+            html += '<table class="compact-table"><thead><tr><th>Lender</th><th>Contact</th><th>Status</th><th>Rate</th><th>Term</th><th>Max Amount</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+            fund.sbaLenders.forEach((l, i) => {
+                const statusColors = {'Researching':'#9ca3af','Applied':'#3b82f6','In Review':'#f59e0b','Approved':'#22c55e','Declined':'#ef4444','Closed':'#7e22ce'};
+                html += '<tr><td style="font-weight:600;">' + (l.name||'') + '</td><td>' + (l.contact||'') + '</td>'
+                    + '<td><span style="padding:2px 8px;border-radius:3px;font-size:10px;font-weight:600;background:' + (statusColors[l.status]||'#9ca3af') + '22;color:' + (statusColors[l.status]||'#9ca3af') + ';">' + (l.status||'Researching') + '</span></td>'
+                    + '<td>' + (l.rate||'—') + '</td><td>' + (l.term||'—') + '</td><td>' + (l.maxAmount ? '$'+l.maxAmount+'K' : '—') + '</td>'
+                    + '<td style="font-size:11px;">' + (l.notes||'').slice(0,40) + '</td>'
+                    + '<td><button class="btn-small" onclick="app.editSBALender(' + i + ')">Edit</button></td></tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No lenders tracked yet.</div>';
+        }
+        html += '</div></div>';
+
+        html += '<div class="card" style="margin-top:12px;"><div class="card-header">SBA Loan Calculator</div><div style="padding:16px;">'
+            + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Loan Amount ($)</label><input type="number" id="sbaCalcAmount" value="350000" oninput="app.calcSBA()"></div>'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Interest Rate (%)</label><input type="number" id="sbaCalcRate" value="10.5" step="0.1" oninput="app.calcSBA()"></div>'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Term (years)</label><input type="number" id="sbaCalcTerm" value="10" oninput="app.calcSBA()"></div></div>'
+            + '<div id="sbaCalcResult" style="font-size:13px;"></div></div></div>';
+        setTimeout(() => this.calcSBA(), 100);
+        return html;
+    },
+
+    calcSBA() {
+        const P = parseFloat(document.getElementById('sbaCalcAmount')?.value) || 0;
+        const r = (parseFloat(document.getElementById('sbaCalcRate')?.value) || 0) / 100 / 12;
+        const n = (parseFloat(document.getElementById('sbaCalcTerm')?.value) || 0) * 12;
+        if (!P || !r || !n) return;
+        const payment = P * (r * Math.pow(1+r,n)) / (Math.pow(1+r,n) - 1);
+        const totalPaid = payment * n;
+        const totalInterest = totalPaid - P;
+        const el = document.getElementById('sbaCalcResult');
+        if (el) el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;">'
+            + '<div><div style="font-size:20px;font-weight:700;color:var(--sf-brand);">$' + Math.round(payment).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Monthly Payment</div></div>'
+            + '<div><div style="font-size:20px;font-weight:700;">$' + Math.round(totalPaid).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Total Paid</div></div>'
+            + '<div><div style="font-size:20px;font-weight:700;color:var(--sf-error);">$' + Math.round(totalInterest).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Total Interest</div></div></div>';
+    },
+
+    addSBALender() {
+        const name = prompt('Lender name:'); if (!name) return;
+        const contact = prompt('Contact name:', '') || '';
+        const status = prompt('Status (Researching/Applied/In Review/Approved/Declined):', 'Researching') || 'Researching';
+        if (!this.data._fund.sbaLenders) this.data._fund.sbaLenders = [];
+        this.data._fund.sbaLenders.push({name, contact, status, rate:'', term:'', maxAmount:'', notes:'', created: new Date().toISOString()});
+        this.persist(); this.renderFundLaunch();
+    },
+
+    editSBALender(idx) {
+        const l = this.data._fund.sbaLenders[idx]; if (!l) return;
+        l.name = prompt('Lender:', l.name) || l.name;
+        l.contact = prompt('Contact:', l.contact) || l.contact;
+        l.status = prompt('Status (Researching/Applied/In Review/Approved/Declined/Closed):', l.status) || l.status;
+        l.rate = prompt('Rate offered:', l.rate) || l.rate;
+        l.term = prompt('Term (years):', l.term) || l.term;
+        l.maxAmount = prompt('Max amount ($K):', l.maxAmount) || l.maxAmount;
+        l.notes = prompt('Notes:', l.notes) || l.notes;
+        this.persist(); this.renderFundLaunch();
+    },
+
+    _renderFundDocs(fund) {
+        const categories = ['Entity Formation','SBA Application','Target Business','Closing','Post-Acquisition'];
+        const statuses = {needed:'#ef4444',progress:'#f59e0b',complete:'#22c55e'};
+        if (!fund.documents) fund.documents = [];
+        let html = '';
+        categories.forEach(cat => {
+            const docs = fund.documents.filter(d => d.category === cat);
+            html += '<div class="card" style="margin-bottom:10px;"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">' + cat + ' <button class="btn-small" onclick="app.addFundDoc(\'' + cat + '\')">+ Add</button></div><div style="padding:8px 12px;">';
+            if (docs.length) {
+                docs.forEach((d, i) => {
+                    const globalIdx = fund.documents.indexOf(d);
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                        + '<div style="display:flex;align-items:center;gap:8px;">'
+                        + '<span style="width:8px;height:8px;border-radius:50%;background:' + (statuses[d.status]||'#ef4444') + ';"></span>'
+                        + (d.url ? '<a href="' + d.url + '" target="_blank" style="color:var(--sf-brand);font-weight:600;">' + d.name + '</a>' : '<span>' + d.name + '</span>')
+                        + '</div><div style="display:flex;gap:4px;">'
+                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
+                        + '</div></div>';
+                });
+            } else { html += '<div style="font-size:11px;color:var(--sf-text-weak);padding:4px 0;">No documents yet.</div>'; }
+            html += '</div></div>';
+        });
+        return html;
+    },
+
+    addFundDoc(category) {
+        const name = prompt('Document name:'); if (!name) return;
+        const url = prompt('Google Drive URL (optional):', '') || '';
+        if (!this.data._fund.documents) this.data._fund.documents = [];
+        this.data._fund.documents.push({name, category, url, status: 'needed'});
+        this.persist(); this.renderFundLaunch();
+    },
+
+    _renderServiceProviders(fund) {
+        const roles = ['Attorney','CPA/Accountant','Insurance Broker','SBA Lender','Business Broker','SCORE Mentor','Financial Advisor','Other'];
+        if (!fund.serviceProviders) fund.serviceProviders = [];
+        let html = '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Service Providers & Advisors <button class="btn-small" onclick="app.addServiceProvider()">+ Add</button></div><div style="padding:0;">';
+        if (fund.serviceProviders.length) {
+            html += '<table class="compact-table"><thead><tr><th>Role</th><th>Name</th><th>Firm</th><th>Phone</th><th>Email</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
+            fund.serviceProviders.forEach((sp, i) => {
+                const linked = sp.contactId ? this.data.contacts.find(c => c.id === sp.contactId) : null;
+                html += '<tr><td style="font-weight:600;">' + (sp.role||'') + '</td>'
+                    + '<td>' + (linked ? '<a onclick="app.viewContact(\'' + linked.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + linked.name + '</a>' : (sp.name||'')) + '</td>'
+                    + '<td>' + (sp.firm||'') + '</td><td>' + (sp.phone||'') + '</td><td>' + (sp.email||'') + '</td>'
+                    + '<td><span style="padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;background:' + (sp.engaged?'#dcfce7;color:#166534':'#f3f4f6;color:#374151') + ';">' + (sp.engaged?'Engaged':'Prospect') + '</span></td>'
+                    + '<td style="font-size:11px;">' + (sp.notes||'').slice(0,40) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else { html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No service providers yet.</div>'; }
+        html += '</div></div>';
+        return html;
+    },
+
+    addServiceProvider() {
+        const role = prompt('Role (Attorney, CPA, Insurance Broker, SBA Lender, Business Broker, SCORE Mentor):', 'Attorney') || 'Other';
+        const name = prompt('Name:'); if (!name) return;
+        const firm = prompt('Firm:', '') || '';
+        const phone = prompt('Phone:', '') || '';
+        const email = prompt('Email:', '') || '';
+        const contactName = prompt('Link to CRM contact (name, or leave blank):', '');
+        const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
+        if (!this.data._fund.serviceProviders) this.data._fund.serviceProviders = [];
+        this.data._fund.serviceProviders.push({role, name, firm, phone, email, contactId: contact?.id||null, engaged: false, notes: ''});
+        this.persist(); this.renderFundLaunch();
+    },
+
+    _renderFundAccounting(fund) {
+        if (!fund.accounting) fund.accounting = {equity: 0, sbaLoan: 0, monthlyPayment: 0, cashReserve: 0, distributions: 0};
+        const a = fund.accounting;
+        const totalCapital = (a.equity||0) + (a.sbaLoan||0);
+        const nav = totalCapital - (a.distributions||0);
+        const reports = fund.monthlyReports || [];
+
+        let html = '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.equity||0).toLocaleString() + '</div><div class="ps-label">Personal Equity</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.sbaLoan||0).toLocaleString() + '</div><div class="ps-label">SBA Loan</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCapital.toLocaleString() + '</div><div class="ps-label">Total Capital</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.monthlyPayment||0).toLocaleString() + '</div><div class="ps-label">Monthly SBA Payment</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.cashReserve||0).toLocaleString() + '</div><div class="ps-label">Cash Reserve</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + nav.toLocaleString() + '</div><div class="ps-label">Fund NAV</div></div>'
+            + '</div>';
+
+        html += '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Fund Accounting <button class="btn-small" onclick="app.editFundAccounting()">Edit</button></div>'
+            + '<div style="padding:16px;font-size:12px;color:var(--sf-text-weak);">Update your fund accounting figures by clicking Edit. These numbers track your personal capital deployment and SBA loan obligations.</div></div>';
+
+        html += '<div class="card" style="margin-top:12px;"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Monthly Reports <button class="btn-small" onclick="app.addMonthlyReport()">+ Add Report</button></div><div style="padding:0;">';
+        if (reports.length) {
+            html += '<table class="compact-table"><thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Income</th><th>Cash Flow</th><th>Notes</th></tr></thead><tbody>';
+            reports.forEach(r => {
+                const net = (r.revenue||0) - (r.expenses||0);
+                html += '<tr><td style="font-weight:600;">' + (r.month||'') + '</td><td>$' + (r.revenue||0).toLocaleString() + '</td><td>$' + (r.expenses||0).toLocaleString() + '</td>'
+                    + '<td style="color:' + (net>=0?'var(--sf-success)':'var(--sf-error)') + ';font-weight:600;">$' + net.toLocaleString() + '</td>'
+                    + '<td>$' + (r.cashFlow||0).toLocaleString() + '</td><td style="font-size:11px;">' + (r.notes||'').slice(0,40) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else { html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No monthly reports yet. Add one after your first month of operations.</div>'; }
+        html += '</div></div>';
+        return html;
+    },
+
+    editFundAccounting() {
+        const a = this.data._fund.accounting || {};
+        a.equity = parseFloat(prompt('Personal equity invested ($):', a.equity||0)) || 0;
+        a.sbaLoan = parseFloat(prompt('SBA loan amount ($):', a.sbaLoan||0)) || 0;
+        a.monthlyPayment = parseFloat(prompt('Monthly SBA payment ($):', a.monthlyPayment||0)) || 0;
+        a.cashReserve = parseFloat(prompt('Cash reserve ($):', a.cashReserve||0)) || 0;
+        a.distributions = parseFloat(prompt('Total distributions to date ($):', a.distributions||0)) || 0;
+        this.data._fund.accounting = a;
+        this.persist(); this.renderFundLaunch();
+    },
+
+    addMonthlyReport() {
+        const month = prompt('Month (e.g. 2026-10):', new Date().toISOString().slice(0,7)); if (!month) return;
+        const revenue = parseFloat(prompt('Revenue ($):', '0')) || 0;
+        const expenses = parseFloat(prompt('Expenses ($):', '0')) || 0;
+        const cashFlow = parseFloat(prompt('Operating cash flow ($):', '0')) || 0;
+        const notes = prompt('Notes:', '') || '';
+        if (!this.data._fund.monthlyReports) this.data._fund.monthlyReports = [];
+        this.data._fund.monthlyReports.push({month, revenue, expenses, cashFlow, notes});
+        this.persist(); this.renderFundLaunch();
+    },
+
     renderInvestors() {
         if (!this.data.investors) this.data.investors = [];
         const investors = this.data.investors;
@@ -6664,6 +7021,11 @@ Tone: Professional but personal, not overly formal`;
         document.getElementById('dealSource').value = '';
         document.getElementById('dealSourceContact').value = '';
         document.getElementById('dealProbability').value = '';
+        document.getElementById('dealAskingPrice').value = '';
+        document.getElementById('dealSDE').value = '';
+        document.getElementById('dealOwnerInvolvement').value = '';
+        document.getElementById('dealListingURL').value = '';
+        document.getElementById('dealMultiple').textContent = '—';
         document.getElementById('dealCloseDate').value = '';
         document.getElementById('dealDriveLink').value = '';
         document.getElementById('dealFeeStructure').value = '';
@@ -6685,6 +7047,11 @@ Tone: Professional but personal, not overly formal`;
         document.getElementById('dealSector').value = deal.sector || '';
         document.getElementById('dealSource').value = deal.source || '';
         document.getElementById('dealSourceContact').value = deal.sourceContact || '';
+        document.getElementById('dealAskingPrice').value = deal.askingPrice || '';
+        document.getElementById('dealSDE').value = deal.sde || '';
+        document.getElementById('dealOwnerInvolvement').value = deal.ownerInvolvement || '';
+        document.getElementById('dealListingURL').value = deal.listingURL || '';
+        if (deal.askingPrice && deal.sde) document.getElementById('dealMultiple').textContent = (deal.askingPrice/deal.sde).toFixed(1) + 'x';
         document.getElementById('dealProbability').value = deal.probability || '';
         document.getElementById('dealCloseDate').value = deal.closeDate || '';
         document.getElementById('dealDriveLink').value = deal.driveLink || '';
