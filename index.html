@@ -6,6 +6,7 @@
     <link rel="preconnect" href="https://tmc-crm-f3728-default-rtdb.firebaseio.com">
     <link rel="preconnect" href="https://unpkg.com">
     <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -752,6 +753,65 @@ const app = {
         return Math.round((filled / fields.length) * 100);
     },
 
+    // === Gmail Integration ===
+    GMAIL_CLIENT_ID: '952660161996-el5663ja1ns7q1mg7h90fm471am7kqgd.apps.googleusercontent.com',
+    _gmailToken: null,
+    _gmailTokenExpiry: 0,
+
+    initGmail() {
+        if (!window.google?.accounts?.oauth2) return;
+        this._gmailClient = google.accounts.oauth2.initTokenClient({
+            client_id: this.GMAIL_CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/gmail.readonly',
+            callback: (resp) => {
+                if (resp.access_token) {
+                    this._gmailToken = resp.access_token;
+                    this._gmailTokenExpiry = Date.now() + (resp.expires_in * 1000);
+                    localStorage.setItem('matthewsCRM_gmailToken', resp.access_token);
+                    localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                    this.updateStatus('Gmail connected', true);
+                    if (this.currentView === 'contactDetail') this.renderContactDetail();
+                }
+            }
+        });
+        const saved = localStorage.getItem('matthewsCRM_gmailToken');
+        const exp = parseInt(localStorage.getItem('matthewsCRM_gmailExpiry') || '0');
+        if (saved && exp > Date.now()) { this._gmailToken = saved; this._gmailTokenExpiry = exp; }
+    },
+
+    connectGmail() {
+        if (this._gmailClient) this._gmailClient.requestAccessToken();
+        else setTimeout(() => { this.initGmail(); if (this._gmailClient) this._gmailClient.requestAccessToken(); }, 500);
+    },
+
+    isGmailConnected() { return this._gmailToken && this._gmailTokenExpiry > Date.now(); },
+
+    async fetchGmailForContact(contact) {
+        if (!this.isGmailConnected()) return [];
+        const emails = [contact.pe_email, contact.we_email, contact.email].filter(Boolean);
+        if (!emails.length) return [];
+        const query = emails.map(e => 'from:' + e + ' OR to:' + e).join(' OR ');
+        try {
+            const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=15`, {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) { if (res.status === 401) { this._gmailToken = null; } return []; }
+            const data = await res.json();
+            if (!data.messages) return [];
+            const threads = await Promise.all(data.messages.slice(0, 10).map(async m => {
+                const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`, {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!r.ok) return null;
+                const msg = await r.json();
+                const headers = {};
+                (msg.payload?.headers || []).forEach(h => headers[h.name] = h.value);
+                return {id: m.id, subject: headers.Subject || '(no subject)', from: headers.From || '', to: headers.To || '', date: headers.Date || '', snippet: msg.snippet || ''};
+            }));
+            return threads.filter(Boolean);
+        } catch { return []; }
+    },
+
     fmtPhone(p) {
         if (!p) return p;
         const d = p.replace(/\D/g, '');
@@ -801,7 +861,10 @@ const app = {
             }
         }, 100);
 
-        // 5. Cloud sync in background (doesn't block UI)
+        // 5. Gmail init
+        setTimeout(() => this.initGmail(), 200);
+
+        // 6. Cloud sync in background (doesn't block UI)
         setTimeout(() => this.cloudPull(), 500);
 
         // 6. Geocoding much later
@@ -3926,6 +3989,16 @@ const app = {
                             }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
                         </div>
                     </div>
+                    <!-- Gmail Emails -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">📧 Emails</span>
+                            ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Connected</span>' : `<button class="btn-small" onclick="app.connectGmail()" style="font-size:11px;">Connect Gmail</button>`}
+                        </div>
+                        <div id="gmailEmails" style="padding:8px 16px; max-height:300px; overflow-y:auto;">
+                            ${this.isGmailConnected() ? '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Loading emails...</div>' : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Connect Gmail to see email history</div>'}
+                        </div>
+                    </div>
                     <!-- *Notes section -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">*Notes</div>
@@ -3938,6 +4011,26 @@ const app = {
         `;
         document.getElementById('content').innerHTML = html;
         document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'contacts\'; app.render();">Contacts</a> / ' + c.name;
+        // Load Gmail emails async (non-blocking)
+        if (this.isGmailConnected()) {
+            this.fetchGmailForContact(c).then(emails => {
+                const el = document.getElementById('gmailEmails');
+                if (!el) return;
+                if (!emails.length) { el.innerHTML = '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">No emails found</div>'; return; }
+                el.innerHTML = emails.map(e => {
+                    const fromName = (e.from||'').replace(/<.*>/,'').trim() || e.from;
+                    const dateStr = e.date ? new Date(e.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+                    return `<div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${e.subject}</div>
+                            <span style="font-size:10px; color:var(--sf-text-weakest); margin-left:8px; white-space:nowrap;">${dateStr}</span>
+                        </div>
+                        <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${fromName}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${e.snippet}</div>
+                    </div>`;
+                }).join('');
+            });
+        }
     },
 
     // Complete an activity (mark as Closed)
