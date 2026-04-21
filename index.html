@@ -1708,6 +1708,69 @@ Tone: Professional but personal, not overly formal`;
         }
     },
 
+    cleanupSocialImports() {
+        const status = document.getElementById('socialImportStatus');
+        const bizWords = ['llc','ltd','inc','bakery','retreat','group','club','grille','restaurant','dental','mortgage','candles','collective','realtor','consulting','insurance','church','official','fanpage','community','dallas','trips','spot','heaven','entrepreneurs','dog','dogs','puppies','coverage','brand manager','mind.','®'];
+        const socialTags = ['Instagram Import','Instagram Contacts','Social Import','Facebook Import'];
+        const socialContacts = this.data.contacts.filter(c => {
+            if (!c.tags) return false;
+            return socialTags.some(t => c.tags.includes(t));
+        });
+        if (!socialContacts.length) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-text-weak);">No social-imported contacts found.</div>';
+            return;
+        }
+        const toRemove = [];
+        const toFlag = [];
+        socialContacts.forEach(c => {
+            const name = (c.name || '').trim();
+            const nameLower = name.toLowerCase();
+            const hasSpace = name.includes(' ');
+            const isAllLower = name === nameLower && !hasSpace;
+            const hasBizWord = bizWords.some(w => nameLower.includes(w));
+            const isEmoji = /^[\p{Emoji}\s]+$/u.test(name);
+            const noName = !name || name.length < 2;
+            const isUsername = !hasSpace && name.includes('.') || !hasSpace && name.includes('_');
+            if (noName || isEmoji) { toRemove.push({contact: c, reason: 'No real name'}); }
+            else if (hasBizWord) { toRemove.push({contact: c, reason: 'Business/brand account'}); }
+            else if (!hasSpace && isAllLower) { toRemove.push({contact: c, reason: 'Username only (no first/last)'}); }
+            else if (!hasSpace) { toFlag.push({contact: c, reason: 'Single name only'}); }
+        });
+        if (!toRemove.length && !toFlag.length) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);">✓ All social imports look clean!</div>';
+            return;
+        }
+        let html = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+        html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">🧹 Social Import Cleanup</div>';
+        if (toRemove.length) {
+            html += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-error);margin-bottom:4px;">WILL REMOVE (' + toRemove.length + ')</div>';
+            html += '<div style="max-height:200px;overflow-y:auto;font-size:11px;">';
+            toRemove.forEach(r => { html += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(r.contact.name || '(empty)') + ' <span style="color:var(--sf-text-weak);">— ' + r.reason + '</span></div>'; });
+            html += '</div></div>';
+        }
+        if (toFlag.length) {
+            html += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-warning);margin-bottom:4px;">SINGLE NAME — KEEPING (' + toFlag.length + ')</div>';
+            html += '<div style="max-height:100px;overflow-y:auto;font-size:11px;">';
+            toFlag.forEach(r => { html += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(r.contact.name) + '</div>'; });
+            html += '</div></div>';
+        }
+        html += '<button class="btn-primary" onclick="app._executeCleanup()" style="margin-top:8px;">Confirm: Remove ' + toRemove.length + ' contacts</button>';
+        html += '</div>';
+        this._cleanupToRemove = toRemove.map(r => r.contact.id);
+        if (status) status.innerHTML = html;
+    },
+
+    _executeCleanup() {
+        if (!this._cleanupToRemove) return;
+        const ids = this._cleanupToRemove;
+        ids.forEach(id => firestoreDelete('contacts', id));
+        this.data.contacts = this.data.contacts.filter(c => !ids.includes(c.id));
+        this.persist();
+        this._cleanupToRemove = null;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Removed ' + ids.length + ' contacts. Your CRM is clean.</div>';
+    },
+
     async importSocialCsv(file) {
         if (!file) return;
         const status = document.getElementById('socialImportStatus');
@@ -6678,6 +6741,9 @@ Tone: Professional but personal, not overly formal`;
                     <button onclick="app.bulkIgHandles();">📷 Bulk Add IG Handles</button>
                     <button onclick="document.getElementById('socialCsvFile').click();">📋 Import Social CSV</button>
                     <input type="file" id="socialCsvFile" accept=".csv,.txt" style="display:none;" onchange="app.importSocialCsv(this.files[0])">
+                </div>
+                <div style="margin-top:8px;">
+                    <button onclick="app.cleanupSocialImports();">🧹 Clean Up Social Imports</button>
                 </div>
                 <div id="socialImportStatus"></div>
 
