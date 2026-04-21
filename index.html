@@ -4426,6 +4426,7 @@ Tone: Professional but personal, not overly formal`;
         if (!evt) return;
         if (!evt.files) evt.files = [];
         evt.files.push({name, url});
+        firestoreUpsert('events', evt);
         this.persist();
         this.renderEventDetail();
     },
@@ -4434,6 +4435,7 @@ Tone: Professional but personal, not overly formal`;
         const evt = this.data.events.find(x => x.id === eventId);
         if (!evt || !evt.files) return;
         evt.files.splice(idx, 1);
+        firestoreUpsert('events', evt);
         this.persist();
         this.renderEventDetail();
     },
@@ -4646,7 +4648,7 @@ Tone: Professional but personal, not overly formal`;
             + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e6853d;"></span> CRM Events</span>'
             + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#dcfce7;"></span> Birthdays</span>'
             + '</div></div>'
-            + (this._travelEvents.length ? '<div class="cal-sidebar-section"><div class="cal-sidebar-title">✈ Travel</div>' + this._travelEvents.slice(0,5).map(t => '<div class="cal-travel-card"><div style="font-size:10px;text-transform:uppercase;color:' + (t.type==='flight'?'#1a73e8':t.type==='hotel'?'#e8710a':'#666') + ';font-weight:700;">' + t.type + '</div><div style="font-size:12px;font-weight:600;margin:2px 0;">' + t.subject.slice(0,50) + '</div>' + (t._parsed.confirmation ? '<div class="flight-num">Conf: ' + t._parsed.confirmation + '</div>' : '') + '<div style="font-size:10px;color:#888;">' + t._parsed.dates.join(' - ') + '</div></div>').join('') + '</div>' : '')
+            + (this._travelEvents.length ? '<div class="cal-sidebar-section"><div class="cal-sidebar-title">✈ Travel</div>' + this._travelEvents.slice(0,5).map(t => '<div class="cal-travel-card"><div style="font-size:10px;text-transform:uppercase;color:' + (t.type==='flight'?'#1a73e8':t.type==='hotel'?'#e8710a':'#666') + ';font-weight:700;">' + t.type + '</div><div style="font-size:12px;font-weight:600;margin:2px 0;">' + esc(t.subject.slice(0,50)) + '</div>' + (t._parsed.confirmation ? '<div class="flight-num">Conf: ' + esc(t._parsed.confirmation) + '</div>' : '') + '<div style="font-size:10px;color:#888;">' + esc(t._parsed.dates.join(' - ')) + '</div></div>').join('') + '</div>' : '')
             + '</div>';
         document.getElementById('content').innerHTML = '<div style="display:flex;gap:0;min-height:calc(100vh - 140px);">'
             + '<div style="flex:1;min-width:0;">' + header + body + '</div>' + sidebar + '</div>';
@@ -5047,8 +5049,8 @@ Tone: Professional but personal, not overly formal`;
             const viewFn = isContact ? 'viewContact' : 'viewAccount';
             let html = '<div style="font-size:13px; max-width:260px;">';
             html += '<div style="font-size:10px; text-transform:uppercase; color:#888;">' + typeLabel + dslaHtml + '</div>';
-            html += '<div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.' + viewFn + '(\'' + item.id + '\')" style="color:#0176d3; cursor:pointer;">' + item.name + '</a></div>';
-            if (item.title) html += '<div style="color:#666;">' + item.title + '</div>';
+            html += '<div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.' + viewFn + '(\'' + item.id + '\')" style="color:#0176d3; cursor:pointer;">' + esc(item.name) + '</a></div>';
+            if (item.title) html += '<div style="color:#666;">' + esc(item.title) + '</div>';
             if (phone) html += '<div style="margin:4px 0;"><a href="#" onclick="event.preventDefault();app.logCallFromTap(\'' + item.id + '\',\'' + phone + '\');">📞 Call</a> · <a href="#" onclick="event.preventDefault();app.logTextFromTap(\'' + item.id + '\',\'' + phone + '\');">💬 Text</a></div>';
             html += '<div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">' + esc(item.address) + '</div>';
             html += '<div style="margin-top:4px;"><a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(item.address) + '" target="_blank" style="color:#0176d3;">Directions ↗</a></div>';
