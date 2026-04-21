@@ -1578,6 +1578,31 @@ Tone: Professional but personal, not overly formal`;
                 });
             };
 
+            // Handle Instagram contacts_contact_info format (synced phone contacts)
+            if (data.contacts_contact_info && Array.isArray(data.contacts_contact_info)) {
+                data.contacts_contact_info.forEach(entry => {
+                    const smd = entry.string_map_data || {};
+                    const firstName = smd['First Name']?.value || smd['first_name']?.value || '';
+                    const lastName = smd['Last Name']?.value || smd['last_name']?.value || '';
+                    const phone = smd['Contact Number']?.value || smd['contact_number']?.value || smd['Phone Number']?.value || '';
+                    const email = smd['Email']?.value || smd['email']?.value || '';
+                    const name = (entry.title || ((firstName + ' ' + lastName).trim()) || '').trim();
+                    if (!name) return;
+                    const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name) || (phone && (c.pc_number === phone || c.mobile === phone || c.wc_number === phone || c.phone === phone)));
+                    if (existing) {
+                        if (phone && !existing.pc_number && !existing.mobile) existing.mobile = phone;
+                        if (email && !existing.pe_email && !existing.we_email) existing.pe_email = email;
+                        matched++;
+                        firestoreUpsert('contacts', existing);
+                    } else {
+                        const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, mobile: phone || null, pe_email: email || null, tier: '5', tags: 'Instagram Contacts', createdAt: new Date().toISOString()};
+                        this.data.contacts.push(newC);
+                        firestoreUpsert('contacts', newC);
+                        created++;
+                    }
+                });
+            }
+
             // Handle all known Instagram JSON formats:
             // Format 1: bare array [{string_list_data:[{value:"user"}]}]  (followers_1.json, following.json)
             if (Array.isArray(data)) {
