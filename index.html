@@ -1012,6 +1012,17 @@ const app = {
             notes: document.getElementById('contactNotes').value || null
         };
 
+        // Duplicate detection for new contacts
+        if (!id) {
+            const dupes = this.data.contacts.filter(c => {
+                if (contact.pc_number && c.pc_number && c.pc_number.replace(/\D/g,'') === contact.pc_number.replace(/\D/g,'')) return true;
+                if (contact.we_email && c.we_email && c.we_email.toLowerCase() === contact.we_email.toLowerCase()) return true;
+                if (contact.pe_email && c.pe_email && c.pe_email.toLowerCase() === contact.pe_email.toLowerCase()) return true;
+                if (contact.name && c.name && c.name.toLowerCase() === contact.name.toLowerCase()) return true;
+                return false;
+            });
+            if (dupes.length && !confirm(`Possible duplicate(s) found:\n${dupes.map(d=>d.name).join(', ')}\n\nSave anyway?`)) return;
+        }
         if (id) {
             const idx = this.data.contacts.findIndex(c => c.id === id);
             if (idx >= 0) this.data.contacts[idx] = {...this.data.contacts[idx], ...contact};
@@ -1475,6 +1486,30 @@ const app = {
 
                 <!-- RIGHT COLUMN -->
                 <div style="width:360px; flex-shrink:0;">
+                    <!-- Upcoming Events -->
+                    ${(() => { const upcoming = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start >= todayStr).sort((a,b) => (a.start||'').localeCompare(b.start||'')).slice(0,5); return upcoming.length ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📅 Upcoming Events</div>
+                        <div style="padding:8px 16px;">
+                            ${upcoming.map(e => { const con = this.data.contacts.find(c => c.id === e.contactId); return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <div><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${e.name}</a>${con ? `<br><span style="font-size:11px; color:var(--sf-text-weak);">${con.name}</span>` : ''}</div>
+                                <span style="font-size:11px; color:var(--sf-text-weak); white-space:nowrap;">${new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+                            </div>`; }).join('')}
+                        </div>
+                    </div>` : ''; })()}
+
+                    <!-- VIP Neglect Alert -->
+                    ${(() => { const neglected = this.data.contacts.filter(c => c.tier === '1-VIP').filter(c => { const la = c.la || c.last_activity_display; if (!la) return true; return Math.floor((today - new Date(la)) / 86400000) >= 30; }).slice(0,5); return neglected.length ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-warning);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; color:var(--sf-warning);">⚠️ VIP Follow-up Needed</div>
+                        <div style="padding:8px 16px;">
+                            ${neglected.map(c => { const dsla = this.calculateDSLA(c.la || c.last_activity_display); return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a>
+                                <span style="font-size:12px; color:var(--sf-error); font-weight:600;">${dsla != null ? dsla+'D' : 'Never'}</span>
+                            </div>`; }).join('')}
+                        </div>
+                    </div>` : ''; })()}
+
                     <!-- Recently Viewed -->
                     <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
                         <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recently Viewed</div>
@@ -3928,6 +3963,7 @@ const app = {
                         <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
                         <button class="btn-small" onclick="app.openContactForm(); document.getElementById('contactCompany').value='${a.id}';">New Contact</button>
                         <button class="btn-small" onclick="app.openDealForm(); document.getElementById('dealAccount').value='${a.id}';">New Process</button>
+                        <button class="btn-small" onclick="app.openEventForm(); document.getElementById('eventAccount').value='${a.id}';">New Event</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
@@ -3937,6 +3973,7 @@ const app = {
                     <div><div class="sf-hl-field-label">Contacts</div><div class="sf-hl-field-value">${contacts.length}</div></div>
                     <div><div class="sf-hl-field-label">Processes</div><div class="sf-hl-field-value">${deals.length}</div></div>
                     <div><div class="sf-hl-field-label">Pipeline</div><div class="sf-hl-field-value">$${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div></div>
+                    <div><div class="sf-hl-field-label">Events</div><div class="sf-hl-field-value">${this.data.events.filter(e => e.accountId === a.id).length}</div></div>
                 </div>
             </div>
             <div class="detail-container">
@@ -4503,6 +4540,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
     // Register service worker for offline support
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+            e.preventDefault();
+            const search = document.getElementById('globalSearch');
+            if (search) search.focus();
+        }
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
+            const fab = document.getElementById('fabOptions');
+            if (fab) fab.style.display = 'none';
+        }
+    });
+
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
     </script>
 </body>
