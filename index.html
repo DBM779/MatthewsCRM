@@ -1795,8 +1795,8 @@ const app = {
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
-                <div class="stat-card"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app._dealView='analytics';app.navigate('deals')"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('tasks')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
             </div>
 
             <!-- TODAY'S ACTION PLAN (top position) -->
@@ -1826,9 +1826,9 @@ const app = {
                     const wm = this.data.contacts.filter(c => gd2(c) > 30 && gd2(c) <= 90).length;
                     const co = this.data.contacts.filter(c => gd2(c) > 90).length;
                     const tt = this.data.contacts.length || 1;
-                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-success);">Active ≤30D</div><div style="font-size:18px; font-weight:300; color:var(--sf-success);">${ac}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(ac/tt*100)}%</div></div>
-                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-warning);">Cooling 30-90D</div><div style="font-size:18px; font-weight:300; color:var(--sf-warning);">${wm}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(wm/tt*100)}%</div></div>
-                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center;"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-error);">Cold 90D+</div><div style="font-size:18px; font-weight:300; color:var(--sf-error);">${co}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(co/tt*100)}%</div></div>`;
+                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='active';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-success);">Active ≤30D</div><div style="font-size:18px; font-weight:300; color:var(--sf-success);">${ac}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(ac/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='cooling';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-warning);">Cooling 30-90D</div><div style="font-size:18px; font-weight:300; color:var(--sf-warning);">${wm}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(wm/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='cold';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-error);">Cold 90D+</div><div style="font-size:18px; font-weight:300; color:var(--sf-error);">${co}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(co/tt*100)}%</div></div>`;
                 })()}
             </div>
 
@@ -1914,7 +1914,7 @@ const app = {
                                 const count = activeDeals.filter(d => d.stage === s).length;
                                 const val = stageVals[i];
                                 const pct = Math.max(val / maxVal * 100, 2);
-                                return `<div style="margin-bottom:10px;">
+                                return `<div style="margin-bottom:10px;cursor:pointer;" onclick="app._dealView='pipeline';app.navigate('deals');">
                                     <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
                                         <span style="font-weight:500;">${s} (${count})</span>
                                         <span style="color:var(--sf-text-weak);">$${val.toFixed(1)}M</span>
@@ -2536,6 +2536,17 @@ const app = {
                 return searchable.includes(lt);
             });
         }
+        if (f.dsla) {
+            const now = new Date();
+            filtered = filtered.filter(c => {
+                const la = c.la || c.last_activity_display;
+                const days = la ? Math.floor((now - new Date(la)) / 86400000) : 999;
+                if (f.dsla === 'active') return days <= 30;
+                if (f.dsla === 'cooling') return days > 30 && days <= 90;
+                if (f.dsla === 'cold') return days > 90;
+                return true;
+            });
+        }
 
         const sorted = this._applySortToList(filtered.map(c => {
             const cpy = this.data.accounts.find(a => a.id === (c.accountId || c.account_id));
@@ -2599,7 +2610,8 @@ const app = {
             </div>` : ''}
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
                 <input type="text" placeholder="Search contacts…" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
-                ${f.text || f.tier ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
+                ${f.dsla ? `<span style="font-size:11px;padding:3px 8px;border-radius:3px;background:var(--sf-brand);color:#fff;font-weight:600;">${f.dsla==='active'?'Active ≤30D':f.dsla==='cooling'?'Cooling 30-90D':'Cold 90D+'}</span>` : ''}
+                ${f.text || f.tier || f._ob || f.dsla ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
                 <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
             </div>
             <div class="card" style="overflow:hidden;">
@@ -2679,7 +2691,7 @@ const app = {
         this.renderContacts();
     },
     clearContactFilters() {
-        this.contactFilters = {tier: '', text: ''};
+        this.contactFilters = {tier: '', text: '', dsla: '', _ob: ''};
         localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
         this.renderContacts();
     },
