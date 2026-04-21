@@ -516,6 +516,7 @@
         <div class="sf-app-tab" data-view="contacts" onclick="app.navigate('contacts')"><span class="obj-icon obj-icon-contact">C</span>Contacts</div>
         <div class="sf-app-tab" data-view="accounts" onclick="app.navigate('accounts')"><span class="obj-icon obj-icon-account">A</span>Accounts</div>
         <div class="sf-app-tab" data-view="activities" onclick="app.navigate('activities')"><span class="obj-icon obj-icon-activity">E</span>Events</div>
+        <div class="sf-app-tab" data-view="tasks" onclick="app.navigate('tasks')"><span class="obj-icon" style="background:#48c3cc;">T</span>Activities</div>
         <div class="sf-app-tab" data-view="calendar" onclick="app.navigate('calendar')"><span class="obj-icon obj-icon-activity">C</span>Calendar</div>
         <div class="sf-app-tab" data-view="map" onclick="app.navigate('map')"><span class="obj-icon obj-icon-map">M</span>Map</div>
         <div class="sf-app-tab" data-view="deals" onclick="app.navigate('deals')"><span class="obj-icon obj-icon-deal">P</span>Processes</div>
@@ -1713,6 +1714,7 @@ const app = {
             case 'map': this.renderMap(); break;
             case 'emails': this.renderEmails(); break;
             case 'referrals': this.renderReferrals(); break;
+            case 'tasks': this.renderTaskBoard(); break;
             case 'reports': this.renderReports(); break;
             case 'investors': this.renderInvestors(); break;
             case 'settings': this.renderSettings(); break;
@@ -5116,6 +5118,119 @@ const app = {
         });
         panel.innerHTML = html;
         panel.classList.add('show');
+    },
+
+    _taskFilter: {type:'', priority:'', text:'', contact:''},
+    _taskView: 'board',
+
+    renderTaskBoard() {
+        const v = this._taskView;
+        const tf = this._taskFilter;
+        const typeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄',Text:'💬'};
+        const priorityColors = {High:'#ef4444',Normal:'#3b82f6',Low:'#9ca3af'};
+        let acts = [...this.data.activities];
+        if (tf.type) acts = acts.filter(a => a.type === tf.type);
+        if (tf.priority) acts = acts.filter(a => a.priority === tf.priority);
+        if (tf.contact) { const lt = tf.contact.toLowerCase(); acts = acts.filter(a => { const c = this.data.contacts.find(x => x.id === (a.contactId||a.contact_id)); return c && c.name.toLowerCase().includes(lt); }); }
+        if (tf.text) { const lt = tf.text.toLowerCase(); acts = acts.filter(a => (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt)); }
+
+        const statuses = ['Not Started','In Progress','Waiting','Deferred','Completed'];
+        const overdue = acts.filter(a => a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed').length;
+        const dueToday = acts.filter(a => a.dueDate && a.dueDate === new Date().toISOString().slice(0,10) && a.status !== 'Completed').length;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:10px;"><h2 style="margin:0;">Activities</h2>'
+            + (overdue ? '<span style="font-size:11px;padding:3px 10px;border-radius:12px;background:#fee2e2;color:#991b1b;font-weight:700;">' + overdue + ' overdue</span>' : '')
+            + (dueToday ? '<span style="font-size:11px;padding:3px 10px;border-radius:12px;background:#fef3c7;color:#92400e;font-weight:700;">' + dueToday + ' due today</span>' : '')
+            + '</div><div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='board'?'active':'') + '" onclick="app._taskView=\'board\';app.renderTaskBoard();">Board</button>'
+            + '<button class="cal-view-tab ' + (v==='list'?'active':'') + '" onclick="app._taskView=\'list\';app.renderTaskBoard();">List</button>'
+            + '</div>'
+            + '<button class="btn-primary" onclick="app.openActivityForm()">+ Activity</button></div></div>';
+
+        html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'
+            + '<input type="text" placeholder="Search…" value="' + (tf.text||'') + '" oninput="app._taskFilter.text=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px 10px;font-size:12px;width:160px;">'
+            + '<select onchange="app._taskFilter.type=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px;font-size:12px;"><option value="">All Types</option>' + Object.keys(typeIcons).map(t => '<option value="' + t + '" ' + (tf.type===t?'selected':'') + '>' + typeIcons[t] + ' ' + t + '</option>').join('') + '</select>'
+            + '<select onchange="app._taskFilter.priority=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px;font-size:12px;"><option value="">All Priority</option><option value="High" ' + (tf.priority==='High'?'selected':'') + '>🔴 High</option><option value="Normal" ' + (tf.priority==='Normal'?'selected':'') + '>🔵 Normal</option><option value="Low" ' + (tf.priority==='Low'?'selected':'') + '>⚪ Low</option></select>'
+            + '<input type="text" placeholder="Filter by contact…" value="' + (tf.contact||'') + '" oninput="app._taskFilter.contact=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px 10px;font-size:12px;width:140px;">'
+            + (tf.text||tf.type||tf.priority||tf.contact ? '<button class="btn-small" onclick="app._taskFilter={type:\'\',priority:\'\',text:\'\',contact:\'\'};app.renderTaskBoard();">Clear</button>' : '')
+            + '</div>';
+
+        if (v === 'board') {
+            html += '<div class="kanban-board" style="min-height:500px;">';
+            statuses.forEach(status => {
+                const col = acts.filter(a => a.status === status).sort((a,b) => {
+                    const po = {High:0,Normal:1,Low:2};
+                    return (po[a.priority]||1) - (po[b.priority]||1) || (a.dueDate||'9').localeCompare(b.dueDate||'9');
+                });
+                const colColor = status==='Completed'?'#22c55e':status==='In Progress'?'#3b82f6':status==='Waiting'?'#f59e0b':status==='Deferred'?'#9ca3af':'#6b7280';
+                html += '<div class="kanban-column" data-status="' + status + '" ondragover="event.preventDefault();this.classList.add(\'drag-over\');" ondragleave="this.classList.remove(\'drag-over\');" ondrop="this.classList.remove(\'drag-over\');app.dropActivity(event,\'' + status + '\');">';
+                html += '<div class="kanban-header"><span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:' + colColor + ';"></span>' + status + ' <span class="kh-count">' + col.length + '</span></span></div>';
+                col.forEach(a => {
+                    const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                    const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+                    const evt = this.data.events.find(e => (e.activityIds||[]).includes(a.id));
+                    const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+                    const pColor = priorityColors[a.priority] || '#3b82f6';
+                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.editActivity(\'' + a.id + '\')">';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
+                    html += '<div class="kanban-card-title">' + (typeIcons[a.type]||'') + ' ' + (a.subject||a.type||'') + '</div>';
+                    if (isOverdue) html += '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:700;">OVERDUE</span>';
+                    html += '</div>';
+                    if (a.dueDate) html += '<div style="font-size:10px;color:' + (isOverdue?'#ef4444':'var(--sf-text-weak)') + ';margin:2px 0;">📅 ' + a.dueDate + '</div>';
+                    if (a.notes) html += '<div style="font-size:10px;color:var(--sf-text-weak);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">' + a.notes.slice(0,60) + '</div>';
+                    const tags = [];
+                    if (con) tags.push('<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">👤 ' + con.name.split(' ')[0] + '</a>');
+                    if (deal) tags.push('<a onclick="event.stopPropagation();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">💼 ' + (deal.name||'').slice(0,15) + '</a>');
+                    if (evt) tags.push('<span style="color:#e6853d;">📅 ' + (evt.name||'').slice(0,15) + '</span>');
+                    if (a.accountId) { const acc = this.data.accounts.find(x => x.id === a.accountId); if (acc) tags.push('<span style="color:#7f8de1;">🏢 ' + acc.name.split(' ')[0] + '</span>'); }
+                    if (tags.length) html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:10px;">' + tags.join('') + '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            });
+            html += '</div>';
+        } else {
+            acts.sort((a,b) => {
+                const po = {High:0,Normal:1,Low:2};
+                return (po[a.priority]||1) - (po[b.priority]||1) || (a.dueDate||'9').localeCompare(b.dueDate||'9');
+            });
+            html += '<div class="card"><div style="padding:0;"><table class="compact-table"><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Deal</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
+            acts.forEach(a => {
+                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+                const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+                html += '<tr style="cursor:pointer;' + (isOverdue?'background:#fef2f2;':'') + '" onclick="app.editActivity(\'' + a.id + '\')">'
+                    + '<td>' + (typeIcons[a.type]||'') + ' ' + (a.type||'') + '</td>'
+                    + '<td style="font-weight:600;">' + (a.subject||'') + '</td>'
+                    + '<td>' + (con ? '<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + con.name + '</a>' : '') + '</td>'
+                    + '<td>' + (deal ? deal.name : '') + '</td>'
+                    + '<td style="color:' + (isOverdue?'#ef4444':'inherit') + ';">' + (a.dueDate||'') + (isOverdue?' ⚠':'') + '</td>'
+                    + '<td><span style="color:' + (priorityColors[a.priority]||'#3b82f6') + ';font-weight:600;">' + (a.priority||'Normal') + '</span></td>'
+                    + '<td>' + (a.status||'') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    dragActivity(e, id) { e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); },
+
+    dropActivity(e, newStatus) {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const act = this.data.activities.find(a => a.id === id);
+        if (!act || act.status === newStatus) return;
+        this.logChange('activity', id, act.subject||act.type, [{field:'status', from: act.status, to: newStatus}]);
+        act.status = newStatus;
+        if (newStatus === 'Completed' && act.contactId) {
+            const con = this.data.contacts.find(c => c.id === act.contactId);
+            if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) con.la = today; }
+        }
+        this.persist();
+        this.renderTaskBoard();
     },
 
     renderInvestors() {
