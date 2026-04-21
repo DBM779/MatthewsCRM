@@ -5843,6 +5843,8 @@ Tone: Professional but personal, not overly formal`;
             + '<button class="cal-view-tab ' + (v==='calendar'?'active':'') + '" onclick="app._taskView=\'calendar\';app.renderTaskBoard();">Calendar</button>'
             + '</div>'
             + '<label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" ' + (this._showArchived?'checked':'') + ' onchange="app._showArchived=this.checked;app.renderTaskBoard();" style="width:auto;min-height:auto;">Archived</label>'
+            + '<button class="btn-small" onclick="app.saveTaskView();">⭐ Save View</button>'
+            + (() => { const sv = JSON.parse(localStorage.getItem('matthewsCRM_taskViews')||'[]'); return sv.length ? '<select onchange="if(this.value)app.loadTaskView(parseInt(this.value));this.value=\'\';" style="min-height:28px;padding:2px 4px;font-size:11px;"><option value="">Saved Views</option>' + sv.map((v,i) => '<option value="'+i+'">'+esc(v.name)+'</option>').join('') + '</select>' : ''; })()
             + '<div style="position:relative;display:inline-block;"><button class="btn-small" onclick="document.getElementById(\'taskTmplMenu\').style.display=document.getElementById(\'taskTmplMenu\').style.display===\'block\'?\'none\':\'block\';">Templates ▾</button>'
             + '<div id="taskTmplMenu" style="display:none;position:absolute;right:0;top:28px;background:#fff;border:1px solid var(--sf-border);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;min-width:180px;">'
             + '<div onclick="app.createTaskFromTemplate(\'call\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📞 Follow-up Call</div>'
@@ -5902,7 +5904,15 @@ Tone: Professional but personal, not overly formal`;
                     if (evt) tags.push('<span style="color:#e6853d;">📅 ' + (evt.name||'').slice(0,15) + '</span>');
                     if (a.accountId) { const acc = this.data.accounts.find(x => x.id === a.accountId); if (acc) tags.push('<span style="color:#7f8de1;">🏢 ' + acc.name.split(' ')[0] + '</span>'); }
                     if ((a._labels||[]).length) html += '<div style="display:flex;gap:2px;margin-top:3px;">' + a._labels.map(l => '<span style="width:20px;height:6px;border-radius:3px;background:'+l+';display:inline-block;"></span>').join('') + '</div>';
-                    if ((a._checklist||[]).length) { const cd = a._checklist.filter(c=>c.done).length; html += '<div style="font-size:9px;color:var(--sf-text-weak);margin-top:2px;">☑ ' + cd + '/' + a._checklist.length + '</div>'; }
+                    const cardMeta = [];
+                    if ((a._checklist||[]).length) { const cd = a._checklist.filter(c=>c.done).length; cardMeta.push('☑ ' + cd + '/' + a._checklist.length); }
+                    if (a._timeLogged) { const th = Math.floor(a._timeLogged/60); cardMeta.push('⏱ ' + (th ? th + 'h' : '') + (a._timeLogged%60) + 'm'); }
+                    if (a._timerStart) cardMeta.push('<span style="color:#22c55e;">● Live</span>');
+                    if ((a._comments||[]).length) cardMeta.push('💬 ' + a._comments.length);
+                    if ((a._attachments||[]).length) cardMeta.push('📎 ' + a._attachments.length);
+                    if ((a._blockedBy||[]).length) cardMeta.push('<span style="color:#ef4444;">🚫 Blocked</span>');
+                    if (a._recurring) cardMeta.push('🔁');
+                    if (cardMeta.length) html += '<div style="font-size:9px;color:var(--sf-text-weak);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;">' + cardMeta.join(' ') + '</div>';
                     if (tags.length) html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:10px;">' + tags.join('') + '</div>';
                     html += '</div>';
                 });
@@ -5998,6 +6008,95 @@ Tone: Professional but personal, not overly formal`;
     },
 
     _showArchived: false,
+    _activeTimer: null,
+
+    startTaskTimer(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (this._activeTimer && this._activeTimer !== id) { this.stopTaskTimer(this._activeTimer); }
+        a._timerStart = Date.now();
+        this._activeTimer = id;
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    stopTaskTimer(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a || !a._timerStart) return;
+        const elapsed = Math.floor((Date.now() - a._timerStart) / 60000);
+        if (!a._timeLogged) a._timeLogged = 0;
+        a._timeLogged += elapsed;
+        delete a._timerStart;
+        if (this._activeTimer === id) this._activeTimer = null;
+        if (!a._activity_log) a._activity_log = [];
+        a._activity_log.push({action: 'Logged ' + elapsed + ' min', date: new Date().toISOString()});
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    addManualTime(id) {
+        const mins = parseInt(prompt('Minutes to add:', '30'));
+        if (!mins || isNaN(mins)) return;
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (!a._timeLogged) a._timeLogged = 0;
+        a._timeLogged += mins;
+        if (!a._activity_log) a._activity_log = [];
+        a._activity_log.push({action: 'Manually logged ' + mins + ' min', date: new Date().toISOString()});
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    addTaskDependency(id) {
+        const name = prompt('This task is blocked by (enter task subject):');
+        if (!name) return;
+        const blocker = this.data.activities.find(a => (a.subject||'').toLowerCase().includes(name.toLowerCase()));
+        if (!blocker) { alert('Task not found.'); return; }
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (!a._blockedBy) a._blockedBy = [];
+        if (!a._blockedBy.includes(blocker.id)) a._blockedBy.push(blocker.id);
+        if (!blocker._blocks) blocker._blocks = [];
+        if (!blocker._blocks.includes(id)) blocker._blocks.push(id);
+        firestoreUpsert('activities', a); firestoreUpsert('activities', blocker); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    async aiSuggestNextSteps(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        const el = document.getElementById('taskAiPanel');
+        if (el) el.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">✨ Thinking...</div>';
+        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+        const checklist = (a._checklist||[]).map(c => (c.done?'✓':'○') + ' ' + c.text).join(', ');
+        const prompt = 'You are a productivity advisor for an investment banker. Given this task, suggest 3 specific next actions and any risks. Be concise.\n\nTask: ' + (a.subject||'') + '\nType: ' + (a.type||'') + '\nStatus: ' + (a.status||'') + '\nPriority: ' + (a.priority||'') + '\nNotes: ' + (a.notes||'None') + '\nChecklist: ' + (checklist||'None') + '\nContact: ' + (con?con.name:'None') + '\nDeal: ' + (deal?deal.name:'None') + '\nTime logged: ' + (a._timeLogged||0) + ' min';
+        const result = await this.askGemini(prompt);
+        if (el) this._showAIPanel('taskAiPanel', result);
+    },
+
+    _taskSavedViews: null,
+    saveTaskView() {
+        const name = prompt('Name this view:');
+        if (!name) return;
+        if (!this._taskSavedViews) this._taskSavedViews = JSON.parse(localStorage.getItem('matthewsCRM_taskViews') || '[]');
+        this._taskSavedViews.push({name, filters: {...this._taskFilter}, view: this._taskView});
+        localStorage.setItem('matthewsCRM_taskViews', JSON.stringify(this._taskSavedViews));
+        this.renderTaskBoard();
+    },
+
+    loadTaskView(idx) {
+        if (!this._taskSavedViews) this._taskSavedViews = JSON.parse(localStorage.getItem('matthewsCRM_taskViews') || '[]');
+        const v = this._taskSavedViews[idx];
+        if (!v) return;
+        this._taskFilter = {...v.filters};
+        this._taskView = v.view || 'board';
+        this.renderTaskBoard();
+    },
 
     quickAddTask(subject, status) {
         const newAct = {id: 'act-' + Date.now(), type: 'Task', subject, status, priority: 'Normal', dueDate: null, notes: null, createdAt: new Date().toISOString()};
@@ -6080,7 +6179,17 @@ Tone: Professional but personal, not overly formal`;
         h += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Comments</div>';
         h += '<div style="display:flex;gap:6px;margin-bottom:8px;"><input type="text" id="taskCommentInput" placeholder="Add a comment…" style="flex:1;min-height:30px;padding:4px 8px;font-size:12px;" onkeydown="if(event.key===\'Enter\')app.addTaskComment(\'' + id + '\')"><button class="btn-small" onclick="app.addTaskComment(\'' + id + '\')">Post</button></div>';
         comments.slice().reverse().forEach(c => { h += '<div style="padding:6px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;"><div style="color:var(--sf-text-weak);font-size:10px;">' + (c.date?new Date(c.date).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'') + '</div><div>' + esc(c.text) + '</div></div>'; });
-        h += '</div></div>';
+        h += '</div>';
+        // AI panel
+        h += '<div id="taskAiPanel"></div>';
+        // Activity log
+        const actLog = a._activity_log || [];
+        if (actLog.length) {
+            h += '<div style="margin-top:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Activity Log</div>';
+            actLog.slice(-10).reverse().forEach(l => { h += '<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--sf-border-weak);color:var(--sf-text-weak);">' + (l.date?new Date(l.date).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' — ':'') + esc(l.action) + '</div>'; });
+            h += '</div>';
+        }
+        h += '</div>';
         h += '<div style="width:200px;padding:16px;flex-shrink:0;">';
         h += '<div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:8px;">Details</div>';
         h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Status:</span> ' + (a.status||'') + '</div>';
@@ -6089,8 +6198,30 @@ Tone: Professional but personal, not overly formal`;
         if (con) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Contact:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + esc(con.name) + '</a></div>';
         if (deal) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Deal:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">' + esc(deal.name) + '</a></div>';
         if (acct) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Account:</span> ' + esc(acct.name) + '</div>';
+        // Time tracking
+        const timeLogged = a._timeLogged || 0;
+        const hrs = Math.floor(timeLogged/60); const mins = timeLogged%60;
+        h += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--sf-border-weak);">';
+        h += '<div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">⏱ Time Tracked</div>';
+        h += '<div style="font-size:16px;font-weight:700;margin-bottom:4px;">' + (hrs ? hrs + 'h ' : '') + mins + 'm</div>';
+        if (a._timerStart) { h += '<button class="btn-small" style="width:100%;background:#fee2e2;color:#991b1b;" onclick="app.stopTaskTimer(\'' + id + '\')">⏹ Stop Timer</button>'; }
+        else { h += '<button class="btn-small" style="width:100%;background:#dcfce7;color:#166534;" onclick="app.startTaskTimer(\'' + id + '\')">▶ Start Timer</button>'; }
+        h += '<button class="btn-small" style="width:100%;margin-top:2px;" onclick="app.addManualTime(\'' + id + '\')">+ Log Time</button>';
+        h += '</div>';
+        // Dependencies
+        const blockedBy = (a._blockedBy||[]).map(bid => this.data.activities.find(x => x.id === bid)).filter(Boolean);
+        const blocks = (a._blocks||[]).map(bid => this.data.activities.find(x => x.id === bid)).filter(Boolean);
+        if (blockedBy.length || blocks.length) {
+            h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--sf-border-weak);font-size:11px;">';
+            if (blockedBy.length) { h += '<div style="color:var(--sf-error);font-weight:600;margin-bottom:2px;">🚫 Blocked by:</div>'; blockedBy.forEach(b => { h += '<div style="padding:1px 0;cursor:pointer;color:var(--sf-brand);" onclick="this.closest(\'[style*=fixed]\').remove();app.openTaskDetail(\'' + b.id + '\');">' + esc(b.subject||b.type) + '</div>'; }); }
+            if (blocks.length) { h += '<div style="color:var(--sf-warning);font-weight:600;margin-top:4px;margin-bottom:2px;">⏳ Blocks:</div>'; blocks.forEach(b => { h += '<div style="padding:1px 0;cursor:pointer;color:var(--sf-brand);" onclick="this.closest(\'[style*=fixed]\').remove();app.openTaskDetail(\'' + b.id + '\');">' + esc(b.subject||b.type) + '</div>'; }); }
+            h += '</div>';
+        }
         h += '<div style="margin-top:16px;display:flex;flex-direction:column;gap:4px;">';
         h += '<button class="btn-small" style="width:100%;" onclick="this.closest(\'[style*=fixed]\').remove();app.editActivity(\'' + id + '\')">✏ Edit</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.addTaskDependency(\'' + id + '\')">🔗 Add Dependency</button>';
+        h += '<button class="btn-small" style="width:100%;background:#e8f0fe;color:#1a73e8;" onclick="app.aiSuggestNextSteps(\'' + id + '\')">✨ AI Suggest</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.searchGoogleDrive(\'' + esc((a.subject||'').replace(/'/g,"\\'")) + '\')">🔍 Search Drive</button>';
         h += '<button class="btn-small" style="width:100%;" onclick="app.duplicateTask(\'' + id + '\')">📋 Duplicate</button>';
         h += '<button class="btn-small" style="width:100%;" onclick="app.toggleRecurring(\'' + id + '\')">' + (a._recurring ? '🔁 Recurring: ' + a._recurring : '🔁 Make Recurring') + '</button>';
         h += '<button class="btn-small" style="width:100%;" onclick="this.closest(\'[style*=fixed]\').remove();app.archiveTask(\'' + id + '\');">📦 Archive</button>';
