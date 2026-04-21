@@ -1556,57 +1556,79 @@ Tone: Professional but personal, not overly formal`;
             const text = await file.text();
             const data = JSON.parse(text);
             let matched = 0, created = 0, messages = 0;
-
-            const followers = data.followers || data.relationships_followers || [];
-            const following = data.following || data.relationships_following || [];
-            const inbox = data.inbox || data.messages || [];
-
             const allUsers = [];
-            const extract = (list, key) => {
-                (Array.isArray(list) ? list : list[key] || []).forEach(item => {
-                    const val = item.string_list_data || item.value || item;
-                    const name = typeof val === 'string' ? val : (val[0]?.value || val.username || item.username || item.name || '');
-                    const href = typeof val === 'object' && val[0]?.href ? val[0].href : '';
-                    const ts = typeof val === 'object' && val[0]?.timestamp ? val[0].timestamp : null;
-                    if (name) allUsers.push({name: name.replace(/_/g,' '), username: name, href, ts});
+
+            const extractUser = (item) => {
+                if (item.string_list_data && Array.isArray(item.string_list_data)) {
+                    const d = item.string_list_data[0];
+                    if (d && d.value) return {username: d.value, href: d.href || '', ts: d.timestamp || null};
+                }
+                if (item.value) return {username: item.value, href: item.href || '', ts: item.timestamp || null};
+                if (item.username) return {username: item.username, href: '', ts: null};
+                if (item.name) return {username: item.name, href: '', ts: null};
+                if (typeof item === 'string') return {username: item, href: '', ts: null};
+                return null;
+            };
+
+            const processArray = (arr) => {
+                if (!Array.isArray(arr)) return;
+                arr.forEach(item => {
+                    const u = extractUser(item);
+                    if (u && u.username) allUsers.push(u);
                 });
             };
-            extract(followers, 'relationships_followers');
-            extract(following, 'relationships_following');
 
-            const seen = new Set();
-            allUsers.forEach(u => {
-                if (seen.has(u.username)) return;
-                seen.add(u.username);
-                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, u.name) || (c.instagram && c.instagram.replace('@','').toLowerCase() === u.username.toLowerCase()));
-                if (existing) {
-                    if (!existing.instagram) existing.instagram = u.username;
-                    matched++;
-                    firestoreUpsert('contacts', existing);
-                } else {
-                    const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name: u.name, instagram: u.username, tier: '5', tags: 'Instagram Import', createdAt: new Date().toISOString()};
-                    this.data.contacts.push(newC);
-                    firestoreUpsert('contacts', newC);
-                    created++;
-                }
-            });
+            // Handle all known Instagram JSON formats:
+            // Format 1: bare array [{string_list_data:[{value:"user"}]}]  (followers_1.json, following.json)
+            if (Array.isArray(data)) {
+                processArray(data);
+            }
+            // Format 2: {relationships_followers: [...]} or {followers: [...]}
+            else if (typeof data === 'object') {
+                Object.keys(data).forEach(key => {
+                    const val = data[key];
+                    if (Array.isArray(val)) processArray(val);
+                    else if (val && typeof val === 'object' && !Array.isArray(val)) {
+                        Object.values(val).forEach(v => { if (Array.isArray(v)) processArray(v); });
+                    }
+                });
+            }
 
-            if (Array.isArray(inbox)) {
-                inbox.forEach(thread => {
-                    const participants = thread.participants || [];
-                    const msgs = thread.messages || thread.conversation || [];
-                    const otherName = participants.find(p => p.name !== 'You')?.name || participants[0]?.name || '';
+            // Handle messages format: {participants:[...], messages:[...]}
+            if (data.participants && data.messages) {
+                const participants = data.participants || [];
+                const msgs = data.messages || [];
+                const otherName = participants.find(p => p.name)?.name || '';
+                if (otherName) {
                     const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, otherName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === otherName.toLowerCase()));
-                    if (contact && msgs.length) {
+                    if (contact) {
                         if (!contact.ig_messages) contact.ig_messages = [];
                         msgs.slice(0, 50).forEach(m => {
                             const msgText = m.content || m.text || '';
                             const sender = m.sender_name || m.sender || '';
-                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : (m.timestamp ? new Date(m.timestamp * 1000).toISOString() : '');
-                            if (msgText) {
-                                contact.ig_messages.push({from: sender, text: msgText.slice(0, 500), date: ts});
-                                messages++;
-                            }
+                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : '';
+                            if (msgText) { contact.ig_messages.push({from: sender, text: msgText.slice(0,500), date: ts}); messages++; }
+                        });
+                        contact.ig_messages = contact.ig_messages.slice(-100);
+                        firestoreUpsert('contacts', contact);
+                    }
+                }
+            }
+
+            // Handle inbox folder format: [{participants, messages}, ...]
+            const inbox = data.inbox || data.messages;
+            if (Array.isArray(inbox)) {
+                inbox.forEach(thread => {
+                    if (!thread.participants || !thread.messages) return;
+                    const otherName = thread.participants.find(p => p.name)?.name || '';
+                    const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, otherName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === otherName.toLowerCase()));
+                    if (contact && thread.messages.length) {
+                        if (!contact.ig_messages) contact.ig_messages = [];
+                        thread.messages.slice(0, 50).forEach(m => {
+                            const msgText = m.content || m.text || '';
+                            const sender = m.sender_name || m.sender || '';
+                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : '';
+                            if (msgText) { contact.ig_messages.push({from: sender, text: msgText.slice(0,500), date: ts}); messages++; }
                         });
                         contact.ig_messages = contact.ig_messages.slice(-100);
                         firestoreUpsert('contacts', contact);
@@ -1614,9 +1636,28 @@ Tone: Professional but personal, not overly formal`;
                 });
             }
 
+            const seen = new Set();
+            allUsers.forEach(u => {
+                if (seen.has(u.username.toLowerCase())) return;
+                seen.add(u.username.toLowerCase());
+                const displayName = u.username.replace(/[._]/g, ' ');
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, displayName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === u.username.toLowerCase()));
+                if (existing) {
+                    if (!existing.instagram) existing.instagram = u.username;
+                    matched++;
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name: displayName, instagram: u.username, tier: '5', tags: 'Instagram Import', createdAt: new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    created++;
+                }
+            });
+
             this.persist();
             this.updateSelectOptions();
-            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Instagram import complete: ' + matched + ' matched, ' + created + ' new contacts, ' + messages + ' messages imported</div>';
+            const debugInfo = allUsers.length === 0 ? ' (File keys: ' + Object.keys(typeof data === 'object' && !Array.isArray(data) ? data : {_array: true}).join(', ') + ')' : '';
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:' + (matched+created > 0 ? 'var(--sf-success)' : 'var(--sf-warning)') + ';font-weight:600;">✓ Instagram import: ' + matched + ' matched, ' + created + ' new contacts, ' + messages + ' messages' + esc(debugInfo) + '</div>';
         } catch(e) {
             if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Instagram data download.</div>';
         }
