@@ -1121,6 +1121,7 @@ Recent activity types: ${[...new Set(this.data.activities.slice(-20).map(a=>a.ty
     async aiDraftEmail(contactId) {
         const c = this.data.contacts.find(x => x.id === contactId);
         if (!c) return;
+        if (!c.pe_email && !c.we_email && !c.email) { alert('No email address on file for ' + c.name + '. Add one first.'); return; }
         const purpose = prompt('What is the email about?', 'Follow-up / check in');
         if (!purpose) return;
         const el = document.getElementById('aiEmailDraft');
@@ -1694,11 +1695,13 @@ Tone: Professional but personal, not overly formal`;
                 const changes = this._diffRecord(old, deal, ['name','stage','value','probability','sector','source','sourceContact','closeDate','feeStructure','counterparties','continuationVehicle']);
                 if (changes.length) this.logChange('deal', id, deal.name, changes);
                 this.data.deals[idx] = {...old, ...deal};
+                firestoreUpsert('deals', this.data.deals[idx]);
             }
         } else {
             const newDeal = {...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()};
             if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newDeal._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
             this.data.deals.push(newDeal);
+            firestoreUpsert('deals', newDeal);
             this.logChange('deal', newDeal.id, deal.name, [{field:'created', from:'', to:'New deal'}]);
         }
         this.persist();
@@ -1780,9 +1783,11 @@ Tone: Professional but personal, not overly formal`;
 
         if (id) {
             const idx = this.data.activities.findIndex(a => a.id === id);
-            if (idx >= 0) this.data.activities[idx] = {...this.data.activities[idx], ...activity};
+            if (idx >= 0) { this.data.activities[idx] = {...this.data.activities[idx], ...activity}; firestoreUpsert('activities', this.data.activities[idx]); }
         } else {
-            this.data.activities.push({...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()});
+            const newAct = {...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.activities.push(newAct);
+            firestoreUpsert('activities', newAct);
         }
         // Update contact's Last Activity
         if (activity.contactId && (activity.status === 'Completed' || activity.status === 'Closed')) {
@@ -3294,7 +3299,7 @@ Tone: Professional but personal, not overly formal`;
             + '</div><div style="display:flex;gap:6px;">'
             + '<button class="btn-small" onclick="app.editDeal(\'' + d.id + '\')">Edit</button>'
             + '<button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiAnalyzeDeal(\'' + d.id + '\')">✨ AI Advisor</button>'
-            + '<button class="btn-small" style="color:var(--sf-error);" onclick="if(confirm(\'Delete this deal?\')){app.data.deals=app.data.deals.filter(x=>x.id!==\'' + d.id + '\');app.persist();app._dealView=\'pipeline\';app.renderDeals();}">Delete</button>'
+            + '<button class="btn-small" style="color:var(--sf-error);" onclick="if(confirm(\'Delete this deal?\')){app.data.deals=app.data.deals.filter(x=>x.id!==\'' + d.id + '\');firestoreDelete(\'deals\',\'' + d.id + '\');app.persist();app._dealView=\'pipeline\';app.renderDeals();}">Delete</button>'
             + '</div></div>'
             + '<div id="aiDealPanel"></div>';
 
@@ -3547,11 +3552,12 @@ Tone: Professional but personal, not overly formal`;
         };
         if (id) {
             const idx = this.data.events.findIndex(x => x.id === id);
-            if (idx >= 0) this.data.events[idx] = {...this.data.events[idx], ...evt};
+            if (idx >= 0) { this.data.events[idx] = {...this.data.events[idx], ...evt}; firestoreUpsert('events', this.data.events[idx]); }
         } else {
             const newEvt = {...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()};
             if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newEvt._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
             this.data.events.push(newEvt);
+            firestoreUpsert('events', newEvt);
         }
         this.persist();
         if (evt.address) this.geocodeAddress(evt.address);
@@ -5636,10 +5642,8 @@ Tone: Professional but personal, not overly formal`;
     toggleFundItem(phase, idx, checked) {
         const fund = this.data._fund;
         if (!fund || !fund.phases || !fund.phases[phase] || !fund.phases[phase][idx]) return;
-        if (fund.phases[phase][idx]) {
-            fund.phases[phase][idx].done = checked;
-            this.persist();
-        }
+        fund.phases[phase][idx].done = checked;
+        this.persist();
     },
 
     addFundItem(phase) {
@@ -5900,7 +5904,9 @@ Tone: Professional but personal, not overly formal`;
         const name = prompt('Investor/LP name:');
         if (!name) return;
         const type = prompt('Type (Individual, Family Office, Fund of Funds, Institution, Endowment):', 'Individual') || 'Individual';
-        const committed = parseFloat(prompt('Commitment amount ($M):', '0')) || 0;
+        const commitStr = prompt('Commitment amount ($M):', '0');
+        if (commitStr === null) return;
+        const committed = parseFloat(commitStr) || 0;
         const contactName = prompt('Link to CRM contact (name, or leave blank):', '');
         const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
         if (!this.data.investors) this.data.investors = [];
@@ -7116,7 +7122,7 @@ Tone: Professional but personal, not overly formal`;
         document.getElementById('dealSDE').value = deal.sde || '';
         document.getElementById('dealOwnerInvolvement').value = deal.ownerInvolvement || '';
         document.getElementById('dealListingURL').value = deal.listingURL || '';
-        if (deal.askingPrice && deal.sde) document.getElementById('dealMultiple').textContent = (deal.askingPrice/deal.sde).toFixed(1) + 'x';
+        if (deal.askingPrice && deal.sde && deal.sde > 0) document.getElementById('dealMultiple').textContent = (deal.askingPrice/deal.sde).toFixed(1) + 'x';
         document.getElementById('dealProbability').value = deal.probability || '';
         document.getElementById('dealCloseDate').value = deal.closeDate || '';
         document.getElementById('dealDriveLink').value = deal.driveLink || '';
@@ -7179,7 +7185,7 @@ Tone: Professional but personal, not overly formal`;
         const activityDealSelect = document.getElementById('activityDeal');
 
         accountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-        dealAccountSelect.innerHTML = this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        dealAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
         activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
         activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
         activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
