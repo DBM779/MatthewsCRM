@@ -764,16 +764,34 @@ const cloudSync = {
 
 const db = {
     load() {
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch { return null; }
+        try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
     },
     save(data) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         cloudSync.debouncedPush(data);
     }
 };
+
+// Idempotent write helper: uses record ID as Firestore doc ID
+async function firestoreUpsert(collection, record) {
+    if (!cloudSync.isSignedIn()) return;
+    const userDoc = cloudSync._userDoc();
+    if (!userDoc) return;
+    const id = record.id || (collection.slice(0,3) + '-' + Date.now());
+    record.id = id;
+    record.updated_at = new Date().toISOString();
+    try {
+        await userDoc.collection(collection).doc(id).set(record, {merge: true});
+    } catch (e) { console.error('Firestore write error:', e); }
+    return record;
+}
+
+async function firestoreDelete(collection, id) {
+    if (!cloudSync.isSignedIn()) return;
+    const userDoc = cloudSync._userDoc();
+    if (!userDoc) return;
+    try { await userDoc.collection(collection).doc(id).delete(); } catch {}
+}
 
 const app = {
     currentView: 'dashboard',
@@ -848,43 +866,37 @@ const app = {
         } catch { return []; }
     },
 
+    // Idempotent: check for duplicate auto-logged activity within 60 seconds
+    _isDuplicateActivity(type, contactId) {
+        const now = Date.now();
+        return this.data.activities.some(a => a.type === type && (a.contactId || a.contact_id) === contactId && a.source === 'auto' && a.createdAt && (now - new Date(a.createdAt).getTime()) < 60000);
+    },
+
     logTextFromTap(contactId, phone) {
         const contact = this.data.contacts.find(c => c.id === contactId);
-        if (!contact) return;
-        const today = new Date().toISOString().split('T')[0];
-        contact.la = today;
-        this.data.activities.push({
-            id: 'act-' + Date.now(),
-            type: 'Text',
-            subject: 'Text — ' + (contact.name || ''),
-            contactId: contactId,
-            accountId: contact.accountId || contact.account_id || null,
-            dueDate: today,
-            status: 'Completed',
-            notes: 'Auto-logged from text tap: ' + phone,
-            createdAt: new Date().toISOString()
-        });
-        this.persist();
+        if (!contact) { window.location.href = 'sms:' + phone; return; }
+        if (!this._isDuplicateActivity('Text', contactId)) {
+            const today = new Date().toISOString().split('T')[0];
+            contact.la = today;
+            const act = {id: 'act-' + Date.now(), type: 'Text', subject: 'Text — ' + (contact.name || ''), contactId, accountId: contact.accountId || contact.account_id || null, dueDate: today, status: 'Completed', notes: 'Auto-logged: ' + phone, source: 'auto', createdAt: new Date().toISOString()};
+            this.data.activities.push(act);
+            this.persist();
+            firestoreUpsert('activities', act);
+        }
         window.location.href = 'sms:' + phone;
     },
 
     logCallFromTap(contactId, phone) {
         const contact = this.data.contacts.find(c => c.id === contactId);
-        if (!contact) return;
-        const today = new Date().toISOString().split('T')[0];
-        contact.la = today;
-        this.data.activities.push({
-            id: 'act-' + Date.now(),
-            type: 'Call',
-            subject: 'Call — ' + (contact.name || ''),
-            contactId: contactId,
-            accountId: contact.accountId || contact.account_id || null,
-            dueDate: today,
-            status: 'Completed',
-            notes: 'Auto-logged from phone tap: ' + phone,
-            createdAt: new Date().toISOString()
-        });
-        this.persist();
+        if (!contact) { window.location.href = 'tel:' + phone; return; }
+        if (!this._isDuplicateActivity('Call', contactId)) {
+            const today = new Date().toISOString().split('T')[0];
+            contact.la = today;
+            const act = {id: 'act-' + Date.now(), type: 'Call', subject: 'Call — ' + (contact.name || ''), contactId, accountId: contact.accountId || contact.account_id || null, dueDate: today, status: 'Completed', notes: 'Auto-logged: ' + phone, source: 'auto', createdAt: new Date().toISOString()};
+            this.data.activities.push(act);
+            this.persist();
+            firestoreUpsert('activities', act);
+        }
         window.location.href = 'tel:' + phone;
     },
 
@@ -1191,9 +1203,11 @@ const app = {
         }
         if (id) {
             const idx = this.data.contacts.findIndex(c => c.id === id);
-            if (idx >= 0) this.data.contacts[idx] = {...this.data.contacts[idx], ...contact};
+            if (idx >= 0) { this.data.contacts[idx] = {...this.data.contacts[idx], ...contact}; firestoreUpsert('contacts', this.data.contacts[idx]); }
         } else {
-            this.data.contacts.push({...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()});
+            const newContact = {...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.contacts.push(newContact);
+            firestoreUpsert('contacts', newContact);
         }
         this.persist();
         if (contact.address) this.geocodeAddress(contact.address);
@@ -1215,9 +1229,9 @@ const app = {
 
         if (id) {
             const idx = this.data.accounts.findIndex(a => a.id === id);
-            if (idx >= 0) this.data.accounts[idx] = {...this.data.accounts[idx], ...account};
+            if (idx >= 0) this.data.accounts[idx] = {...this.data.accounts[idx], ...account}; firestoreUpsert("accounts", this.data.accounts[idx]);
         } else {
-            this.data.accounts.push({...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()});
+            const newAcct = {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()}; this.data.accounts.push(newAcct); firestoreUpsert('accounts', newAcct);
         }
         this.persist();
         if (account.address) this.geocodeAddress(account.address);
@@ -1343,22 +1357,22 @@ const app = {
 
     deleteContact(id) {
         if (!confirm('Delete this contact?')) return;
-        this.data.contacts = this.data.contacts.filter(c => c.id !== id);
+        this.data.contacts = this.data.contacts.filter(c => c.id !== id); firestoreDelete('contacts', id);
         this.persist(); this.render();
     },
     deleteAccount(id) {
         if (!confirm('Delete this account?')) return;
-        this.data.accounts = this.data.accounts.filter(a => a.id !== id);
+        this.data.accounts = this.data.accounts.filter(a => a.id !== id); firestoreDelete('accounts', id);
         this.persist(); this.render();
     },
     deleteDeal(id) {
         if (!confirm('Delete this deal?')) return;
-        this.data.deals = this.data.deals.filter(d => d.id !== id);
+        this.data.deals = this.data.deals.filter(d => d.id !== id); firestoreDelete('deals', id);
         this.persist(); this.render();
     },
     deleteActivity(id) {
         if (!confirm('Delete this activity?')) return;
-        this.data.activities = this.data.activities.filter(a => a.id !== id);
+        this.data.activities = this.data.activities.filter(a => a.id !== id); firestoreDelete('activities', id);
         this.persist(); this.render();
     },
 
@@ -2507,7 +2521,7 @@ const app = {
 
     deleteEvent(id) {
         if (!confirm('Delete this event?')) return;
-        this.data.events = this.data.events.filter(x => x.id !== id);
+        this.data.events = this.data.events.filter(x => x.id !== id); firestoreDelete('events', id);
         this.persist();
         if (this.currentView === 'activityDetail') { this.currentView = 'activities'; }
         this.render();
