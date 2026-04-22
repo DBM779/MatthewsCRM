@@ -1,0 +1,16 @@
+{
+  "name": "Matthews CRM",
+  "short_name": "CRM",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#16325c",
+  "theme_color": "#16325c",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%2316325c'/><text x='96' y='130' font-size='120' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>M</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "functions",
+  "description": "Matthews CRM Cloud Functions",
+  "scripts": {"serve": "firebase emulators:start --only functions", "deploy": "firebase deploy --only functions"},
+  "engines": {"node": "22"},
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.8.0",
+    "firebase-functions": "^7.2.5",
+    "pg": "^8.13.0"
+  }
+}
