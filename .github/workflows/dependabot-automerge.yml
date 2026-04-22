@@ -1,0 +1,35 @@
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-approve and auto-merge (patch + minor)
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review "$PR_URL" --approve -b "Auto-approved: ${{ steps.meta.outputs.update-type }} (safe-updates group)"
+          gh pr merge "$PR_URL" --auto --squash --delete-branch
+
+      - name: Comment on major bumps (human review required)
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR_URL" --body "Major version bump detected for **${{ steps.meta.outputs.dependency-names }}** (${{ steps.meta.outputs.previous-version }} → ${{ steps.meta.outputs.new-version }}). Not auto-merging — a human needs to review the migration notes before merge."
