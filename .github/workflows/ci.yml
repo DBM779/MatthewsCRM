@@ -24,4 +24,5 @@ jobs:
       - run: npm ci
 
       - name: Smoke test (require index.js loads)
-        run: node -e "require('./index.js'); console.log('OK: index.js loaded on Node' + process.version)"
+        run: |
+          node -e "require('./index.js'); console.log('OK - index.js loaded on Node ' + process.version)"
