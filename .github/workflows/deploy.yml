@@ -73,7 +73,8 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Deploy failed on main (${sha})`,
-              body: `Automated deploy failed.\n\n- Commit: ${sha}\n- Run: ${runUrl}\n\nCheck the logs and either fix forward or revert ${sha}.`,
-              labels: ['deploy-failure']
+              title: `🚨 Deploy failed on main (${sha})`,
+              body: `@DBM779 — automated deploy to Firebase failed. The live CRM may be in a broken state.\n\n- **Commit:** ${sha}\n- **Run logs:** ${runUrl}\n\n**Next steps:**\n1. Open the run log above and find the failing step\n2. Either push a fix (pipeline will redeploy) or revert \`${sha}\` on main\n3. Close this issue once \`/health\` is back to 200\n\nIf you want Claude to handle this, paste the run URL into a Claude Code session.`,
+              labels: ['deploy-failure'],
+              assignees: ['DBM779']
             });

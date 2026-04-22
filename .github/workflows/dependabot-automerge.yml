@@ -26,10 +26,11 @@ jobs:
           gh pr review "$PR_URL" --approve -b "Auto-approved: ${{ steps.meta.outputs.update-type }} (safe-updates group)"
           gh pr merge "$PR_URL" --auto --squash --delete-branch
 
-      - name: Comment on major bumps (human review required)
+      - name: Flag major bumps for human review (@mention + assign)
         if: steps.meta.outputs.update-type == 'version-update:semver-major'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          gh pr comment "$PR_URL" --body "Major version bump detected for **${{ steps.meta.outputs.dependency-names }}** (${{ steps.meta.outputs.previous-version }} → ${{ steps.meta.outputs.new-version }}). Not auto-merging — a human needs to review the migration notes before merge."
+          gh pr comment "$PR_URL" --body "@DBM779 — major version bump for **${{ steps.meta.outputs.dependency-names }}** (${{ steps.meta.outputs.previous-version }} → ${{ steps.meta.outputs.new-version }}). Not auto-merging — please review the changelog / migration notes for breaking changes before merging. Paste this PR URL into Claude Code if you want help reviewing."
+          gh pr edit "$PR_URL" --add-assignee DBM779
