@@ -1040,6 +1040,47 @@ ${guestInfo || 'No attendees linked'}`;
         this._showAIPanel('aiMeetingPanel', result);
     },
 
+    async loadAutoInsights() {
+        const el = document.getElementById('aiDashInsights');
+        if (!el) return;
+        const token = await getAuthToken();
+        if (!token) { el.innerHTML = '<div style="font-size:12px;color:var(--sf-text-weak);">Sign in to see AI insights.</div>'; return; }
+        try {
+            const res = await fetch(SQL_API + '/ai_insights', {headers: {'Authorization': 'Bearer ' + token}});
+            if (!res.ok) throw new Error('Failed');
+            const insights = await res.json();
+            const active = insights.filter(i => !i.dismissed).slice(0, 8);
+            if (!active.length) { el.innerHTML = '<div style="font-size:12px;color:var(--sf-text-weak);">No insights yet. Click "Run Analysis" to generate.</div>'; return; }
+            el.innerHTML = active.map(i => {
+                const pColor = i.priority === 'high' ? '#ef4444' : i.priority === 'medium' ? '#f59e0b' : '#3b82f6';
+                const pIcon = i.priority === 'high' ? '🔴' : i.priority === 'medium' ? '🟡' : '🔵';
+                return '<div style="padding:8px 0;border-bottom:1px solid var(--sf-border-weak);"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div style="font-size:13px;font-weight:600;">' + pIcon + ' ' + esc(i.title) + '</div><button class="btn-small" onclick="app.dismissInsight(' + i.id + ')" style="font-size:9px;padding:1px 6px;">✕</button></div>' + (i.body ? '<div style="font-size:12px;color:var(--sf-text-weak);margin-top:2px;">' + esc(i.body) + '</div>' : '') + '</div>';
+            }).join('');
+        } catch { el.innerHTML = '<div style="font-size:12px;color:var(--sf-text-weak);">Click "Run Analysis" to generate insights.</div>'; }
+    },
+
+    async dismissInsight(id) {
+        const token = await getAuthToken();
+        if (!token) return;
+        await fetch(SQL_API + '/ai_insights/' + id, {method: 'PUT', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: JSON.stringify({dismissed: true})});
+        this.loadAutoInsights();
+    },
+
+    async runAutonomousNow() {
+        const el = document.getElementById('aiDashInsights');
+        if (el) el.innerHTML = '<div style="font-size:12px;color:var(--sf-brand);">🔄 Running AI analysis... (takes 30-60 seconds)</div>';
+        const token = await getAuthToken();
+        if (!token) return;
+        try {
+            const res = await fetch('https://us-central1-tmc-crm-f3728.cloudfunctions.net/runAutonomous', {headers: {'Authorization': 'Bearer ' + token}});
+            const data = await res.json();
+            if (data.insights) {
+                el.innerHTML = '<div style="font-size:12px;color:var(--sf-success);font-weight:600;margin-bottom:8px;">✅ Analysis complete — ' + data.insights.length + ' insights, ' + (data.dataFixes?.length||0) + ' data fixes</div>';
+                setTimeout(() => this.loadAutoInsights(), 500);
+            }
+        } catch(e) { if (el) el.innerHTML = '<div style="font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '</div>'; }
+    },
+
     async aiDashboardInsights() {
         const el = document.getElementById('aiDashInsights');
         if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Generating insights...</div>';
@@ -2391,14 +2432,17 @@ Tone: Professional but personal, not overly formal`;
                 <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('tasks')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
             </div>
 
-            <!-- AI Insights -->
+            <!-- AI Insights (Autonomous) -->
             <div style="background:#fff; border:1px solid #c2d4f0; border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid #4285f4;">
                 <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
                     <span style="font-weight:700; font-size:14px;">✨ AI Insights</span>
-                    <button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDashboardInsights()">Generate</button>
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.loadAutoInsights()">Refresh</button>
+                        <button class="btn-small" style="background:#dcfce7;color:#166534;" onclick="app.runAutonomousNow()">Run Analysis</button>
+                    </div>
                 </div>
                 <div id="aiDashInsights" style="padding:10px 16px;">
-                    <div style="font-size:12px;color:var(--sf-text-weak);">Click "Generate" for AI-powered insights about your pipeline, contacts, and tasks.</div>
+                    <div style="font-size:12px;color:var(--sf-text-weak);">Loading insights...</div>
                 </div>
             </div>
 
@@ -2692,6 +2736,7 @@ Tone: Professional but personal, not overly formal`;
             </div>
         `;
         document.getElementById('content').innerHTML = html;
+        this.loadAutoInsights();
     },
 
     // Sorting

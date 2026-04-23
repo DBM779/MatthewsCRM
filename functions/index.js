@@ -2,6 +2,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const { pool, initDb } = require('./db');
+const { runAllAutonomous } = require('./autonomous');
 
 // Set Cloud SQL instance for all functions
 const runtimeOpts = { memory: '256MB', timeoutSeconds: 60 };
@@ -316,6 +317,32 @@ exports.health = functions.runWith(runtimeOpts).https.onRequest(async (req, res)
     await initDb();
     const { rows } = await pool.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
     res.json({ status: 'ok', tables: rows.map(r => r.tablename) });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Nightly autonomous run — 2am UTC every day
+exports.nightlyAutonomous = functions.pubsub.schedule('0 2 * * *')
+  .timeZone('America/Chicago')
+  .onRun(async () => {
+    await initDb();
+    await runAllAutonomous();
+  });
+
+// Manual trigger for autonomous run
+exports.runAutonomous = functions.runWith({memory: '512MB', timeoutSeconds: 300}).https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+  const user = await verifyAuth(req, res);
+  if (!user) return;
+  await initDb();
+  try {
+    await runAllAutonomous();
+    const { rows: insights } = await pool.query("SELECT * FROM ai_insights WHERE created_at > CURRENT_DATE ORDER BY priority DESC, created_at DESC");
+    const { rows: dataFixes } = await pool.query("SELECT * FROM data_quality_log WHERE created_at > CURRENT_DATE ORDER BY created_at DESC LIMIT 20");
+    res.json({ status: 'ok', insights, dataFixes });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }

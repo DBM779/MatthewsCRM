@@ -191,6 +191,39 @@ CREATE TABLE IF NOT EXISTS document_views (
 CREATE INDEX IF NOT EXISTS idx_email_tracking_campaign ON email_tracking(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_email_tracking_contact ON email_tracking(contact_id);
 CREATE INDEX IF NOT EXISTS idx_doc_views_doc ON document_views(doc_id);
+
+CREATE TABLE IF NOT EXISTS ai_insights (
+    id SERIAL PRIMARY KEY,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    priority TEXT DEFAULT 'normal',
+    record_type TEXT,
+    record_id TEXT,
+    dismissed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS contact_scores (
+    contact_id TEXT PRIMARY KEY REFERENCES contacts(id) ON DELETE CASCADE,
+    engagement_score NUMERIC DEFAULT 0,
+    referral_score NUMERIC DEFAULT 0,
+    network_score NUMERIC DEFAULT 0,
+    response_score NUMERIC DEFAULT 0,
+    composite_score NUMERIC DEFAULT 0,
+    suggested_tier TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS data_quality_log (
+    id SERIAL PRIMARY KEY,
+    action TEXT NOT NULL,
+    record_type TEXT,
+    record_id TEXT,
+    details TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_insights_type ON ai_insights(type);
+CREATE INDEX IF NOT EXISTS idx_ai_insights_dismissed ON ai_insights(dismissed);
+CREATE INDEX IF NOT EXISTS idx_contact_scores_composite ON contact_scores(composite_score DESC);
 `;
 
 let initialized = false;
