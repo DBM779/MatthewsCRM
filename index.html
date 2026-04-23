@@ -12,6 +12,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88&libraries=marker,places,visualization&v=weekly&callback=Function.prototype"></script>
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Matthews CRM">
@@ -2973,10 +2974,21 @@ Tone: Professional but personal, not overly formal`;
 
     // === Quick Links (reusable for contacts, accounts, deals) ===
     addQuickLink(type, recordId) {
-        const name = prompt('Link name (e.g. "OneNote - Project Notes", "LBO Model"):');
-        if (!name) return;
-        const url = prompt('URL (Google Drive link, OneNote link, any URL):');
-        if (!url) return;
+        const usePicker = this._gmailToken && confirm('Pick from Google Drive?\n\nOK = Browse Drive\nCancel = Paste URL manually');
+        if (usePicker) {
+            this.openDrivePicker((file) => {
+                this._saveQuickLink(type, recordId, file.name, file.url);
+            });
+        } else {
+            const name = prompt('Link name (e.g. "LBO Model", "CIM"):');
+            if (!name) return;
+            const url = prompt('URL (Google Drive link or any URL):');
+            if (!url) return;
+            this._saveQuickLink(type, recordId, name, url);
+        }
+    },
+
+    _saveQuickLink(type, recordId, name, url) {
         const arr = type === 'contact' ? this.data.contacts : type === 'account' ? this.data.accounts : this.data.deals;
         const record = arr.find(r => r.id === recordId);
         if (!record) return;
@@ -3023,18 +3035,51 @@ Tone: Professional but personal, not overly formal`;
         window.open(`https://drive.google.com/drive/search?q=${encodeURIComponent(query)}`, '_blank');
     },
 
+    _drivePickerLoaded: false,
+    _drivePickerCallback: null,
+
+    openDrivePicker(callback) {
+        this._drivePickerCallback = callback;
+        if (!this._gmailToken) {
+            alert('Connect Gmail first to access Google Drive.');
+            return;
+        }
+        if (this._drivePickerLoaded) { this._showPicker(); return; }
+        gapi.load('picker', () => { this._drivePickerLoaded = true; this._showPicker(); });
+    },
+
+    _showPicker() {
+        const view = new google.picker.DocsView()
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(false);
+        const picker = new google.picker.PickerBuilder()
+            .setOAuthToken(this._gmailToken)
+            .addView(view)
+            .addView(new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS))
+            .addView(new google.picker.DocsView(google.picker.ViewId.PRESENTATIONS))
+            .addView(new google.picker.DocsView(google.picker.ViewId.PDFS))
+            .setCallback((data) => {
+                if (data.action === google.picker.Action.PICKED && data.docs?.length) {
+                    const doc = data.docs[0];
+                    if (this._drivePickerCallback) {
+                        this._drivePickerCallback({name: doc.name, url: doc.url, mimeType: doc.mimeType, iconUrl: doc.iconUrl});
+                    }
+                }
+            })
+            .setTitle('Select a file from Google Drive')
+            .build();
+        picker.setVisible(true);
+    },
+
     addContactFile(contactId) {
-        const name = prompt('File name:');
-        if (!name) return;
-        const url = prompt('OneDrive URL:');
-        if (!url) return;
-        const contact = this.data.contacts.find(c => c.id === contactId);
-        if (!contact) return;
-        if (!contact.files) contact.files = [];
-        contact.files.push({name, url});
-        firestoreUpsert('contacts', contact);
-        this.persist();
-        this.renderContactDetail();
+        this.openDrivePicker((file) => {
+            const contact = this.data.contacts.find(c => c.id === contactId);
+            if (!contact) return;
+            if (!contact.files) contact.files = [];
+            contact.files.push({name: file.name, url: file.url});
+            firestoreUpsert('contacts', contact); this.persist();
+            this.renderContactDetail();
+        });
     },
 
     removeContactFile(contactId, idx) {
@@ -4734,17 +4779,15 @@ Tone: Professional but personal, not overly formal`;
     },
 
     addEventFile(eventId) {
-        const name = prompt('File name:');
-        if (!name) return;
-        const url = prompt('OneDrive URL:');
-        if (!url) return;
-        const evt = this.data.events.find(x => x.id === eventId);
-        if (!evt) return;
-        if (!evt.files) evt.files = [];
-        evt.files.push({name, url});
-        firestoreUpsert('events', evt);
-        this.persist();
-        this.renderEventDetail();
+        this.openDrivePicker((file) => {
+            const evt = this.data.events.find(x => x.id === eventId);
+            if (!evt) return;
+            if (!evt.files) evt.files = [];
+            evt.files.push({name: file.name, url: file.url});
+            firestoreUpsert('events', evt);
+            this.persist();
+            this.renderEventDetail();
+        });
     },
 
     removeEventFile(eventId, idx) {
@@ -6159,7 +6202,7 @@ Tone: Professional but personal, not overly formal`;
 
     addTaskComment(id) { const input = document.getElementById('taskCommentInput'); if (!input||!input.value.trim()) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._comments) a._comments = []; a._comments.push({text:input.value.trim(), date:new Date().toISOString()}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
 
-    addTaskAttachment(id) { const name = prompt('Name:'); if (!name) return; const url = prompt('URL:'); if (!url) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._attachments) a._attachments = []; a._attachments.push({name,url}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+    addTaskAttachment(id) { this.openDrivePicker((file) => { const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._attachments) a._attachments = []; a._attachments.push({name:file.name,url:file.url}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); }); },
 
     removeTaskAttachment(id, idx) { const a = this.data.activities.find(x => x.id === id); if (!a||!a._attachments) return; a._attachments.splice(idx,1); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
 
