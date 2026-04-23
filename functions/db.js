@@ -144,6 +144,53 @@ CREATE INDEX IF NOT EXISTS idx_activities_contact ON activities(contact_id);
 CREATE INDEX IF NOT EXISTS idx_activities_due ON activities(due_date);
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 CREATE INDEX IF NOT EXISTS idx_audit_record ON audit_log(record_type, record_id);
+
+CREATE TABLE IF NOT EXISTS email_campaigns (
+    id TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    body TEXT,
+    template TEXT,
+    segment TEXT,
+    status TEXT DEFAULT 'draft',
+    sent_count INTEGER DEFAULT 0,
+    open_count INTEGER DEFAULT 0,
+    click_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    sent_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS email_tracking (
+    id SERIAL PRIMARY KEY,
+    campaign_id TEXT REFERENCES email_campaigns(id) ON DELETE CASCADE,
+    contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+    email_to TEXT,
+    type TEXT NOT NULL,
+    url TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS tracked_documents (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    file_url TEXT NOT NULL,
+    contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+    deal_id TEXT REFERENCES deals(id) ON DELETE SET NULL,
+    total_views INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS document_views (
+    id SERIAL PRIMARY KEY,
+    doc_id TEXT REFERENCES tracked_documents(id) ON DELETE CASCADE,
+    contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+    page_number INTEGER,
+    time_spent INTEGER DEFAULT 0,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_email_tracking_campaign ON email_tracking(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_email_tracking_contact ON email_tracking(contact_id);
+CREATE INDEX IF NOT EXISTS idx_doc_views_doc ON document_views(doc_id);
 `;
 
 let initialized = false;
