@@ -8,10 +8,8 @@
     <link rel="preconnect" href="https://tmc-crm-f3728-default-rtdb.firebaseio.com">
     <link rel="preconnect" href="https://unpkg.com">
     <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
     <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88&libraries=marker,places,visualization&v=weekly&callback=Function.prototype"></script>
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
     <meta name="mobile-web-app-capable" content="yes">
@@ -865,110 +863,16 @@ const firebaseApp = firebase.initializeApp({
     projectId: 'tmc-crm-f3728'
 });
 const firebaseAuth = firebase.auth();
-const firestore = firebase.firestore();
-firestore.enablePersistence({synchronizeTabs: true}).catch(() => {});
 
 const COLLECTIONS = ['contacts','accounts','activities','events','deals','dealContacts','referrals','emails'];
 
 const cloudSync = {
-    _pendingSync: false,
-    _listeners: [],
-    _uid: null,
-
     async signIn() {
         const provider = new firebase.auth.GoogleAuthProvider();
         try { await firebaseAuth.signInWithPopup(provider); return true; } catch { return false; }
     },
-
-    isSignedIn() { return !!firebaseAuth.currentUser; },
-
-    _basePath() {
-        const user = firebaseAuth.currentUser;
-        if (!user) return null;
-        this._uid = user.uid;
-        return `users/${user.uid}`;
-    },
-
-    col(name) {
-        const p = this._basePath();
-        return p ? firestore.collection(`${p}/${name}`) : null;
-    },
-
-    // Idempotent upsert: uses record ID as doc ID
-    async upsert(collection, record) {
-        const col = this.col(collection);
-        if (!col || !record.id) return record;
-        const clean = {...record};
-        clean.updated_at = new Date().toISOString();
-        // Remove undefined values (Firestore rejects them)
-        Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
-        try { await col.doc(record.id).set(clean, {merge: true}); } catch (e) { console.error('Upsert error:', e.message); }
-        return record;
-    },
-
-    async remove(collection, id) {
-        const col = this.col(collection);
-        if (!col) return;
-        try { await col.doc(id).delete(); } catch {}
-    },
-
-    // Pull all collections from Firestore
-    async pullAll() {
-        const p = this._basePath();
-        if (!p) return null;
-        const data = {};
-        for (const c of COLLECTIONS) {
-            try {
-                const snap = await firestore.collection(`${p}/${c}`).get();
-                data[c] = snap.docs.map(d => ({...d.data(), id: d.id}));
-            } catch { data[c] = null; }
-        }
-        return data;
-    },
-
-    // Batch push all data to Firestore (for initial migration)
-    async pushAll(data) {
-        const p = this._basePath();
-        if (!p) return;
-        for (const colName of COLLECTIONS) {
-            const items = data[colName] || [];
-            // Batch in groups of 450 (Firestore limit is 500)
-            for (let i = 0; i < items.length; i += 450) {
-                const batch = firestore.batch();
-                items.slice(i, i + 450).forEach(item => {
-                    if (!item.id) return;
-                    const clean = {...item};
-                    Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
-                    batch.set(firestore.doc(`${p}/${colName}/${item.id}`), clean, {merge: true});
-                });
-                try { await batch.commit(); } catch (e) { console.error('Batch error:', colName, e.message); }
-            }
-        }
-    },
-
-    // Real-time listeners — changes from other devices appear instantly
-    startListening(onUpdate) {
-        this.stopListening();
-        const p = this._basePath();
-        if (!p) return;
-        for (const colName of COLLECTIONS) {
-            const unsub = firestore.collection(`${p}/${colName}`).onSnapshot(snap => {
-                const items = snap.docs.map(d => ({...d.data(), id: d.id}));
-                onUpdate(colName, items);
-            }, () => {});
-            this._listeners.push(unsub);
-        }
-    },
-
-    stopListening() { this._listeners.forEach(u => u()); this._listeners = []; },
-
-    // Debounced full push (fallback for bulk operations)
-    debouncedPush(data) {
-        if (this._pendingSync) clearTimeout(this._pendingSync);
-        this._pendingSync = setTimeout(() => { this.pushAll(data).catch(() => {}); this._pendingSync = false; }, 5000);
-    }
+    isSignedIn() { return !!firebaseAuth.currentUser; }
 };
-
 // Shorthand helpers used throughout the app
 const SQL_API = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/api';
 const SQL_BULK = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/bulk';
@@ -1196,38 +1100,6 @@ Tone: Professional but personal, not overly formal`;
     _gmailTokenExpiry: 0,
 
     initGmail() {
-        // Check if returning from OAuth redirect with token in hash
-        if (window.location.hash.includes('access_token=')) {
-            const params = new URLSearchParams(window.location.hash.substring(1));
-            const token = params.get('access_token');
-            const expiresIn = parseInt(params.get('expires_in') || '3600');
-            if (token) {
-                this._gmailToken = token;
-                this._gmailTokenExpiry = Date.now() + (expiresIn * 1000);
-                localStorage.setItem('matthewsCRM_gmailToken', token);
-                localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
-                this.updateStatus('Gmail connected', true);
-                window.history.replaceState(null, '', window.location.pathname);
-            }
-        }
-        if (window.google?.accounts?.oauth2) {
-            try { this._gmailClient = google.accounts.oauth2.initTokenClient({
-                client_id: this.GMAIL_CLIENT_ID,
-                scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
-                callback: (resp) => {
-                    if (resp.error) { alert('Gmail auth error: ' + resp.error); return; }
-                    if (resp.access_token) {
-                        this._gmailToken = resp.access_token;
-                        this._gmailTokenExpiry = Date.now() + (resp.expires_in * 1000);
-                        localStorage.setItem('matthewsCRM_gmailToken', resp.access_token);
-                        localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
-                        this.updateStatus('Gmail connected', true);
-                        this.render();
-                    }
-                },
-                error_callback: (err) => { alert('Gmail error: ' + (err.type || err.message || JSON.stringify(err))); }
-            }); } catch(e) { alert('GIS init error: ' + e.message); }
-        }
         const saved = localStorage.getItem('matthewsCRM_gmailToken');
         const exp = parseInt(localStorage.getItem('matthewsCRM_gmailExpiry') || '0');
         if (saved && exp > Date.now()) { this._gmailToken = saved; this._gmailTokenExpiry = exp; }
@@ -1559,24 +1431,9 @@ Tone: Professional but personal, not overly formal`;
             this.updateStatus('●', true);
             this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 2000);
         }
-        this._syncMeta();
+        
     },
 
-    _syncMetaTimer: null,
-    _syncMeta() {
-        clearTimeout(this._syncMetaTimer);
-        this._syncMetaTimer = setTimeout(() => {
-            const col = cloudSync.col('meta');
-            if (!col) return;
-            const meta = {};
-            if (this.data.investors?.length) meta.investors = this.data.investors;
-            if (this.data._fund) meta._fund = this.data._fund;
-            if (this.data._connections?.length) meta._connections = this.data._connections;
-            if (this.data._auditLog?.length) meta._auditLog = this.data._auditLog.slice(0, 200);
-            const clean = JSON.parse(JSON.stringify(meta));
-            col.doc('appMeta').set(clean, {merge: true}).catch(() => {});
-        }, 3000);
-    },
 
     importJsonData(jsonData) {
         const d = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
@@ -1593,7 +1450,7 @@ Tone: Professional but personal, not overly formal`;
         if (d._auditLog) { this.data._auditLog = [...(this.data._auditLog||[]), ...d._auditLog].slice(0,500); }
         if (d._fund) { this.data._fund = d._fund; }
         this.persist();
-        if (cloudSync.isSignedIn()) cloudSync.pushAll(this.data).catch(() => {});
+        
         this.updateSelectOptions();
         this.render();
         this.bgGeocodeAll();
@@ -6452,7 +6309,7 @@ Tone: Professional but personal, not overly formal`;
         const fund = this.data._fund;
         if (!fund || !fund.phases || !fund.phases[phase] || !fund.phases[phase][idx]) return;
         fund.phases[phase][idx].done = checked;
-        this._syncMeta(); this.persist();
+        this.persist();
     },
 
     addFundItem(phase) {
@@ -6461,7 +6318,7 @@ Tone: Professional but personal, not overly formal`;
         if (!text) return;
         const deadline = prompt('Deadline (YYYY-MM-DD, or leave blank):', '') || '';
         this.data._fund.phases[phase].push({text, done: false, deadline});
-        this._syncMeta(); this.persist();
+        this.persist();
         this.renderFundLaunch();
     },
 
@@ -6514,7 +6371,7 @@ Tone: Professional but personal, not overly formal`;
         const status = prompt('Status (Researching/Applied/In Review/Approved/Declined):', 'Researching') || 'Researching';
         if (!this.data._fund.sbaLenders) this.data._fund.sbaLenders = [];
         this.data._fund.sbaLenders.push({name, contact, status, rate:'', term:'', maxAmount:'', notes:'', created: new Date().toISOString()});
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     editSBALender(idx) {
@@ -6526,7 +6383,7 @@ Tone: Professional but personal, not overly formal`;
         l.term = prompt('Term (years):', l.term) || l.term;
         l.maxAmount = prompt('Max amount ($K):', l.maxAmount) || l.maxAmount;
         l.notes = prompt('Notes:', l.notes) || l.notes;
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     _renderFundDocs(fund) {
@@ -6545,7 +6402,7 @@ Tone: Professional but personal, not overly formal`;
                         + '<span style="width:8px;height:8px;border-radius:50%;background:' + (statuses[d.status]||'#ef4444') + ';"></span>'
                         + (d.url ? '<a href="' + d.url + '" target="_blank" style="color:var(--sf-brand);font-weight:600;">' + d.name + '</a>' : '<span>' + d.name + '</span>')
                         + '</div><div style="display:flex;gap:4px;">'
-                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app._syncMeta();app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
+                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
                         + '</div></div>';
                 });
             } else { html += '<div style="font-size:11px;color:var(--sf-text-weak);padding:4px 0;">No documents yet.</div>'; }
@@ -6559,7 +6416,7 @@ Tone: Professional but personal, not overly formal`;
         const url = prompt('Google Drive URL (optional):', '') || '';
         if (!this.data._fund.documents) this.data._fund.documents = [];
         this.data._fund.documents.push({name, category, url, status: 'needed'});
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     _renderServiceProviders(fund) {
@@ -6592,7 +6449,7 @@ Tone: Professional but personal, not overly formal`;
         const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
         if (!this.data._fund.serviceProviders) this.data._fund.serviceProviders = [];
         this.data._fund.serviceProviders.push({role, name, firm, phone, email, contactId: contact?.id||null, engaged: false, notes: ''});
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     _renderFundAccounting(fund) {
@@ -6637,7 +6494,7 @@ Tone: Professional but personal, not overly formal`;
         a.cashReserve = parseFloat(prompt('Cash reserve ($):', a.cashReserve||0)) || 0;
         a.distributions = parseFloat(prompt('Total distributions to date ($):', a.distributions||0)) || 0;
         this.data._fund.accounting = a;
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     addMonthlyReport() {
@@ -6648,7 +6505,7 @@ Tone: Professional but personal, not overly formal`;
         const notes = prompt('Notes:', '') || '';
         if (!this.data._fund.monthlyReports) this.data._fund.monthlyReports = [];
         this.data._fund.monthlyReports.push({month, revenue, expenses, cashFlow, notes});
-        this._syncMeta(); this.persist(); this.renderFundLaunch();
+        this.persist(); this.renderFundLaunch();
     },
 
     renderInvestors() {
@@ -6732,7 +6589,7 @@ Tone: Professional but personal, not overly formal`;
         const committed = parseFloat(prompt('Committed ($M):', inv.committed)); if (isNaN(committed)) return;
         const status = prompt('Status (Active/Prospect/Exited):', inv.status) || inv.status;
         inv.name = name; inv.type = type; inv.committed = committed; inv.status = status;
-        this._syncMeta(); this.persist(); this.renderInvestors();
+        this.persist(); this.renderInvestors();
     },
 
     logCapitalCall(idx) {
@@ -6743,7 +6600,7 @@ Tone: Professional but personal, not overly formal`;
         inv.called = (inv.called||0) + amount;
         if (!this.data._investorComms) this.data._investorComms = [];
         this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Capital Call', note: '$' + amount.toFixed(1) + 'M called'});
-        this._syncMeta(); this.persist(); this.renderInvestors();
+        this.persist(); this.renderInvestors();
     },
 
     logDistribution(idx) {
@@ -6754,7 +6611,7 @@ Tone: Professional but personal, not overly formal`;
         inv.distributed = (inv.distributed||0) + amount;
         if (!this.data._investorComms) this.data._investorComms = [];
         this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Distribution', note: '$' + amount.toFixed(1) + 'M distributed'});
-        this._syncMeta(); this.persist(); this.renderInvestors();
+        this.persist(); this.renderInvestors();
     },
 
     renderReferrals() {
@@ -7751,7 +7608,7 @@ Tone: Professional but personal, not overly formal`;
         const context = prompt('Context (e.g. "Met at conference", "College roommates"):', '') || '';
         const strength = prompt('Strength (strong/medium/weak):', 'medium') || 'medium';
         this.data._connections.push({id: 'conn-' + Date.now(), from: contactId, to: other.id, type, context, strength, created: new Date().toISOString()});
-        this._syncMeta();
+        
         this.persist();
         this.renderContactDetail();
     },
@@ -7759,7 +7616,7 @@ Tone: Professional but personal, not overly formal`;
     removeConnection(contactId, connId) {
         if (!this.data._connections) return;
         this.data._connections = this.data._connections.filter(cn => cn.id !== connId);
-        this._syncMeta();
+        
         this.persist();
         this.renderContactDetail();
     },
@@ -8459,7 +8316,6 @@ app.navigate = function(view) {
     }
 };
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
 document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
     if (app.currentView !== 'tasks') return;
@@ -8469,7 +8325,6 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === '2') { app._taskView='list'; app.renderTaskBoard(); }
     else if (e.key === '3') { app._taskView='calendar'; app.renderTaskBoard(); }
 });
-window.addEventListener('beforeunload', () => { if (app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
 document.addEventListener('DOMContentLoaded', async () => {
     // Auto-sync: if #sync in URL, fetch data from local sync server
     if (location.hash === '#sync') {
