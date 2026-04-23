@@ -1,0 +1,7678 @@
+// === Data layer: localStorage + Firebase cloud sync ===
+const STORAGE_KEY = 'matthewsCRM';
+
+// Initialize Firebase
+const firebaseApp = firebase.initializeApp({
+    apiKey: 'AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88',
+    authDomain: 'tmc-crm-f3728.firebaseapp.com',
+    projectId: 'tmc-crm-f3728'
+});
+const firebaseAuth = firebase.auth();
+const firestore = firebase.firestore();
+firestore.enablePersistence({synchronizeTabs: true}).catch(() => {});
+
+const COLLECTIONS = ['contacts','accounts','activities','events','deals','dealContacts','referrals','emails'];
+
+const cloudSync = {
+    _pendingSync: false,
+    _listeners: [],
+    _uid: null,
+
+    async signIn() {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        try { await firebaseAuth.signInWithPopup(provider); return true; } catch { return false; }
+    },
+
+    isSignedIn() { return !!firebaseAuth.currentUser; },
+
+    _basePath() {
+        const user = firebaseAuth.currentUser;
+        if (!user) return null;
+        this._uid = user.uid;
+        return `users/${user.uid}`;
+    },
+
+    col(name) {
+        const p = this._basePath();
+        return p ? firestore.collection(`${p}/${name}`) : null;
+    },
+
+    // Idempotent upsert: uses record ID as doc ID
+    async upsert(collection, record) {
+        const col = this.col(collection);
+        if (!col || !record.id) return record;
+        const clean = {...record};
+        clean.updated_at = new Date().toISOString();
+        // Remove undefined values (Firestore rejects them)
+        Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
+        try { await col.doc(record.id).set(clean, {merge: true}); } catch (e) { console.error('Upsert error:', e.message); }
+        return record;
+    },
+
+    async remove(collection, id) {
+        const col = this.col(collection);
+        if (!col) return;
+        try { await col.doc(id).delete(); } catch {}
+    },
+
+    // Pull all collections from Firestore
+    async pullAll() {
+        const p = this._basePath();
+        if (!p) return null;
+        const data = {};
+        for (const c of COLLECTIONS) {
+            try {
+                const snap = await firestore.collection(`${p}/${c}`).get();
+                data[c] = snap.docs.map(d => ({...d.data(), id: d.id}));
+            } catch { data[c] = null; }
+        }
+        return data;
+    },
+
+    // Batch push all data to Firestore (for initial migration)
+    async pushAll(data) {
+        const p = this._basePath();
+        if (!p) return;
+        for (const colName of COLLECTIONS) {
+            const items = data[colName] || [];
+            // Batch in groups of 450 (Firestore limit is 500)
+            for (let i = 0; i < items.length; i += 450) {
+                const batch = firestore.batch();
+                items.slice(i, i + 450).forEach(item => {
+                    if (!item.id) return;
+                    const clean = {...item};
+                    Object.keys(clean).forEach(k => { if (clean[k] === undefined) delete clean[k]; });
+                    batch.set(firestore.doc(`${p}/${colName}/${item.id}`), clean, {merge: true});
+                });
+                try { await batch.commit(); } catch (e) { console.error('Batch error:', colName, e.message); }
+            }
+        }
+    },
+
+    // Real-time listeners — changes from other devices appear instantly
+    startListening(onUpdate) {
+        this.stopListening();
+        const p = this._basePath();
+        if (!p) return;
+        for (const colName of COLLECTIONS) {
+            const unsub = firestore.collection(`${p}/${colName}`).onSnapshot(snap => {
+                const items = snap.docs.map(d => ({...d.data(), id: d.id}));
+                onUpdate(colName, items);
+            }, () => {});
+            this._listeners.push(unsub);
+        }
+    },
+
+    stopListening() { this._listeners.forEach(u => u()); this._listeners = []; },
+
+    // Debounced full push (fallback for bulk operations)
+    debouncedPush(data) {
+        if (this._pendingSync) clearTimeout(this._pendingSync);
+        this._pendingSync = setTimeout(() => { this.pushAll(data).catch(() => {}); this._pendingSync = false; }, 5000);
+    }
+};
+
+// Shorthand helpers used throughout the app
+const SQL_API = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/api';
+const SQL_BULK = 'https://us-central1-tmc-crm-f3728.cloudfunctions.net/bulk';
+
+async function getAuthToken() {
+    const user = firebaseAuth.currentUser;
+    if (!user) return null;
+    return user.getIdToken();
+}
+
+async function firestoreUpsert(collection, record) {
+    const token = await getAuthToken();
+    if (!token || !record.id) return record;
+    const clean = {...record};
+    Object.keys(clean).forEach(k => { if (clean[k] === undefined || clean[k] === null) delete clean[k]; });
+    try {
+        await fetch(SQL_API + '/' + collection + '/' + record.id, {
+            method: 'PUT', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify(clean)
+        }).then(async r => {
+            if (r.status === 404) {
+                await fetch(SQL_API + '/' + collection, {
+                    method: 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    body: JSON.stringify(clean)
+                });
+            }
+        });
+    } catch (e) { console.log('SQL sync error:', e.message); }
+    return record;
+}
+
+async function firestoreDelete(collection, id) {
+    const token = await getAuthToken();
+    if (!token) return;
+    try {
+        await fetch(SQL_API + '/' + collection + '/' + id, {
+            method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}
+        });
+    } catch (e) { console.log('SQL delete error:', e.message); }
+}
+
+const db = {
+    load() {
+        try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+    },
+    save(data) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+};
+
+function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+const app = {
+    currentView: 'dashboard',
+    currentRecord: null,
+    isLoading: true,
+    data: {contacts: [], accounts: [], deals: [], activities: [], emails: [], referrals: [], dealContacts: [], events: [], investors: [], _connections: [], _auditLog: []},
+
+    fmt(n) { return Number(n).toLocaleString(); },
+
+    contactCompleteness(c) {
+        const fields = ['name','pc_number','wc_number','pe_email','we_email','address','title','tier','obligation','birthdate','instagram','facebook','linkedin','general_notes'];
+        const filled = fields.filter(f => c[f] && String(c[f]).trim()).length;
+        return Math.round((filled / fields.length) * 100);
+    },
+
+    // === Gemini AI ===
+    GEMINI_API_KEY: 'AIzaSyA6fX9QfEB1Pehl8aJc8yoek2PhJHdYS88',
+    _geminiCache: {},
+
+    async askGemini(prompt, cacheKey) {
+        if (cacheKey && this._geminiCache[cacheKey] && (Date.now() - this._geminiCache[cacheKey].ts) < 300000) return this._geminiCache[cacheKey].text;
+        try {
+            const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + this.GEMINI_API_KEY, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({contents: [{parts: [{text: prompt}]}], generationConfig: {maxOutputTokens: 1024, temperature: 0.7}})
+            });
+            if (!res.ok) { const err = await res.text(); console.log('Gemini error:', err); return 'AI unavailable. Check Gemini API key in Cloud Console.'; }
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI.';
+            if (cacheKey) this._geminiCache[cacheKey] = {text, ts: Date.now()};
+            return text;
+        } catch(e) { return 'AI request failed: ' + e.message; }
+    },
+
+    _showAIPanel(containerId, content) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        el.innerHTML = '<div style="background:linear-gradient(135deg,#f0f4ff,#e8f0fe);border:1px solid #c2d4f0;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;white-space:pre-wrap;position:relative;">'
+            + '<div style="position:absolute;top:8px;right:10px;font-size:10px;color:#5f6368;font-weight:600;">✨ Gemini AI</div>'
+            + content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')
+            + '</div>';
+    },
+
+    async aiAnalyzeDeal(dealId) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        const el = document.getElementById('aiDealPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Analyzing deal...</div>';
+        const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+        const acts = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).length;
+        const ddDone = d._ddStatus ? Object.values(d._ddStatus).filter(Boolean).length : 0;
+        const icVotes = (d._icVotes||[]);
+        const prompt = `You are a senior investment banking advisor. Analyze this deal and provide: 1) Risk assessment (2-3 key risks), 2) Suggested next steps (3-4 specific actions), 3) What's missing or needs attention. Be concise and actionable.
+
+Deal: ${d.name}
+Stage: ${d.stage} | Value: $${d.value}M | Probability: ${d.probability}%
+Sector: ${d.sector || 'Not specified'} | Close Date: ${d.closeDate || 'TBD'}
+Account: ${acct ? acct.name : 'Unknown'} | Industry: ${acct?.industry || 'Unknown'}
+Fee Structure: ${d.feeStructure || 'Not set'}
+Source: ${d.source || 'Unknown'} | Source Contact: ${d.sourceContact || 'None'}
+Activities logged: ${acts} | DD items completed: ${ddDone}/25
+IC Votes: ${icVotes.length ? icVotes.map(v=>v.member+':'+v.vote).join(', ') : 'None yet'}
+Counterparties: ${d.counterparties || 'None listed'}
+Technical Notes: ${d.techNotes || 'None'}`;
+        const result = await this.askGemini(prompt, 'deal_' + dealId);
+        this._showAIPanel('aiDealPanel', result);
+    },
+
+    async aiContactSuggest(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        const el = document.getElementById('aiContactPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Generating suggestions...</div>';
+        const la = c.la || c.last_activity_display;
+        const dsla = la ? Math.floor((new Date() - new Date(la)) / 86400000) : 999;
+        const acts = (this.data.activities||[]).filter(a => (a.contactId||a.contact_id) === c.id).slice(0,5);
+        const deals = this.data.deals.filter(d => (this.data.dealContacts||[]).some(dc => dc.deal_id === d.id && dc.contact_id === c.id));
+        const conns = (this.data._connections||[]).filter(cn => cn.from === c.id || cn.to === c.id);
+        const prompt = `You are a relationship-focused CRM advisor for an investment banker in Dallas. Generate: 1) A 3-sentence relationship summary, 2) Suggested outreach message (casual but professional), 3) Talking points for next conversation. Be specific and personal.
+
+Contact: ${c.name}
+Title: ${c.title || 'Unknown'} | Company: ${c.account_name || ''}
+Tier: ${c.tier || 'Untiered'} | Obligation: ${c.obligation || 'Unknown'}
+Days since last activity: ${dsla === 999 ? 'Never contacted' : dsla + ' days'}
+Recent activities: ${acts.map(a => a.type + ': ' + (a.subject||'')).join(', ') || 'None'}
+Active deals together: ${deals.map(d => d.name).join(', ') || 'None'}
+Connections: knows ${conns.length} other contacts
+Birthdate: ${c.birthdate || 'Unknown'} | City: ${c.mailing_city||c.MailingCity||'Unknown'}
+Tags: ${c.tags || 'None'} | Lead Source: ${c.lead_source || 'Unknown'}`;
+        const result = await this.askGemini(prompt, 'contact_' + contactId);
+        this._showAIPanel('aiContactPanel', result);
+    },
+
+    async aiMeetingPrep(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const el = document.getElementById('aiMeetingPanel');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Preparing brief...</div>';
+        const guests = this._getEventGuests(e);
+        const guestInfo = guests.slice(0,5).map(g => {
+            const acts = (this.data.activities||[]).filter(a => (a.contactId||a.contact_id) === g.id).slice(0,3);
+            const deals = this.data.deals.filter(d => (this.data.dealContacts||[]).some(dc => dc.deal_id === d.id && dc.contact_id === g.id));
+            return `${g.name} (${g.title||''}): ${acts.length} recent activities, ${deals.length} deals`;
+        }).join('\n');
+        const prompt = `You are preparing a meeting brief for an investment banker. Create: 1) Meeting overview, 2) Key attendee profiles (what to know about each), 3) Suggested agenda/talking points, 4) Follow-up actions to prepare.
+
+Event: ${e.name}
+Type: ${e.type || 'Meeting'} | Date: ${e.start || 'TBD'}
+Location: ${e.address || 'TBD'}
+Description: ${e.description || 'None'}
+Attendees:
+${guestInfo || 'No attendees linked'}`;
+        const result = await this.askGemini(prompt, 'meeting_' + eventId);
+        this._showAIPanel('aiMeetingPanel', result);
+    },
+
+    async aiDashboardInsights() {
+        const el = document.getElementById('aiDashInsights');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Generating insights...</div>';
+        const today = new Date().toISOString().slice(0,10);
+        const activeDeals = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const stalled = activeDeals.filter(d => this._dealHealth(d) === 'red');
+        const pipelineVal = activeDeals.reduce((s,d) => s + (d.value||0), 0);
+        const overdue = this.data.activities.filter(a => a.dueDate && a.dueDate < today && a.status !== 'Completed').length;
+        const gd = c => { const la = c.la||c.last_activity_display; return la ? Math.floor((new Date()-new Date(la))/86400000) : 999; };
+        const coldVIPs = this.data.contacts.filter(c => c.tier === '1-VIP' && gd(c) >= 14).slice(0,5);
+        const prompt = `You are a CRM AI assistant for an investment banker. Provide 3-4 brief, actionable insights based on this data. Be specific with names and numbers. Format as bullet points.
+
+Pipeline: $${pipelineVal.toFixed(0)}M across ${activeDeals.length} active deals
+Stalled deals (14+ days no activity): ${stalled.map(d => d.name + ' ($' + d.value + 'M, ' + d.stage + ')').join(', ') || 'None'}
+Overdue tasks: ${overdue}
+VIPs needing outreach: ${coldVIPs.map(c => c.name + ' (' + gd(c) + 'D)').join(', ') || 'None'}
+Total contacts: ${this.data.contacts.length} | Total accounts: ${this.data.accounts.length}
+Recent activity types: ${[...new Set(this.data.activities.slice(-20).map(a=>a.type))].join(', ')}`;
+        const result = await this.askGemini(prompt, 'dash_' + today);
+        this._showAIPanel('aiDashInsights', result);
+    },
+
+    async aiDraftEmail(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        if (!c.pe_email && !c.we_email && !c.email) { alert('No email address on file for ' + c.name + '. Add one first.'); return; }
+        const purpose = prompt('What is the email about?', 'Follow-up / check in');
+        if (!purpose) return;
+        const el = document.getElementById('aiEmailDraft');
+        if (el) el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--sf-text-weak);">✨ Drafting email...</div>';
+        const la = c.la || c.last_activity_display;
+        const dsla = la ? Math.floor((new Date() - new Date(la)) / 86400000) : 999;
+        const prompt = `Draft a professional but warm email for an investment banker in Dallas. Keep it concise (3-5 sentences). Include a clear subject line on the first line prefixed with "Subject: ".
+
+To: ${c.name}
+Title: ${c.title || ''} | Relationship: ${c.obligation || 'Professional'}
+Days since last contact: ${dsla === 999 ? 'Never' : dsla}
+Purpose: ${purpose}
+Tone: Professional but personal, not overly formal`;
+        const result = await this.askGemini(prompt);
+        if (el) {
+            const subjectMatch = result.match(/Subject:\s*(.+)/i);
+            const subject = subjectMatch ? subjectMatch[1].trim() : purpose;
+            const body = result.replace(/Subject:\s*.+\n?/i, '').trim();
+            el.innerHTML = '<div style="background:linear-gradient(135deg,#f0f4ff,#e8f0fe);border:1px solid #c2d4f0;border-radius:8px;padding:14px 16px;font-size:13px;position:relative;">'
+                + '<div style="position:absolute;top:8px;right:10px;font-size:10px;color:#5f6368;font-weight:600;">✨ Gemini AI</div>'
+                + '<div style="font-weight:700;margin-bottom:6px;">Subject: ' + subject + '</div>'
+                + '<div style="white-space:pre-wrap;line-height:1.6;">' + body + '</div>'
+                + '<div style="margin-top:10px;display:flex;gap:6px;">'
+                + '<button class="btn-small btn-primary" onclick="window.open(\'mailto:' + (c.pe_email||c.we_email||c.email||'') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body) + '\')">Send via Email</button>'
+                + '<button class="btn-small" onclick="navigator.clipboard.writeText(this.closest(\'div[style*=background]\').querySelector(\'div[style*=white-space]\').textContent)">Copy</button>'
+                + '</div></div>';
+        }
+    },
+
+    // === Gmail Integration ===
+    GMAIL_CLIENT_ID: '952660161996-el5663ja1ns7q1mg7h90fm471am7kqgd.apps.googleusercontent.com',
+    _gmailToken: null,
+    _gmailTokenExpiry: 0,
+
+    initGmail() {
+        // Check if returning from OAuth redirect with token in hash
+        if (window.location.hash.includes('access_token=')) {
+            const params = new URLSearchParams(window.location.hash.substring(1));
+            const token = params.get('access_token');
+            const expiresIn = parseInt(params.get('expires_in') || '3600');
+            if (token) {
+                this._gmailToken = token;
+                this._gmailTokenExpiry = Date.now() + (expiresIn * 1000);
+                localStorage.setItem('matthewsCRM_gmailToken', token);
+                localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                this.updateStatus('Gmail connected', true);
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+        }
+        if (window.google?.accounts?.oauth2) {
+            try { this._gmailClient = google.accounts.oauth2.initTokenClient({
+                client_id: this.GMAIL_CLIENT_ID,
+                scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
+                callback: (resp) => {
+                    if (resp.error) { alert('Gmail auth error: ' + resp.error); return; }
+                    if (resp.access_token) {
+                        this._gmailToken = resp.access_token;
+                        this._gmailTokenExpiry = Date.now() + (resp.expires_in * 1000);
+                        localStorage.setItem('matthewsCRM_gmailToken', resp.access_token);
+                        localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                        this.updateStatus('Gmail connected', true);
+                        this.render();
+                    }
+                },
+                error_callback: (err) => { alert('Gmail error: ' + (err.type || err.message || JSON.stringify(err))); }
+            }); } catch(e) { alert('GIS init error: ' + e.message); }
+        }
+        const saved = localStorage.getItem('matthewsCRM_gmailToken');
+        const exp = parseInt(localStorage.getItem('matthewsCRM_gmailExpiry') || '0');
+        if (saved && exp > Date.now()) { this._gmailToken = saved; this._gmailTokenExpiry = exp; }
+    },
+
+    async connectGmail() {
+        try {
+            const token = await getAuthToken();
+            if (!token) { alert('Please sign in first.'); return; }
+            const res = await fetch('https://us-central1-tmc-crm-f3728.cloudfunctions.net/gmailAuth', {
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            const data = await res.json();
+            if (!data.url) { alert('Could not get auth URL.'); return; }
+            // Open popup for Google consent
+            const popup = window.open(data.url, 'gmail_auth', 'width=500,height=600');
+            // Listen for token from popup
+            window.addEventListener('message', (e) => {
+                if (e.data?.gmailToken) {
+                    this._gmailToken = e.data.gmailToken;
+                    this._gmailTokenExpiry = Date.now() + ((e.data.expiresIn||3600) * 1000);
+                    localStorage.setItem('matthewsCRM_gmailToken', e.data.gmailToken);
+                    localStorage.setItem('matthewsCRM_gmailExpiry', this._gmailTokenExpiry);
+                    this.updateStatus('Gmail connected', true);
+                    this.render();
+                }
+            }, {once: true});
+        } catch(e) {
+            alert('Gmail connect error: ' + e.message);
+        }
+    },
+
+    isGmailConnected() { return this._gmailToken && this._gmailTokenExpiry > Date.now(); },
+
+    async fetchGmailForContact(contact) {
+        if (!this.isGmailConnected()) return [];
+        const emails = [contact.pe_email, contact.we_email, contact.email].filter(Boolean);
+        if (!emails.length) return [];
+        const query = emails.map(e => 'from:' + e + ' OR to:' + e).join(' OR ');
+        try {
+            const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=25`, {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) { if (res.status === 401) { this._gmailToken = null; } return []; }
+            const data = await res.json();
+            if (!data.messages) return [];
+            const threads = await Promise.all(data.messages.slice(0, 20).map(async m => {
+                const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`, {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!r.ok) return null;
+                const msg = await r.json();
+                const headers = {};
+                (msg.payload?.headers || []).forEach(h => headers[h.name] = h.value);
+                return {id: m.id, subject: headers.Subject || '(no subject)', from: headers.From || '', to: headers.To || '', date: headers.Date || '', snippet: msg.snippet || ''};
+            }));
+            return threads.filter(Boolean);
+        } catch { return []; }
+    },
+
+    // Idempotent: check for duplicate auto-logged activity within 60 seconds
+    _isDuplicateActivity(type, contactId) {
+        const now = Date.now();
+        return this.data.activities.some(a => a.type === type && (a.contactId || a.contact_id) === contactId && a.source === 'auto' && a.createdAt && (now - new Date(a.createdAt).getTime()) < 60000);
+    },
+
+    logTextFromTap(contactId, phone) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) { window.location.href = 'sms:' + phone; return; }
+        if (!this._isDuplicateActivity('Text', contactId)) {
+            const today = new Date().toISOString().split('T')[0];
+            contact.la = today;
+            const act = {id: 'act-' + Date.now(), type: 'Text', subject: 'Text — ' + (contact.name || ''), contactId, accountId: contact.accountId || contact.account_id || null, dueDate: today, status: 'Completed', notes: 'Auto-logged: ' + phone, source: 'auto', createdAt: new Date().toISOString()};
+            this.data.activities.push(act);
+            this.persist();
+            firestoreUpsert('activities', act);
+        }
+        window.location.href = 'sms:' + phone;
+    },
+
+    logCallFromTap(contactId, phone) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) { window.location.href = 'tel:' + phone; return; }
+        if (!this._isDuplicateActivity('Call', contactId)) {
+            const today = new Date().toISOString().split('T')[0];
+            contact.la = today;
+            const act = {id: 'act-' + Date.now(), type: 'Call', subject: 'Call — ' + (contact.name || ''), contactId, accountId: contact.accountId || contact.account_id || null, dueDate: today, status: 'Completed', notes: 'Auto-logged: ' + phone, source: 'auto', createdAt: new Date().toISOString()};
+            this.data.activities.push(act);
+            this.persist();
+            firestoreUpsert('activities', act);
+        }
+        window.location.href = 'tel:' + phone;
+    },
+
+    fmtPhone(p) {
+        if (!p) return p;
+        const d = p.replace(/\D/g, '');
+        if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+        if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+        return p;
+    },
+
+    _migrated: false,
+
+    async init() {
+        // 0. Wait for Firebase Auth state
+        await new Promise(resolve => {
+            firebaseAuth.onAuthStateChanged(user => {
+                if (user) this.updateStatus('Signed in', true);
+                resolve();
+            });
+            setTimeout(resolve, 1500); // Don't wait more than 1.5s
+        });
+
+        // 1. Load data from localStorage (instant)
+        this.loadData();
+
+        // 2. Restore UI state (instant)
+        try { const sf = JSON.parse(localStorage.getItem('matthewsCRM_contactFilters')); if (sf) this.contactFilters = sf; } catch {}
+        try { const ss = JSON.parse(localStorage.getItem('matthewsCRM_sortState')); if (ss) this._sortState = ss; } catch {}
+        const savedHash = location.hash.replace('#','');
+        if (savedHash && savedHash !== 'sync') {
+            if (savedHash.startsWith('contactDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.contacts.find(c => c.id === id); if (this.currentRecord) this.currentView = 'contactDetail'; }
+            else if (savedHash.startsWith('activityDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.events.find(a => a.id === id); if (this.currentRecord) this.currentView = 'activityDetail'; }
+            else if (savedHash.startsWith('accountDetail:')) { const id = savedHash.split(':')[1]; this.currentRecord = this.data.accounts.find(a => a.id === id); if (this.currentRecord) this.currentView = 'accountDetail'; }
+            else if (['dashboard','contacts','accounts','deals','activities','calendar','map','emails','referrals','reports','settings'].includes(savedHash)) this.currentView = savedHash;
+        }
+
+        // 3. RENDER IMMEDIATELY — user sees the app now
+        this.setupEventListeners();
+        this.render();
+        this.updateSelectOptions();
+
+        // 4. Background tasks (non-blocking, after render)
+        setTimeout(() => {
+            // Migrations (run once)
+            if (!this._migrated) {
+                let m = false;
+                for (const c of this.data.contacts) {
+                    if (c.email && !c.we_email) { c.we_email = c.email; m = true; }
+                    if (c.email) { delete c.email; m = true; }
+                    if (c.department) { delete c.department; m = true; }
+                    if (!c.tier) { c.tier = '5'; m = true; }
+                }
+                if (m) this.persist();
+                this._migrated = true;
+                // Clean stale columns
+                const validCols = this._allContactCols.map(c => c.key);
+                try { const saved = JSON.parse(localStorage.getItem('matthewsCRM_contactCols')); if (saved) { const cleaned = saved.filter(k => validCols.includes(k)); if (cleaned.length !== saved.length) { this._contactCols = cleaned; localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(cleaned)); } } } catch {}
+            }
+        }, 100);
+
+        // 5. Gmail init
+        setTimeout(() => this.initGmail(), 200);
+
+        // 6. Cloud sync in background (only if signed in)
+        setTimeout(() => { if (cloudSync.isSignedIn()) this.cloudPull(); }, 500);
+
+        // 6. Geocoding much later
+        setTimeout(() => this.bgGeocodeAll(), 10000);
+    },
+
+    deduplicateData() {
+        const dedup = (arr) => {
+            const seen = new Set();
+            return arr.filter(item => {
+                if (!item.id || seen.has(item.id)) return false;
+                seen.add(item.id);
+                return true;
+            });
+        };
+        const before = {c: this.data.contacts.length, a: this.data.accounts.length, d: this.data.deals.length, act: this.data.activities.length};
+        this.data.contacts = dedup(this.data.contacts);
+        this.data.accounts = dedup(this.data.accounts);
+        this.data.deals = dedup(this.data.deals);
+        this.data.activities = dedup(this.data.activities);
+        this.data.emails = dedup(this.data.emails);
+        this.data.referrals = dedup(this.data.referrals);
+        // Remove non-Salesforce seed/junk records (SF IDs are 15-18 char alphanumeric)
+        const isSfId = (id) => id && /^[a-zA-Z0-9]{15,18}$/.test(id);
+        if (this.data.accounts.some(a => isSfId(a.id)) && this.data.accounts.some(a => !isSfId(a.id))) {
+            this.data.accounts = this.data.accounts.filter(a => isSfId(a.id));
+        }
+        if (this.data.contacts.some(c => isSfId(c.id)) && this.data.contacts.some(c => !isSfId(c.id))) {
+            this.data.contacts = this.data.contacts.filter(c => isSfId(c.id));
+        }
+        if (this.data.deals.some(d => isSfId(d.id)) && this.data.deals.some(d => !isSfId(d.id))) {
+            this.data.deals = this.data.deals.filter(d => isSfId(d.id));
+        }
+        if (this.data.activities.some(a => isSfId(a.id)) && this.data.activities.some(a => !isSfId(a.id))) {
+            this.data.activities = this.data.activities.filter(a => isSfId(a.id));
+        }
+        const removed = (before.c - this.data.contacts.length) + (before.a - this.data.accounts.length) + (before.d - this.data.deals.length) + (before.act - this.data.activities.length);
+        if (removed > 0) {
+            this.persist();
+        }
+    },
+
+    normalizeAddresses() {
+        let fixed = 0;
+        // Contacts: if address is empty, build from mailing fields
+        for (const c of this.data.contacts) {
+            if (c.address) continue;
+            const parts = [
+                c.mailing_street || c.MailingStreet || c.mailingStreet || '',
+                [c.mailing_city || c.MailingCity || c.mailingCity || '',
+                 c.mailing_state || c.MailingState || c.mailingState || '',
+                 c.mailing_postal_code || c.MailingPostalCode || c.mailingPostalCode || c.mailing_zip || ''].filter(Boolean).join(' ')
+            ].filter(Boolean);
+            if (parts.length) { c.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
+        }
+        // Accounts: use whatever address field exists, then fall back to contact
+        for (const a of this.data.accounts) {
+            if (!a.address) {
+                // Try any address-like field on the account itself
+                const any = a.billing_street || a.BillingStreet || a.billingStreet
+                    || a.shipping_street || a.ShippingStreet || a.shippingStreet || '';
+                const anyCity = [
+                    a.billing_city || a.BillingCity || a.billingCity || a.shipping_city || a.ShippingCity || '',
+                    a.billing_state || a.BillingState || a.billingState || a.shipping_state || a.ShippingState || '',
+                    a.billing_postal_code || a.BillingPostalCode || a.billingPostalCode || a.shipping_postal_code || ''
+                ].filter(Boolean).join(' ');
+                const parts = [any, anyCity].filter(Boolean);
+                if (parts.length) { a.address = parts.join(', ').replace(/\n/g, ' ').trim(); fixed++; }
+            }
+            // Still no address? Copy from the account's first contact with an address
+            if (!a.address) {
+                const contact = this.data.contacts.find(c => (c.accountId || c.account_id) === a.id && c.address);
+                if (contact) { a.address = contact.address; fixed++; }
+            }
+        }
+        if (fixed > 0) {
+            this.persist();
+        }
+    },
+
+    async cloudPull() {
+        if (!cloudSync.isSignedIn()) return;
+        try {
+            const token = await getAuthToken();
+            if (!token) return;
+            this.updateStatus('Syncing with SQL...', true);
+            const res = await fetch(SQL_BULK, {headers: {'Authorization': 'Bearer ' + token}});
+            if (!res.ok) { this.updateStatus('Sync failed', false); return; }
+            const cloud = await res.json();
+            const cloudCount = (cloud.contacts||[]).length + (cloud.accounts||[]).length;
+            const localCount = this.data.contacts.length + this.data.accounts.length;
+            if (cloudCount > 0) {
+                for (const col of COLLECTIONS) {
+                    if (cloud[col] && cloud[col].length) this.data[col] = cloud[col];
+                }
+                db.save(this.data);
+                this.updateSelectOptions();
+                this.render();
+                this.updateStatus('Synced with SQL', true);
+            } else if (localCount > 0) {
+                this.updateStatus('Migrating to SQL...', true);
+                const migrationData = {};
+                for (const col of COLLECTIONS) {
+                    if (this.data[col] && this.data[col].length) migrationData[col] = this.data[col];
+                }
+                await fetch(SQL_BULK, {
+                    method: 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    body: JSON.stringify(migrationData)
+                });
+                this.updateStatus('Migrated to SQL', true);
+            }
+        } catch (e) { console.log('SQL sync error:', e.message); this.updateStatus('Offline mode', false); }
+    },
+
+    loadData() {
+        try {
+            this.updateStatus('Loading...', false);
+            const saved = db.load();
+            if (saved && saved.contacts && saved.contacts.length > 0) {
+                this.data = {
+                    contacts: saved.contacts || [],
+                    accounts: saved.accounts || [],
+                    deals: saved.deals || [],
+                    activities: saved.activities || [],
+                    emails: saved.emails || [],
+                    referrals: saved.referrals || [],
+                    dealContacts: saved.dealContacts || [],
+                    events: saved.events || [],
+                    investors: saved.investors || [],
+                    _connections: saved._connections || [],
+                    _auditLog: saved._auditLog || [],
+                    _fund: saved._fund || null
+                };
+            } else {
+                this.data = this.getSeedData();
+                db.save(this.data);
+            }
+            this.updateStatus('Ready', true);
+        } catch (err) {
+            console.error('Load error:', err);
+            this.updateStatus('Error', false);
+            this.data = this.getSeedData();
+        }
+        this.isLoading = false;
+    },
+
+    _persistTimer: null,
+    logChange(recordType, recordId, recordName, changes) {
+        if (!this.data._auditLog) this.data._auditLog = [];
+        this.data._auditLog.unshift({
+            ts: new Date().toISOString(),
+            type: recordType,
+            id: recordId,
+            name: recordName,
+            changes: changes
+        });
+        if (this.data._auditLog.length > 500) this.data._auditLog.length = 500;
+    },
+
+    _diffRecord(oldRec, newRec, fields) {
+        const changes = [];
+        fields.forEach(f => {
+            const o = (oldRec[f]||'').toString(), n = (newRec[f]||'').toString();
+            if (o !== n) changes.push({field: f, from: o || '(empty)', to: n || '(empty)'});
+        });
+        return changes;
+    },
+
+    persist() {
+        this.data._lastModified = new Date().toISOString();
+        db.save(this.data);
+        if (!this._persistTimer) {
+            this.updateStatus('●', true);
+            this._persistTimer = setTimeout(() => { this.updateStatus('Ready', true); this._persistTimer = null; }, 2000);
+        }
+        this._syncMeta();
+    },
+
+    _syncMetaTimer: null,
+    _syncMeta() {
+        clearTimeout(this._syncMetaTimer);
+        this._syncMetaTimer = setTimeout(() => {
+            const col = cloudSync.col('meta');
+            if (!col) return;
+            const meta = {};
+            if (this.data.investors?.length) meta.investors = this.data.investors;
+            if (this.data._fund) meta._fund = this.data._fund;
+            if (this.data._connections?.length) meta._connections = this.data._connections;
+            if (this.data._auditLog?.length) meta._auditLog = this.data._auditLog.slice(0, 200);
+            const clean = JSON.parse(JSON.stringify(meta));
+            col.doc('appMeta').set(clean, {merge: true}).catch(() => {});
+        }, 3000);
+    },
+
+    importJsonData(jsonData) {
+        const d = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+        if (d.accounts) { this.data.accounts = [...this.data.accounts, ...d.accounts]; }
+        if (d.contacts) { this.data.contacts = [...this.data.contacts, ...d.contacts]; }
+        if (d.deals) { this.data.deals = [...this.data.deals, ...d.deals]; }
+        if (d.activities) { this.data.activities = [...this.data.activities, ...d.activities]; }
+        if (d.emails) { this.data.emails = [...this.data.emails, ...d.emails]; }
+        if (d.referrals) { this.data.referrals = [...this.data.referrals, ...d.referrals]; }
+        if (d.events) { this.data.events = [...this.data.events, ...d.events]; }
+        if (d.dealContacts) { this.data.dealContacts = [...this.data.dealContacts, ...d.dealContacts]; }
+        if (d.investors) { this.data.investors = [...(this.data.investors||[]), ...d.investors]; }
+        if (d._connections) { this.data._connections = [...(this.data._connections||[]), ...d._connections]; }
+        if (d._auditLog) { this.data._auditLog = [...(this.data._auditLog||[]), ...d._auditLog].slice(0,500); }
+        if (d._fund) { this.data._fund = d._fund; }
+        this.persist();
+        if (cloudSync.isSignedIn()) cloudSync.pushAll(this.data).catch(() => {});
+        this.updateSelectOptions();
+        this.render();
+        this.bgGeocodeAll();
+        return {accounts: (d.accounts||[]).length, contacts: (d.contacts||[]).length, deals: (d.deals||[]).length, activities: (d.activities||[]).length};
+    },
+
+    _fuzzyMatch(name1, name2) {
+        if (!name1 || !name2) return false;
+        const a = name1.toLowerCase().trim(), b = name2.toLowerCase().trim();
+        if (a === b) return true;
+        if (a.includes(b) || b.includes(a)) return true;
+        const aParts = a.split(/\s+/), bParts = b.split(/\s+/);
+        if (aParts.length >= 2 && bParts.length >= 2 && aParts[0] === bParts[0] && aParts[aParts.length-1] === bParts[bParts.length-1]) return true;
+        return false;
+    },
+
+    async importInstagramData(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading Instagram data...</div>';
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            let matched = 0, created = 0, messages = 0;
+            const allUsers = [];
+
+            const extractUser = (item) => {
+                if (item.string_list_data && Array.isArray(item.string_list_data)) {
+                    const d = item.string_list_data[0];
+                    if (d && d.value) return {username: d.value, href: d.href || '', ts: d.timestamp || null};
+                }
+                if (item.value) return {username: item.value, href: item.href || '', ts: item.timestamp || null};
+                if (item.username) return {username: item.username, href: '', ts: null};
+                if (item.name) return {username: item.name, href: '', ts: null};
+                if (typeof item === 'string') return {username: item, href: '', ts: null};
+                return null;
+            };
+
+            const processArray = (arr) => {
+                if (!Array.isArray(arr)) return;
+                arr.forEach(item => {
+                    const u = extractUser(item);
+                    if (u && u.username) allUsers.push(u);
+                });
+            };
+
+            const results = {matched: [], created: [], messages: 0};
+
+            // Handle Instagram contacts_contact_info format (synced phone contacts)
+            if (data.contacts_contact_info && Array.isArray(data.contacts_contact_info)) {
+                data.contacts_contact_info.forEach(entry => {
+                    const smd = entry.string_map_data || {};
+                    const firstName = smd['First Name']?.value || smd['first_name']?.value || '';
+                    const lastName = smd['Last Name']?.value || smd['last_name']?.value || '';
+                    const phone = smd['Contact Number']?.value || smd['contact_number']?.value || smd['Phone Number']?.value || '';
+                    const email = smd['Email']?.value || smd['email']?.value || '';
+                    const name = (entry.title || ((firstName + ' ' + lastName).trim()) || '').trim();
+                    if (!name) return;
+                    const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name) || (phone && (c.pc_number === phone || c.mobile === phone || c.wc_number === phone || c.phone === phone)));
+                    if (existing) {
+                        const enriched = [];
+                        if (phone && !existing.pc_number && !existing.mobile) { existing.mobile = phone; enriched.push('phone'); }
+                        if (email && !existing.pe_email && !existing.we_email) { existing.pe_email = email; enriched.push('email'); }
+                        results.matched.push({name: existing.name, enriched});
+                        firestoreUpsert('contacts', existing);
+                    } else {
+                        const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, mobile: phone || null, pe_email: email || null, tier: '5', tags: 'Instagram Contacts', createdAt: new Date().toISOString()};
+                        this.data.contacts.push(newC);
+                        firestoreUpsert('contacts', newC);
+                        results.created.push({name, phone: phone||'', email: email||''});
+                    }
+                });
+            }
+
+            // Handle all known Instagram JSON formats:
+            // Format 1: bare array [{string_list_data:[{value:"user"}]}]  (followers_1.json, following.json)
+            if (Array.isArray(data)) {
+                processArray(data);
+            }
+            // Format 2: {relationships_followers: [...]} or {followers: [...]}
+            else if (typeof data === 'object') {
+                Object.keys(data).forEach(key => {
+                    const val = data[key];
+                    if (Array.isArray(val)) processArray(val);
+                    else if (val && typeof val === 'object' && !Array.isArray(val)) {
+                        Object.values(val).forEach(v => { if (Array.isArray(v)) processArray(v); });
+                    }
+                });
+            }
+
+            // Handle messages format: {participants:[...], messages:[...]}
+            if (data.participants && data.messages) {
+                const participants = data.participants || [];
+                const msgs = data.messages || [];
+                const otherName = participants.find(p => p.name)?.name || '';
+                if (otherName) {
+                    const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, otherName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === otherName.toLowerCase()));
+                    if (contact) {
+                        if (!contact.ig_messages) contact.ig_messages = [];
+                        msgs.slice(0, 50).forEach(m => {
+                            const msgText = m.content || m.text || '';
+                            const sender = m.sender_name || m.sender || '';
+                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : '';
+                            if (msgText) { contact.ig_messages.push({from: sender, text: msgText.slice(0,500), date: ts}); messages++; }
+                        });
+                        contact.ig_messages = contact.ig_messages.slice(-100);
+                        firestoreUpsert('contacts', contact);
+                    }
+                }
+            }
+
+            // Handle inbox folder format: [{participants, messages}, ...]
+            const inbox = data.inbox || data.messages;
+            if (Array.isArray(inbox)) {
+                inbox.forEach(thread => {
+                    if (!thread.participants || !thread.messages) return;
+                    const otherName = thread.participants.find(p => p.name)?.name || '';
+                    const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, otherName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === otherName.toLowerCase()));
+                    if (contact && thread.messages.length) {
+                        if (!contact.ig_messages) contact.ig_messages = [];
+                        thread.messages.slice(0, 50).forEach(m => {
+                            const msgText = m.content || m.text || '';
+                            const sender = m.sender_name || m.sender || '';
+                            const ts = m.timestamp_ms ? new Date(m.timestamp_ms).toISOString() : '';
+                            if (msgText) { contact.ig_messages.push({from: sender, text: msgText.slice(0,500), date: ts}); messages++; }
+                        });
+                        contact.ig_messages = contact.ig_messages.slice(-100);
+                        firestoreUpsert('contacts', contact);
+                    }
+                });
+            }
+
+            const seen = new Set();
+            allUsers.forEach(u => {
+                if (seen.has(u.username.toLowerCase())) return;
+                seen.add(u.username.toLowerCase());
+                const displayName = u.username.replace(/[._]/g, ' ');
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, displayName) || (c.instagram && c.instagram.replace('@','').toLowerCase() === u.username.toLowerCase()));
+                if (existing) {
+                    const enriched = [];
+                    if (!existing.instagram) { existing.instagram = u.username; enriched.push('instagram'); }
+                    results.matched.push({name: existing.name, enriched});
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-ig-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name: displayName, instagram: u.username, tier: '5', tags: 'Instagram Import', createdAt: new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    results.created.push({name: displayName, phone: '', email: '', ig: u.username});
+                }
+            });
+
+            this.persist();
+            this.updateSelectOptions();
+            const total = results.matched.length + results.created.length;
+            const debugInfo = total === 0 ? ' (File keys: ' + Object.keys(typeof data === 'object' && !Array.isArray(data) ? data : {_array: true}).join(', ') + ')' : '';
+            let rhtml = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+            rhtml += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:' + (total > 0 ? 'var(--sf-success)' : 'var(--sf-warning)') + ';">✓ Instagram Import: ' + results.matched.length + ' matched, ' + results.created.length + ' new, ' + results.messages + ' messages' + esc(debugInfo) + '</div>';
+            if (results.matched.length) {
+                rhtml += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-brand);margin-bottom:4px;">MATCHED TO EXISTING (' + results.matched.length + ')</div>';
+                rhtml += '<div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.matched.forEach(m => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(m.name) + (m.enriched.length ? ' <span style="color:var(--sf-success);">+ ' + m.enriched.join(', ') + '</span>' : ' <span style="color:var(--sf-text-weak);">(no new data)</span>') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            if (results.created.length) {
+                rhtml += '<div><div style="font-size:11px;font-weight:700;color:#7e22ce;margin-bottom:4px;">NEW CONTACTS CREATED (' + results.created.length + ')</div>';
+                rhtml += '<div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.created.forEach(c => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(c.name) + (c.ig ? ' <span style="color:var(--sf-text-weak);">@' + esc(c.ig) + '</span>' : '') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            rhtml += '</div>';
+            if (status) status.innerHTML = rhtml;
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Instagram data download.</div>';
+        }
+    },
+
+    cleanupSocialImports() {
+        const status = document.getElementById('socialImportStatus');
+        const bizWords = ['llc','ltd','inc','bakery','retreat','group','club','grille','restaurant','dental','mortgage','candles','collective','realtor','consulting','insurance','church','official','fanpage','community','dallas','trips','spot','heaven','entrepreneurs','dog','dogs','puppies','coverage','brand manager','mind.','®'];
+        const socialTags = ['Instagram Import','Instagram Contacts','Social Import','Facebook Import'];
+        const socialContacts = this.data.contacts.filter(c => {
+            if (!c.tags) return false;
+            return socialTags.some(t => c.tags.includes(t));
+        });
+        if (!socialContacts.length) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-text-weak);">No social-imported contacts found.</div>';
+            return;
+        }
+        const toRemove = [];
+        const toFlag = [];
+        socialContacts.forEach(c => {
+            const name = (c.name || '').trim();
+            const nameLower = name.toLowerCase();
+            const hasSpace = name.includes(' ');
+            const isAllLower = name === nameLower && !hasSpace;
+            const hasBizWord = bizWords.some(w => nameLower.includes(w));
+            const isEmoji = /^[\p{Emoji}\s]+$/u.test(name);
+            const noName = !name || name.length < 2;
+            const isUsername = !hasSpace && name.includes('.') || !hasSpace && name.includes('_');
+            if (noName || isEmoji) { toRemove.push({contact: c, reason: 'No real name'}); }
+            else if (hasBizWord) { toRemove.push({contact: c, reason: 'Business/brand account'}); }
+            else if (!hasSpace && isAllLower) { toRemove.push({contact: c, reason: 'Username only (no first/last)'}); }
+            else if (!hasSpace) { toFlag.push({contact: c, reason: 'Single name only'}); }
+        });
+        if (!toRemove.length && !toFlag.length) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);">✓ All social imports look clean!</div>';
+            return;
+        }
+        let html = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+        html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">🧹 Social Import Cleanup</div>';
+        if (toRemove.length) {
+            html += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-error);margin-bottom:4px;">WILL REMOVE (' + toRemove.length + ')</div>';
+            html += '<div style="max-height:200px;overflow-y:auto;font-size:11px;">';
+            toRemove.forEach(r => { html += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(r.contact.name || '(empty)') + ' <span style="color:var(--sf-text-weak);">— ' + r.reason + '</span></div>'; });
+            html += '</div></div>';
+        }
+        if (toFlag.length) {
+            html += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-warning);margin-bottom:4px;">SINGLE NAME — KEEPING (' + toFlag.length + ')</div>';
+            html += '<div style="max-height:100px;overflow-y:auto;font-size:11px;">';
+            toFlag.forEach(r => { html += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(r.contact.name) + '</div>'; });
+            html += '</div></div>';
+        }
+        html += '<button class="btn-primary" onclick="app._executeCleanup()" style="margin-top:8px;">Confirm: Remove ' + toRemove.length + ' contacts</button>';
+        html += '</div>';
+        this._cleanupToRemove = toRemove.map(r => r.contact.id);
+        if (status) status.innerHTML = html;
+    },
+
+    _executeCleanup() {
+        if (!this._cleanupToRemove) return;
+        const ids = this._cleanupToRemove;
+        ids.forEach(id => firestoreDelete('contacts', id));
+        this.data.contacts = this.data.contacts.filter(c => !ids.includes(c.id));
+        this.persist();
+        this._cleanupToRemove = null;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Removed ' + ids.length + ' contacts. Your CRM is clean.</div>';
+    },
+
+    async importSocialCsv(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading CSV...</div>';
+        try {
+            const text = await file.text();
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length < 2) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV has no data rows.</div>'; return; }
+            const delim = lines[0].includes('\t') ? '\t' : ',';
+            const headers = lines[0].split(delim).map(h => h.trim().toLowerCase());
+            const nameIdx = headers.findIndex(h => h.includes('full_name') || h.includes('name'));
+            const igIdx = headers.findIndex(h => h.includes('username') || h.includes('instagram') || h.includes('ig') || h.includes('handle'));
+            const emailIdx = headers.findIndex(h => h.includes('email'));
+            const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('number'));
+            if (nameIdx < 0) { if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">CSV must have a Name column.</div>'; return; }
+
+            const results = {matched: [], created: []};
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(delim).map(s => s.trim());
+                const name = cols[nameIdx] || '';
+                const ig = igIdx >= 0 ? (cols[igIdx] || '').replace('@','') : '';
+                const email = emailIdx >= 0 ? cols[emailIdx] || '' : '';
+                const phone = phoneIdx >= 0 ? cols[phoneIdx] || '' : '';
+                if (!name || name === '—') continue;
+                const cleanEmail = (email && email !== '—') ? email : '';
+                const cleanPhone = (phone && phone !== '—') ? phone : '';
+                const cleanIg = (ig && ig !== '—') ? ig : '';
+
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name) || (cleanIg && c.instagram && c.instagram.replace('@','').toLowerCase() === cleanIg.toLowerCase()) || (cleanPhone && (c.pc_number === cleanPhone || c.mobile === cleanPhone)));
+                if (existing) {
+                    const enriched = [];
+                    if (cleanIg && !existing.instagram) { existing.instagram = cleanIg; enriched.push('instagram'); }
+                    if (cleanEmail && !existing.pe_email && !existing.we_email) { existing.pe_email = cleanEmail; enriched.push('email'); }
+                    if (cleanPhone && !existing.pc_number && !existing.mobile) { existing.mobile = cleanPhone; enriched.push('phone'); }
+                    results.matched.push({name: existing.name, enriched});
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-csv-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, instagram: cleanIg || null, pe_email: cleanEmail || null, mobile: cleanPhone || null, tier: '5', tags: 'Social Import', createdAt: new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    results.created.push({name, ig: cleanIg, phone: cleanPhone, email: cleanEmail});
+                }
+            }
+            this.persist();
+            this.updateSelectOptions();
+            let rhtml = '<div style="padding:12px;border:1px solid var(--sf-border-weak);border-radius:6px;margin-top:8px;">';
+            rhtml += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--sf-success);">✓ CSV Import: ' + results.matched.length + ' matched, ' + results.created.length + ' new contacts</div>';
+            if (results.matched.length) {
+                rhtml += '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sf-brand);margin-bottom:4px;">MATCHED (' + results.matched.length + ')</div><div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.matched.forEach(m => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(m.name) + (m.enriched.length ? ' <span style="color:var(--sf-success);">+ ' + m.enriched.join(', ') + '</span>' : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            if (results.created.length) {
+                rhtml += '<div><div style="font-size:11px;font-weight:700;color:#7e22ce;margin-bottom:4px;">NEW (' + results.created.length + ')</div><div style="max-height:150px;overflow-y:auto;font-size:11px;">';
+                results.created.forEach(c => { rhtml += '<div style="padding:2px 0;border-bottom:1px solid var(--sf-border-weak);">' + esc(c.name) + (c.ig ? ' @' + esc(c.ig) : '') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '') + '</div>'; });
+                rhtml += '</div></div>';
+            }
+            rhtml += '</div>';
+            if (status) status.innerHTML = rhtml;
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '</div>';
+        }
+    },
+
+    bulkIgHandles() {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = '<div style="background:#fff;border-radius:8px;padding:20px;width:500px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">'
+            + '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">Bulk Add Instagram Handles</div>'
+            + '<div style="font-size:12px;color:var(--sf-text-weak);margin-bottom:12px;">One per line: <code>Contact Name, @handle</code></div>'
+            + '<textarea id="bulkIgInput" style="flex:1;min-height:250px;padding:10px;font-size:13px;font-family:monospace;border:1px solid var(--sf-border);border-radius:4px;resize:vertical;" placeholder="Adam Kaiser, @adamkaiser18\nJake Builder, @jakebuilds\nJacob Goetz, @jacobgoetz"></textarea>'
+            + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">'
+            + '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="padding:6px 14px;font-size:13px;">Cancel</button>'
+            + '<button class="btn-primary" onclick="app._processBulkIg();" style="padding:6px 14px;font-size:13px;">Apply</button>'
+            + '</div></div>';
+        document.body.appendChild(overlay);
+    },
+
+    _processBulkIg() {
+        const input = document.getElementById('bulkIgInput');
+        if (!input) return;
+        const lines = input.value.split('\n').filter(l => l.trim());
+        let matched = 0, notFound = [];
+        lines.forEach(line => {
+            const parts = line.split(',').map(s => s.trim());
+            if (parts.length < 2) return;
+            const name = parts[0];
+            const handle = parts[1].replace('@', '');
+            const contact = this.data.contacts.find(c => this._fuzzyMatch(c.name, name));
+            if (contact) {
+                contact.instagram = handle;
+                firestoreUpsert('contacts', contact);
+                matched++;
+            } else {
+                notFound.push(name);
+            }
+        });
+        this.persist();
+        const overlay = document.querySelector('[style*="fixed"][style*="z-index:1000"]');
+        if (overlay) overlay.remove();
+        const status = document.getElementById('socialImportStatus');
+        let msg = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Updated ' + matched + ' contacts with IG handles.</div>';
+        if (notFound.length) msg += '<div style="padding:4px 8px;font-size:11px;color:var(--sf-error);">Not found: ' + notFound.map(n => esc(n)).join(', ') + '</div>';
+        if (status) status.innerHTML = msg;
+    },
+
+    async importFacebookData(file) {
+        if (!file) return;
+        const status = document.getElementById('socialImportStatus');
+        if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">Reading Facebook data...</div>';
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            let matched = 0, created = 0;
+
+            const friends = data.friends || data.friends_v2 || [];
+            const friendsList = Array.isArray(friends) ? friends : (friends.friends || friends.friends_v2 || []);
+
+            friendsList.forEach(f => {
+                const name = f.name || (f.friend_display_name) || '';
+                const ts = f.timestamp ? new Date(f.timestamp * 1000).toISOString() : '';
+                if (!name) return;
+                const existing = this.data.contacts.find(c => this._fuzzyMatch(c.name, name));
+                if (existing) {
+                    if (!existing.facebook && f.profile_uri) existing.facebook = f.profile_uri;
+                    matched++;
+                    firestoreUpsert('contacts', existing);
+                } else {
+                    const newC = {id: 'con-fb-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), name, facebook: f.profile_uri || null, tier: '5', tags: 'Facebook Import', createdAt: ts || new Date().toISOString()};
+                    this.data.contacts.push(newC);
+                    firestoreUpsert('contacts', newC);
+                    created++;
+                }
+            });
+
+            const profile = data.profile || data.profile_v2 || {};
+            if (profile.birthday) {
+                const me = this.data.contacts.find(c => c.name && c.name.includes('Matthews'));
+                if (me && !me.birthdate) me.birthdate = profile.birthday;
+            }
+
+            this.persist();
+            this.updateSelectOptions();
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-success);font-weight:600;">✓ Facebook import complete: ' + matched + ' matched, ' + created + ' new contacts created</div>';
+        } catch(e) {
+            if (status) status.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-error);">Error: ' + esc(e.message) + '. Make sure this is a JSON file from Facebook data download.</div>';
+        }
+    },
+
+    async bgGeocodeAll() {
+        const cache = this._loadGeocodeCache();
+        const items = [...this.data.contacts, ...this.data.accounts, ...this.data.events].filter(i => i.address && !cache[i.address.toLowerCase().trim()]);
+        if (!items.length) return;
+        console.log(`[bgGeocode] Geocoding ${items.length} new addresses in background…`);
+        for (const item of items) {
+            await this.geocodeAddress(item.address);
+            await new Promise(r => setTimeout(r, 1100));
+        }
+        console.log(`[bgGeocode] Done. Cache now has ${Object.keys(this._loadGeocodeCache()).length} entries.`);
+    },
+
+    handleJsonImportFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const counts = this.importJsonData(e.target.result);
+                alert(`Imported: ${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.deals} deals, ${counts.activities} activities`);
+                this.closeModal('modalJsonImport');
+            } catch (err) { alert('Error parsing JSON: ' + err.message); }
+        };
+        reader.readAsText(file);
+    },
+
+    updateStatus(text, isOnline) {
+        const indicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        if (indicator && statusText) {
+            indicator.className = 'status-indicator ' + (isOnline ? 'status-online' : 'status-offline');
+            statusText.textContent = text;
+        }
+    },
+
+    async saveContact(e) {
+        e.preventDefault();
+        const id = document.getElementById('contactId').value;
+        const contact = {
+            name: document.getElementById('contactName').value,
+            pe_email: document.getElementById('contactPeEmail').value || null,
+            we_email: document.getElementById('contactWeEmail').value || null,
+            pc_number: this.fmtPhone(document.getElementById('contactPcNumber').value) || null,
+            wc_number: this.fmtPhone(document.getElementById('contactWcNumber').value) || null,
+            mobile: this.fmtPhone(document.getElementById('contactMobile').value),
+            phone: this.fmtPhone(document.getElementById('contactPhone').value),
+            home_phone: document.getElementById('contactHomePhone').value || null,
+            other_phone: document.getElementById('contactOtherPhone').value || null,
+            fax: document.getElementById('contactFax').value || null,
+            address: document.getElementById('contactAddress').value,
+            accountId: document.getElementById('contactCompany').value || null,
+            tier: document.getElementById('contactTier').value,
+            vip: document.getElementById('contactVip').value === 'true' || false,
+            obligation: [...document.querySelectorAll('.obligation-cb:checked')].map(cb => cb.value).join(', ') || null,
+            la: document.getElementById('contactLA').value || null,
+            birthdate: document.getElementById('contactBirthdate').value || null,
+            title: document.getElementById('contactTitle').value || null,
+            lead_source: document.getElementById('contactLeadSource').value || null,
+            referred_by: document.getElementById('contactReferredBy').value || null,
+            pinned: document.getElementById('contactPinned').value || null,
+            assistant_name: document.getElementById('contactAssistantName').value || null,
+            assistant_phone: document.getElementById('contactAssistantPhone').value || null,
+            instagram: document.getElementById('contactInstagram').value || null,
+            facebook: document.getElementById('contactFacebook').value || null,
+            linkedin: document.getElementById('contactLinkedin').value || null,
+            linkedin_profile: document.getElementById('contactLinkedinProfile').value || null,
+            lisn_profile: document.getElementById('contactLisnProfile').value || null,
+            liSnP: document.getElementById('contactLiSnP').value || null,
+            playbook: document.getElementById('contactPlaybook').value || null,
+            tags: document.getElementById('contactTags').value || null,
+            notes: document.getElementById('contactNotes').value || null
+        };
+
+        // Duplicate detection for new contacts
+        if (!id) {
+            const dupes = this.data.contacts.filter(c => {
+                if (contact.pc_number && c.pc_number && c.pc_number.replace(/\D/g,'') === contact.pc_number.replace(/\D/g,'')) return true;
+                if (contact.we_email && c.we_email && c.we_email.toLowerCase() === contact.we_email.toLowerCase()) return true;
+                if (contact.pe_email && c.pe_email && c.pe_email.toLowerCase() === contact.pe_email.toLowerCase()) return true;
+                if (contact.name && c.name && c.name.toLowerCase() === contact.name.toLowerCase()) return true;
+                return false;
+            });
+            if (dupes.length && !confirm(`Possible duplicate(s) found:\n${dupes.map(d=>d.name).join(', ')}\n\nSave anyway?`)) return;
+        }
+        if (id) {
+            const idx = this.data.contacts.findIndex(c => c.id === id);
+            if (idx >= 0) { this.data.contacts[idx] = {...this.data.contacts[idx], ...contact}; firestoreUpsert('contacts', this.data.contacts[idx]); }
+        } else {
+            const newContact = {...contact, id: 'con-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.contacts.push(newContact);
+            firestoreUpsert('contacts', newContact);
+        }
+        this.persist();
+        if (contact.address) this.geocodeAddress(contact.address);
+        this.closeModal('modalContact');
+        this.render();
+    },
+
+    async saveAccount(e) {
+        e.preventDefault();
+        const id = document.getElementById('accountId').value;
+        const account = {
+            name: document.getElementById('accountName').value,
+            industry: document.getElementById('accountIndustry').value || null,
+            website: document.getElementById('accountWebsite').value || null,
+            address: document.getElementById('accountAddress').value || null,
+            type: document.getElementById('accountType').value,
+            driveLink: document.getElementById('accountDriveLink').value || null,
+            notes: document.getElementById('accountNotes').value || null,
+            ownership: parseFloat(document.getElementById('accountOwnership').value) || null,
+            acqDate: document.getElementById('accountAcqDate').value || null,
+            entryVal: parseFloat(document.getElementById('accountEntryVal').value) || null,
+            currentVal: parseFloat(document.getElementById('accountCurrentVal').value) || null,
+            invested: parseFloat(document.getElementById('accountInvested').value) || null,
+            revenue: parseFloat(document.getElementById('accountRevenue').value) || null,
+            ebitda: parseFloat(document.getElementById('accountEBITDA').value) || null,
+            portStatus: document.getElementById('accountPortStatus').value || null
+        };
+
+        if (id) {
+            const idx = this.data.accounts.findIndex(a => a.id === id);
+            if (idx >= 0) {
+                const old = this.data.accounts[idx];
+                const changes = this._diffRecord(old, account, ['name','type','industry','ownership','entryVal','currentVal','invested','portStatus']);
+                if (changes.length) this.logChange('account', id, account.name, changes);
+                this.data.accounts[idx] = {...old, ...account};
+                firestoreUpsert("accounts", this.data.accounts[idx]);
+            }
+        } else {
+            const newAcct = {...account, id: 'acc-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.accounts.push(newAcct); firestoreUpsert('accounts', newAcct);
+            this.logChange('account', newAcct.id, account.name, [{field:'created', from:'', to:'New account'}]);
+        }
+        this.persist();
+        if (account.address) this.geocodeAddress(account.address);
+        this.closeModal('modalAccount');
+        this.render();
+    },
+
+    async saveDeal(e) {
+        e.preventDefault();
+        const id = document.getElementById('dealId').value;
+        const deal = {
+            name: document.getElementById('dealName').value,
+            accountId: document.getElementById('dealAccount').value,
+            value: parseFloat(document.getElementById('dealValue').value) || 0,
+            stage: document.getElementById('dealStage').value,
+            sector: document.getElementById('dealSector').value || null,
+            source: document.getElementById('dealSource').value || null,
+            sourceContact: document.getElementById('dealSourceContact').value || null,
+            probability: parseInt(document.getElementById('dealProbability').value) || 0,
+            closeDate: document.getElementById('dealCloseDate').value || null,
+            driveLink: document.getElementById('dealDriveLink').value || null,
+            feeStructure: document.getElementById('dealFeeStructure').value || null,
+            askingPrice: parseFloat(document.getElementById('dealAskingPrice').value) || null,
+            sde: parseFloat(document.getElementById('dealSDE').value) || null,
+            ownerInvolvement: document.getElementById('dealOwnerInvolvement').value || null,
+            listingURL: document.getElementById('dealListingURL').value || null,
+            counterparties: document.getElementById('dealCounterparties').value || null,
+            continuationVehicle: [...document.querySelectorAll('.cv-cb:checked')].map(cb => cb.value).join(', ') || null,
+            techNotes: document.getElementById('dealTechNotes').value || null,
+            notes: document.getElementById('dealNotes').value || null
+        };
+
+        if (id) {
+            const idx = this.data.deals.findIndex(d => d.id === id);
+            if (idx >= 0) {
+                const old = this.data.deals[idx];
+                const changes = this._diffRecord(old, deal, ['name','stage','value','probability','sector','source','sourceContact','closeDate','feeStructure','counterparties','continuationVehicle']);
+                if (changes.length) this.logChange('deal', id, deal.name, changes);
+                this.data.deals[idx] = {...old, ...deal};
+                firestoreUpsert('deals', this.data.deals[idx]);
+            }
+        } else {
+            const newDeal = {...deal, id: 'deal-' + Date.now(), createdAt: new Date().toISOString()};
+            if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newDeal._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
+            this.data.deals.push(newDeal);
+            firestoreUpsert('deals', newDeal);
+            this.logChange('deal', newDeal.id, deal.name, [{field:'created', from:'', to:'New deal'}]);
+        }
+        this.persist();
+        this.closeModal('modalDeal');
+        this.render();
+    },
+
+    quickActivityForm(contactId, type) {
+        if (type === 'Email') {
+            document.getElementById('emailContact').value = contactId;
+            document.getElementById('emailSubject').value = 'Quick';
+            this.openModal('modalEmail');
+            setTimeout(() => document.getElementById('emailBody').focus(), 100);
+            return;
+        }
+        this._clearActivityForm();
+        document.getElementById('activityContact').value = contactId;
+        document.getElementById('activityType').value = type;
+        document.getElementById('activitySubject').value = 'Quick';
+        document.getElementById('activityDueDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('activityStatus').value = 'Completed';
+        this.onActivityTypeChange();
+        this.openModal('modalActivity');
+        setTimeout(() => document.getElementById('activityNotes').focus(), 100);
+    },
+
+    _showActDropdown(type, contactId) {
+        const dd = document.getElementById('actDropdown');
+        if (!dd) return;
+        const items = {
+            task: [{label:'New Task', type:'Task'}, {label:'New Follow-up', type:'Follow-up'}, {label:'Add Note', type:'Note'}],
+            event: [{label:'New Meeting', type:'Meeting'}],
+            call: [{label:'Log a Call', type:'Call'}],
+            email: [{label:'Log Email', act:'email'}]
+        };
+        dd.innerHTML = (items[type]||[]).map(i => i.act === 'email'
+            ? `<div onclick="document.getElementById('emailContact').value='${contactId}'; app.openEmailForm(); document.getElementById('actDropdown').style.display='none';" style="padding:8px 14px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${i.label}</div>`
+            : `<div onclick="document.getElementById('activityContact').value='${contactId}'; document.getElementById('activityType').value='${i.type}'; app.onActivityTypeChange(); app.openActivityForm(); document.getElementById('actDropdown').style.display='none';" style="padding:8px 14px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${i.label}</div>`
+        ).join('');
+        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+        if (dd.style.display === 'block') {
+            const close = (e) => { if (!dd.contains(e.target)) { dd.style.display = 'none'; document.removeEventListener('click', close); }};
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+    },
+
+    onActivityTypeChange() {
+        const type = document.getElementById('activityType').value;
+        document.getElementById('activityCallFields').style.display = type === 'Call' ? '' : 'none';
+        document.getElementById('activityMeetingFields').style.display = type === 'Meeting' ? '' : 'none';
+        document.getElementById('activityDateTimeGroup').style.display = (type === 'Meeting' || type === 'Call') ? '' : 'none';
+    },
+
+    async saveActivity(e) {
+        e.preventDefault();
+        const id = document.getElementById('activityId').value;
+        const type = document.getElementById('activityType').value;
+        const activity = {
+            type,
+            subject: document.getElementById('activitySubject').value,
+            contactId: document.getElementById('activityContact').value || null,
+            accountId: document.getElementById('activityAccount').value || null,
+            dealId: document.getElementById('activityDeal').value || null,
+            dueDate: document.getElementById('activityDueDate').value || null,
+            status: document.getElementById('activityStatus').value,
+            priority: document.getElementById('activityPriority').value || 'Normal',
+            dateTime: document.getElementById('activityDateTime').value || null,
+            notes: document.getElementById('activityNotes').value || null,
+        };
+        if (type === 'Call') {
+            activity.callDirection = document.getElementById('activityCallDirection').value || null;
+            activity.callDuration = parseInt(document.getElementById('activityCallDuration').value) || null;
+            activity.callResult = document.getElementById('activityCallResult').value || null;
+        }
+        if (type === 'Meeting') {
+            activity.location = document.getElementById('activityLocation').value || null;
+            activity.endDateTime = document.getElementById('activityEndDateTime').value || null;
+        }
+
+        if (id) {
+            const idx = this.data.activities.findIndex(a => a.id === id);
+            if (idx >= 0) { this.data.activities[idx] = {...this.data.activities[idx], ...activity}; firestoreUpsert('activities', this.data.activities[idx]); }
+        } else {
+            const newAct = {...activity, id: 'act-' + Date.now(), createdAt: new Date().toISOString()};
+            this.data.activities.push(newAct);
+            firestoreUpsert('activities', newAct);
+        }
+        // Update contact's Last Activity
+        if (activity.contactId && (activity.status === 'Completed' || activity.status === 'Closed')) {
+            const con = this.data.contacts.find(c => c.id === activity.contactId);
+            if (con) {
+                const today = new Date().toISOString().split('T')[0];
+                if (!con.la || con.la < today) con.la = today;
+            }
+        }
+        this.persist();
+        this.closeModal('modalActivity');
+        this.render();
+    },
+
+    deleteContact(id) {
+        if (!confirm('Delete this contact?')) return;
+        this.data.contacts = this.data.contacts.filter(c => c.id !== id); firestoreDelete('contacts', id);
+        this.persist(); this.render();
+    },
+    deleteAccount(id) {
+        if (!confirm('Delete this account?')) return;
+        this.data.accounts = this.data.accounts.filter(a => a.id !== id); firestoreDelete('accounts', id);
+        this.persist(); this.render();
+    },
+    deleteDeal(id) {
+        if (!confirm('Delete this deal?')) return;
+        this.data.deals = this.data.deals.filter(d => d.id !== id); firestoreDelete('deals', id);
+        this.persist(); this.render();
+    },
+    deleteActivity(id) {
+        if (!confirm('Delete this activity?')) return;
+        this.data.activities = this.data.activities.filter(a => a.id !== id); firestoreDelete('activities', id);
+        this.persist(); this.render();
+    },
+
+    setupEventListeners() {
+        document.getElementById('formContact').addEventListener('submit', (e) => this.saveContact(e));
+        document.getElementById('formAccount').addEventListener('submit', (e) => this.saveAccount(e));
+        document.getElementById('formDeal').addEventListener('submit', (e) => this.saveDeal(e));
+        document.getElementById('formActivity').addEventListener('submit', (e) => this.saveActivity(e));
+        document.getElementById('formReferral').addEventListener('submit', (e) => this.saveReferral(e));
+        document.getElementById('formEmail').addEventListener('submit', (e) => this.saveEmail(e));
+        document.getElementById('formEvent').addEventListener('submit', (e) => this.saveEvent(e));
+        const dropZone = document.getElementById('csvDropZone');
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) this.handleCsvFile(e.dataTransfer.files[0]); });
+        const vcfZone = document.getElementById('vcfDropZone');
+        if (vcfZone) {
+            vcfZone.addEventListener('dragover', (e) => { e.preventDefault(); vcfZone.classList.add('dragover'); });
+            vcfZone.addEventListener('dragleave', () => vcfZone.classList.remove('dragover'));
+            vcfZone.addEventListener('drop', (e) => { e.preventDefault(); vcfZone.classList.remove('dragover'); if (e.dataTransfer.files.length) this.handleVcfFile(e.dataTransfer.files[0]); });
+        }
+    },
+
+    calculateDSLA(laStr) {
+        if (!laStr) return null;
+        const la = new Date(laStr);
+        const now = new Date();
+        return Math.floor((now - la) / (1000 * 60 * 60 * 24));
+    },
+
+    calculateAS(dsla) {
+        if (dsla === null || dsla === undefined) return 'gray';
+        if (dsla <= 30) return 'green';
+        if (dsla <= 90) return 'yellow';
+        return 'red';
+    },
+
+    getSeedData() {
+        const accounts = [
+            {id: 'acc-1', name: 'Meridian Capital', industry: 'Financial Services', website: '', address: '375 Park Ave, New York, NY 10152', type: 'Client', notes: 'Key IB relationship. Multiple live mandates in Healthcare and Consumer.', createdAt: new Date().toISOString()},
+            {id: 'acc-2', name: 'Bovine Media', industry: 'Media & Entertainment', website: 'www.bovinemedia.com', address: '2911 Turtle Creek Blvd, Dallas, TX 75219', type: 'Own Company', notes: 'Personal venture. Raising Series A (5M target). Refreshing Salesforce weekly.', createdAt: new Date().toISOString()},
+            {id: 'acc-3', name: 'Atlas Search', industry: 'Recruiting', website: 'atlassearch.com', address: '1 World Trade Center, New York, NY 10007', type: 'Vendor', notes: 'IB recruiting firm. Danny ONeill reached out 3/17 re: Associate roles.', createdAt: new Date().toISOString()},
+            {id: 'acc-4', name: 'North Dallas Landscapes', industry: 'Services', website: 'northdallaslandscapes.com', address: 'PO Box 38153, Dallas, TX 75238', type: 'Vendor', notes: 'Home landscape maintenance. Ongoing turf service dispute. Alan/Jake managing. Awaiting call to clarify weekly scope.', createdAt: new Date().toISOString()},
+            {id: 'acc-5', name: 'Jefferies', industry: 'Investment Banking', website: 'jefferies.com', address: 'Dallas, TX', type: 'Own Company', notes: 'Current employer. IB Associate role.', createdAt: new Date().toISOString()},
+            {id: 'acc-6', name: 'Lincoln International', industry: 'Investment Banking', website: 'lincolninternational.com', address: '', type: 'Prospect', notes: 'Multiple contacts. Middle-market IB.', createdAt: new Date().toISOString()},
+            {id: 'acc-7', name: 'Bain & Company', industry: 'Consulting', website: 'bain.com', address: '', type: 'Prospect', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-8', name: 'Lazard', industry: 'Investment Banking', website: 'lazard.com', address: '', type: 'Prospect', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-9', name: 'EY', industry: 'Professional Services', website: 'ey.com', address: '', type: 'Prospect', notes: 'Two contacts: Maurice Berbel and Nick Myers.', createdAt: new Date().toISOString()},
+            {id: 'acc-10', name: 'Corey Ford Construction', industry: 'Construction', website: '', address: 'Dallas, TX', type: 'Vendor', notes: '', createdAt: new Date().toISOString()},
+            {id: 'acc-12', name: 'Linters', industry: 'Services', website: 'linters.com', address: '', type: 'Prospect', notes: 'Jacob Goetz contact.', createdAt: new Date().toISOString()}
+        ];
+
+        const contacts = [
+            {id: 'con-1', name: 'Adam Kaiser', email: 'adamkaiser18@gmail.com', mobile: '(214) 437-8863', phone: '', address: 'Denver, CO', accountId: '', tier: '1-VIP', la: '2025-12-13', dsla: 95, birthdate: '1991-05-18', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'Last email: Fwd BMW Dallas Marathon Bib Assignment 12/13/2025.', createdAt: new Date().toISOString()},
+            {id: 'con-25', name: 'Jake Builder - Corey Ford Construction', email: '', mobile: '', phone: '', address: '', accountId: 'acc-10', tier: '1-VIP', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'Builder. Connected to Corey Ford.', createdAt: new Date().toISOString()},
+            {id: 'con-33', name: 'Jacob Goetz', email: 'jacob@linters.com', mobile: '(214) 801-3797', phone: '', address: '', accountId: 'acc-12', tier: '2', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: '', createdAt: new Date().toISOString()},
+            {id: 'con-49', name: 'Maurice Berbel', email: 'maurice.berbel@ey.com', mobile: '(713) 857-4989', phone: '(214) 969-8404', address: '', accountId: 'acc-9', tier: '3', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'EY Dallas.', createdAt: new Date().toISOString()},
+            {id: 'con-50', name: 'Nick Myers', email: 'nick.myers@ey.com', mobile: '(972) 765-6930', phone: '', address: '', accountId: 'acc-9', tier: '4', la: null, dsla: null, birthdate: '', title: '', instagram: '', linkedin: '', liSnP: '', notes: 'EY Dallas.', createdAt: new Date().toISOString()}
+        ];
+
+        const deals = [
+            {id: 'deal-1', name: 'Meridian Healthcare Roll-up', accountId: 'acc-1', contactIds: [], value: 45, stage: 'Due Diligence', sector: 'Healthcare', probability: 60, closeDate: '2026-06-30', notes: '', createdAt: new Date().toISOString()},
+            {id: 'deal-2', name: 'Bovine Series A Raise', accountId: 'acc-2', contactIds: [], value: 5, stage: 'Pitch', sector: 'TMT', probability: 30, closeDate: '2026-09-30', notes: '', createdAt: new Date().toISOString()},
+            {id: 'deal-3', name: 'Consumer Brand M&A', accountId: 'acc-1', contactIds: [], value: 120, stage: 'Prospect', sector: 'Consumer', probability: 15, closeDate: '2026-12-31', notes: '', createdAt: new Date().toISOString()}
+        ];
+
+        const activities = [
+            {id: 'act-1', type: 'Call', subject: 'Follow up', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-20', status: 'Open', notes: '', createdAt: new Date().toISOString()},
+            {id: 'act-2', type: 'Email', subject: 'Initial outreach', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-25', status: 'Open', notes: '', createdAt: new Date().toISOString()},
+            {id: 'act-3', type: 'Meeting', subject: 'Discovery call', contactId: '', accountId: '', dealId: '', dueDate: '2026-03-22', status: 'Open', notes: '', createdAt: new Date().toISOString()}
+        ];
+
+        return {contacts, accounts, deals, activities, emails: [], referrals: [], dealContacts: [], events: [], investors: [], _connections: [], _auditLog: [], _fund: null};
+    },
+
+    navigate(view) {
+        this.currentView = view;
+        this._bulkSelected.clear();
+        location.hash = view;
+        const tabMap = {dashboard: 'dashboard', contacts: 'contacts', contactDetail: 'contacts', accounts: 'accounts', accountDetail: 'accounts', deals: 'deals', activities: 'activities', calendar: 'calendar', map: 'map', emails: 'emails', referrals: 'referrals', reports: 'reports', settings: 'settings'};
+        const activeTabId = tabMap[view] || view;
+        document.querySelectorAll('.sf-app-tab').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('data-view') === activeTabId);
+        });
+        this.render();
+    },
+
+    _renderCache: {},
+    _lastDataHash: '',
+
+    _dataHash() {
+        return this.data.contacts.length + '|' + this.data.accounts.length + '|' + this.data.events.length + '|' + this.data.activities.length + '|' + (this.data._lastModified||'');
+    },
+
+    invalidateCache() { this._renderCache = {}; },
+
+    render() {
+        if (this.isLoading) {
+            document.getElementById('content').innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading data...</p></div>';
+            return;
+        }
+        // Invalidate cache if data changed
+        const hash = this._dataHash();
+        if (hash !== this._lastDataHash) { this._renderCache = {}; this._lastDataHash = hash; }
+
+        const labels = {dashboard:'Home', contacts:'Contacts', contactDetail:'Contact', accounts:'Accounts', accountDetail:'Account', deals:'Processes', activities:'Events', calendar:'Calendar', map:'Map', emails:'Emails', referrals:'Referrals', reports:'Reports', settings:'Setup'};
+        document.getElementById('breadcrumb').textContent = labels[this.currentView] || this.currentView;
+        // sync tab active state in case of programmatic nav
+        const tabMap = {dashboard:'dashboard', contacts:'contacts', contactDetail:'contacts', accounts:'accounts', accountDetail:'accounts', deals:'deals', activities:'activities', map:'map', emails:'emails', referrals:'referrals', reports:'reports', settings:'settings'};
+        const activeTabId = tabMap[this.currentView] || this.currentView;
+        document.querySelectorAll('.sf-app-tab').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('data-view') === activeTabId);
+        });
+        switch (this.currentView) {
+            case 'dashboard': this.renderDashboard(); break;
+            case 'contacts': this.renderContacts(); break;
+            case 'contactDetail': this.renderContactDetail(); break;
+            case 'accounts': this.renderAccounts(); break;
+            case 'accountDetail': this.renderAccountDetail(); break;
+            case 'deals': this.renderDeals(); break;
+            case 'activities': this.renderEvents(); break;
+            case 'activityDetail': this.renderEventDetail(); break;
+            case 'calendar': this.renderCalendar(); break;
+            case 'map': this.renderMap(); break;
+            case 'emails': this.renderEmails(); break;
+            case 'referrals': this.renderReferrals(); break;
+            case 'tasks': this.renderTaskBoard(); break;
+            case 'reports': this.renderReports(); break;
+            case 'investors': this.renderInvestors(); break;
+            case 'fundlaunch': this.renderFundLaunch(); break;
+            case 'settings': this.renderSettings(); break;
+        }
+    },
+
+    renderDashboard() {
+        const today = new Date(); today.setHours(0,0,0,0);
+        const todayStr = today.toISOString().split('T')[0];
+        const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+        const in7Str = in7.toISOString().split('T')[0];
+        const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
+
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        const openActs = this.data.activities.filter(a => isOpen(a.status));
+        const overdue = openActs.filter(a => (a.dueDate||a.due_date) && (a.dueDate||a.due_date) < todayStr);
+        const dueToday = openActs.filter(a => (a.dueDate||a.due_date) === todayStr);
+        const upcoming = openActs.filter(a => (a.dueDate||a.due_date) > todayStr && (a.dueDate||a.due_date) <= in7Str);
+
+        const activeDeals = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const wonDeals = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lostDeals = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const pipelineVal = activeDeals.reduce((s, d) => s + (d.value || 0), 0);
+        const wonVal = wonDeals.reduce((s, d) => s + (d.value || 0), 0);
+        const winRate = (wonDeals.length + lostDeals.length) > 0 ? Math.round(wonDeals.length / (wonDeals.length + lostDeals.length) * 100) : 0;
+
+        const vipContacts = this.data.contacts.filter(c => c.tier === '1-VIP');
+        const recentActs = [...this.data.activities].sort((a,b) => ((b.dueDate||b.due_date||b.createdAt)||'').localeCompare((a.dueDate||a.due_date||a.createdAt)||'')).slice(0, 10);
+
+        // Upcoming birthdays
+        const birthdays = this.data.contacts.filter(c => {
+            if (!c.birthdate) return false;
+            const bd = new Date(c.birthdate);
+            const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+            if (thisYear < today) thisYear.setFullYear(thisYear.getFullYear() + 1);
+            return thisYear <= in30;
+        }).map(c => {
+            const bd = new Date(c.birthdate);
+            const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+            if (thisYear < today) thisYear.setFullYear(thisYear.getFullYear() + 1);
+            return {...c, daysAway: Math.ceil((thisYear - today) / 86400000)};
+        }).sort((a, b) => a.daysAway - b.daysAway);
+
+        // Pipeline by stage
+        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation'];
+        const stageColors = ['#94a3b8', '#3b82f6', '#8b5cf6', '#f59e0b', '#f97316'];
+        const stageVals = stages.map(s => activeDeals.filter(d => d.stage === s).reduce((sum,d) => sum + (d.value||0), 0));
+        const maxVal = Math.max(...stageVals, 1);
+
+        // Contacts needing attention (no activity in 60+ days)
+        const stale = this.data.contacts.filter(c => {
+            const la = c.la || c.last_activity_display;
+            if (!la) return true;
+            const days = Math.floor((today - new Date(la)) / 86400000);
+            return days >= 60;
+        }).sort((a,b) => (a.la||a.last_activity_display||'').localeCompare(b.la||b.last_activity_display||'')).slice(0, 8);
+
+        // Backup reminder
+        let backupBanner = '';
+        const autoBackup = localStorage.getItem('matthewsCRM_autoBackupEnabled');
+        const lastBackup = localStorage.getItem('matthewsCRM_lastBackup');
+        if (autoBackup) {
+            const daysSince = lastBackup ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000) : 999;
+            if (daysSince >= 7) {
+                backupBanner = `<div class="card" style="border-left:4px solid var(--sf-warning); padding:12px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                    <div style="font-size:13px;"><strong>Backup reminder:</strong> It's been ${daysSince === 999 ? 'a while' : daysSince + ' days'} since your last backup. <a style="color:var(--sf-brand); cursor:pointer; font-weight:600;" onclick="app.backupJSON()">Download backup now</a></div>
+                </div>`;
+            }
+        }
+
+        const typeEmoji = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+
+        const html = `
+            <h2>Home</h2>
+            ${backupBanner}
+            <!-- KPI Cards -->
+            <div class="stat-cards" style="grid-template-columns:repeat(5, 1fr);">
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Pipeline</div><div class="value">$${pipelineVal.toFixed(0)}M</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app._dealView='analytics';app.navigate('deals')"><div class="label">Win Rate</div><div class="value">${winRate}%</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('tasks')"><div class="label">Overdue</div><div class="value" style="color:${overdue.length?'var(--sf-error)':'var(--sf-success)'}">${this.fmt(overdue.length)}</div></div>
+            </div>
+
+            <!-- AI Insights -->
+            <div style="background:#fff; border:1px solid #c2d4f0; border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid #4285f4;">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-weight:700; font-size:14px;">✨ AI Insights</span>
+                    <button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDashboardInsights()">Generate</button>
+                </div>
+                <div id="aiDashInsights" style="padding:10px 16px;">
+                    <div style="font-size:12px;color:var(--sf-text-weak);">Click "Generate" for AI-powered insights about your pipeline, contacts, and tasks.</div>
+                </div>
+            </div>
+
+            <!-- TODAY'S ACTION PLAN (top position) -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-brand);">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📋 Today's Action Plan</div>
+                <div style="padding:10px 16px;">
+                    ${(() => {
+                        const gd = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                        const ro = this.data.contacts.filter(c => c.tier === '1-VIP' && gd(c) >= 14 && gd(c) < 90).sort((a,b) => gd(b)-gd(a)).slice(0,5);
+                        const te = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start.slice(0,10) === todayStr);
+                        const bd = this.data.contacts.filter(c => { if (!c.birthdate) return false; const b = new Date(c.birthdate); const ty = new Date(today.getFullYear(), b.getMonth(), b.getDate()); if (ty < today) ty.setFullYear(ty.getFullYear()+1); return (ty-today)/86400000 <= 7 && (ty-today)/86400000 >= 0; });
+                        let a = [];
+                        if (te.length) a.push(`<div style="margin-bottom:8px;"><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-brand); margin-bottom:4px;">📅 TODAY</div>${te.map(e => `<div style="padding:3px 0; font-size:13px;"><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${e.name}</a> <span style="color:var(--sf-text-weak); font-size:11px;">${e.start?new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):''}</span></div>`).join('')}</div>`);
+                        if (ro.length) a.push(`<div style="margin-bottom:8px;"><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:4px;">📞 REACH OUT</div>${ro.map(c => { const p=c.pc_number||c.mobile||c.wc_number||''; return `<div style="display:flex; align-items:center; justify-content:space-between; padding:3px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><div style="display:flex; gap:4px; align-items:center;"><span style="font-size:10px; color:var(--sf-error);">${gd(c)}D</span>${p?`<a href="#" onclick="event.preventDefault();app.logCallFromTap('${c.id}','${p}');" style="font-size:13px;text-decoration:none;">📞</a><a href="#" onclick="event.preventDefault();app.logTextFromTap('${c.id}','${p}');" style="font-size:13px;text-decoration:none;">💬</a>`:''}</div></div>`; }).join('')}</div>`);
+                        if (bd.length) a.push(`<div><div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:4px;">🎂 BIRTHDAYS</div>${bd.map(c => `<div style="padding:3px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer;">${c.name}</a> <span style="font-size:11px; color:var(--sf-text-weak);">${new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></div>`).join('')}</div>`);
+                        if (!a.length) a.push('<div style="text-align:center; padding:8px; color:var(--sf-text-weak); font-size:13px;">✅ All caught up!</div>');
+                        return a.join('');
+                    })()}
+                </div>
+            </div>
+
+            <!-- Relationship Health -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px;">
+                ${(() => {
+                    const gd2 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                    const ac = this.data.contacts.filter(c => gd2(c) <= 30).length;
+                    const wm = this.data.contacts.filter(c => gd2(c) > 30 && gd2(c) <= 90).length;
+                    const co = this.data.contacts.filter(c => gd2(c) > 90).length;
+                    const tt = this.data.contacts.length || 1;
+                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='active';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-success);">Active ≤30D</div><div style="font-size:18px; font-weight:300; color:var(--sf-success);">${ac}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(ac/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='cooling';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-warning);">Cooling 30-90D</div><div style="font-size:18px; font-weight:300; color:var(--sf-warning);">${wm}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(wm/tt*100)}%</div></div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:8px; text-align:center; cursor:pointer;" onclick="app.contactFilters.dsla='cold';app.navigate('contacts');"><div style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--sf-error);">Cold 90D+</div><div style="font-size:18px; font-weight:300; color:var(--sf-error);">${co}</div><div style="font-size:10px; color:var(--sf-text-weak);">${Math.round(co/tt*100)}%</div></div>`;
+                })()}
+            </div>
+
+            <!-- Main layout: left + right like SF home -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN -->
+                <div style="flex:1; min-width:0;">
+                    <!-- My Tasks -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-weight:700; font-size:14px; cursor:pointer;" onclick="app.navigate('tasks')">My Tasks</span>
+                            <button class="btn-small" onclick="app.openActivityForm();">New Task</button>
+                        </div>
+                        <div style="padding:0 16px;">
+                            ${overdue.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-error); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Overdue (${this.fmt(overdue.length)})</div>` : ''}
+                            ${overdue.slice(0,5).map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:10px;height:10px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-error);">Due ${a.dueDate||a.due_date}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${dueToday.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-warning); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Due Today (${dueToday.length})</div>` : ''}
+                            ${dueToday.map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:10px;height:10px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">Today${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${upcoming.length ? `<div style="padding:8px 0; font-weight:600; font-size:12px; color:var(--sf-brand); text-transform:uppercase; border-bottom:1px solid var(--sf-border-weak);">Upcoming This Week (${upcoming.length})</div>` : ''}
+                            ${upcoming.slice(0,5).map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:10px;height:10px;cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px; font-weight:500;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.dueDate||a.due_date}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            ${!overdue.length && !dueToday.length && !upcoming.length ? '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">No open tasks. You\'re all caught up!</div>' : ''}
+                        </div>
+                    </div>
+
+                    <!-- Pinned Contacts -->
+                    ${(() => { const pinned = this.data.contacts.filter(c => c.pinned); return pinned.length ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">⭐ Pinned Contacts</div>
+                        <div style="padding:0 16px;">
+                            ${pinned.map(c => `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.pc_number||c.mobile||''}</span></div>
+                                <span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>
+                            </div>`).join('')}
+                        </div>
+                    </div>` : ''; })()}
+
+                    <!-- Contacts Needing Attention -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; cursor:pointer;" onclick="app.contactFilters.dsla='cold';app.navigate('contacts');">Contacts Needing Attention <span style="font-weight:400; color:var(--sf-text-weak); font-size:12px;">(60+ days) →</span></div>
+                        <div style="padding:0 16px;">
+                            ${stale.length ? stale.map(c => {
+                                const dsla = this.calculateDSLA(c.la || c.last_activity_display);
+                                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                    <div><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><span style="margin-left:8px; font-size:11px; color:var(--sf-text-weakest);">${c.tier||''}</span></div>
+                                    <span style="font-size:12px; color:var(--sf-error);">${dsla != null ? dsla+'D' : 'Never'}</span>
+                                </div>`;
+                            }).join('') : '<div style="padding:16px 0; text-align:center; font-size:13px; color:var(--sf-text-weak);">All contacts are up to date!</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Pipeline by Stage -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; cursor:pointer;" onclick="app.navigate('deals')">Pipeline by Stage →</div>
+                        <div style="padding:16px;">
+                            ${stages.map((s, i) => {
+                                const count = activeDeals.filter(d => d.stage === s).length;
+                                const val = stageVals[i];
+                                const pct = Math.max(val / maxVal * 100, 2);
+                                return `<div style="margin-bottom:10px;cursor:pointer;" onclick="app._dealView='pipeline';app.navigate('deals');">
+                                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
+                                        <span style="font-weight:500;">${s} (${count})</span>
+                                        <span style="color:var(--sf-text-weak);">$${val.toFixed(1)}M</span>
+                                    </div>
+                                    <div style="height:16px; background:var(--sf-bg); border-radius:3px; overflow:hidden;">
+                                        <div style="height:100%; width:${pct}%; background:${stageColors[i]}; border-radius:3px;"></div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN -->
+                <div style="width:360px; flex-shrink:0;">
+                    <!-- Upcoming Events -->
+                    ${(() => { const upcoming = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start >= todayStr).sort((a,b) => (a.start||'').localeCompare(b.start||'')).slice(0,5); return upcoming.length ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px; display:flex;justify-content:space-between;align-items:center;">📅 Upcoming Events <a onclick="app.navigate('activities')" style="font-size:11px;font-weight:400;color:var(--sf-brand);cursor:pointer;">View all →</a></div>
+                        <div style="padding:8px 16px;">
+                            ${upcoming.map(e => { const con = this.data.contacts.find(c => c.id === e.contactId); return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <div><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${e.name}</a>${con ? `<br><span style="font-size:11px; color:var(--sf-text-weak);">${con.name}</span>` : ''}</div>
+                                <span style="font-size:11px; color:var(--sf-text-weak); white-space:nowrap;">${new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+                            </div>`; }).join('')}
+                        </div>
+                    </div>` : ''; })()}
+
+                    <!-- Nurture Dashboard -->
+                    ${(() => {
+                        const getDSLA = c => { const la = c.la || c.last_activity_display; if (!la) return 999; return Math.floor((today - new Date(la)) / 86400000); };
+                        const t1Urgent = this.data.contacts.filter(c => c.tier === '1-VIP' && getDSLA(c) >= 14).sort((a,b) => getDSLA(b) - getDSLA(a)).slice(0,8);
+                        const t2Due = this.data.contacts.filter(c => c.tier === '2' && getDSLA(c) >= 30).sort((a,b) => getDSLA(b) - getDSLA(a)).slice(0,5);
+                        const renderRow = c => { const d = getDSLA(c); const color = d >= 60 ? 'var(--sf-error)' : d >= 30 ? 'var(--sf-warning)' : 'var(--sf-brand)'; return `<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                            <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500; flex:1;">${c.name}</a>
+                            <span style="font-size:11px; color:var(--sf-text-weak);">${(c.obligation||'').split(',')[0]||''}</span>
+                            <span style="font-size:12px; color:${color}; font-weight:600; min-width:35px; text-align:right;">${d}D</span>
+                        </div>`; };
+                        return (t1Urgent.length || t2Due.length) ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px; border-left:4px solid var(--sf-error);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">🔥 Nurture Priority</div>
+                        <div style="padding:8px 16px;">
+                            ${t1Urgent.length ? `<div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); padding:4px 0; letter-spacing:0.5px;">VIP — 14+ days (${t1Urgent.length})</div>${t1Urgent.map(renderRow).join('')}` : ''}
+                            ${t2Due.length ? `<div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-warning); padding:8px 0 4px 0; letter-spacing:0.5px;">Tier 2 — 30+ days (${t2Due.length})</div>${t2Due.map(renderRow).join('')}` : ''}
+                        </div>
+                    </div>` : ''; })()}
+
+                    <!-- Recently Viewed -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recently Viewed</div>
+                        <div style="padding:8px 16px;">
+                            ${this.recentlyViewed.length ? this.recentlyViewed.slice(0, 5).map(r => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); cursor:pointer;" onclick="app.${r.type === 'contact' ? 'viewContact' : 'viewAccount'}('${r.id}')">
+                                <span class="obj-icon obj-icon-${r.type}" style="width:18px; height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9px; font-weight:700;">${r.type === 'contact' ? 'C' : 'A'}</span>
+                                <span style="font-size:13px; font-weight:500; color:var(--sf-brand);">${r.name}</span>
+                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No recently viewed records</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity Feed -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Recent Activity</div>
+                        <div style="padding:8px 16px; max-height:300px; overflow-y:auto;">
+                            ${recentActs.map(a => {
+                                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                const dd = a.dueDate || a.due_date || '';
+                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <span style="font-size:13px;">${typeEmoji[a.type]||'📋'}</span>
+                                    <div style="flex:1; min-width:0;">
+                                        <div style="font-size:12px; font-weight:500;">${a.subject||'(no subject)'}</div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${dd}${con ? ` · <a onclick="app.viewContact('${con.id}')" style="color:var(--sf-brand); cursor:pointer;">${con.name}</a>` : ''}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Birthdays -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">🎂 Upcoming Birthdays</div>
+                        <div style="padding:8px 16px;">
+                            ${birthdays.length ? birthdays.slice(0,8).map(c => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a>
+                                <span style="color:var(--sf-text-weak); font-size:12px;">${c.daysAway === 0 ? '🎉 Today!' : new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' (' + c.daysAway + 'd)'}</span>
+                            </div>`).join('') : '<div style="padding:8px 0; font-size:13px; color:var(--sf-text-weak); text-align:center;">No upcoming birthdays</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Quick Stats -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">Quick Stats</div>
+                        <div style="padding:12px 16px; font-size:13px;">
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>VIP Contacts</span><strong style="color:#166534;">${this.fmt(vipContacts.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Active Processes</span><strong>${this.fmt(activeDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Won This Year</span><strong style="color:var(--sf-success);">${this.fmt(wonDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Lost This Year</span><strong style="color:var(--sf-error);">${this.fmt(lostDeals.length)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Win Rate</span><strong>${winRate}%</strong></div>
+                            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Total Activities</span><strong>${this.fmt(this.data.activities.length)}</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TODAY'S ACTION PLAN -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px; border-left:4px solid var(--sf-brand);">
+                <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:15px;">📋 Today's Action Plan</div>
+                <div style="padding:12px 16px;">
+                    ${(() => {
+                        const getDSLA2 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                        const reachOut = this.data.contacts.filter(c => c.tier === '1-VIP' && getDSLA2(c) >= 14 && getDSLA2(c) < 90).sort((a,b) => getDSLA2(b)-getDSLA2(a)).slice(0,5);
+                        const todayEvents = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start.slice(0,10) === todayStr);
+                        const bdaySoon = this.data.contacts.filter(c => {
+                            if (!c.birthdate) return false;
+                            const bd = new Date(c.birthdate);
+                            const ty = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+                            if (ty < today) ty.setFullYear(ty.getFullYear()+1);
+                            return (ty - today) / 86400000 <= 7 && (ty - today) / 86400000 >= 0;
+                        });
+                        let actions = [];
+                        if (todayEvents.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-brand); margin-bottom:6px;">📅 Today's Events</div>${todayEvents.map(e => `<div style="padding:4px 0; font-size:13px;"><a onclick="app.viewEvent('${e.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:600;">${e.name}</a> <span style="color:var(--sf-text-weak); font-size:11px;">${e.start ? new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : ''}</span></div>`).join('')}</div>`);
+                        if (reachOut.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:6px;">📞 Reach Out Today</div>${reachOut.map(c => { const phone = c.pc_number||c.mobile||c.wc_number||''; return `<div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a><div style="display:flex; gap:6px; align-items:center;"><span style="font-size:11px; color:var(--sf-error);">${getDSLA2(c)}D</span>${phone ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${phone}');" style="font-size:14px; text-decoration:none;">📞</a><a href="#" onclick="event.preventDefault(); app.logTextFromTap('${c.id}','${phone}');" style="font-size:14px; text-decoration:none;">💬</a>` : ''}</div></div>`; }).join('')}</div>`);
+                        if (bdaySoon.length) actions.push(`<div style="margin-bottom:12px;"><div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:6px;">🎂 Birthdays This Week</div>${bdaySoon.map(c => `<div style="padding:4px 0; font-size:13px;"><a onclick="app.viewContact('${c.id}')" style="color:var(--sf-brand); cursor:pointer; font-weight:500;">${c.name}</a> <span style="font-size:11px; color:var(--sf-text-weak);">${new Date(c.birthdate).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></div>`).join('')}</div>`);
+                        if (!actions.length) actions.push('<div style="text-align:center; padding:12px; color:var(--sf-text-weak); font-size:13px;">✅ You\'re all caught up!</div>');
+                        return actions.join('');
+                    })()}
+                </div>
+            </div>
+
+            <!-- RELATIONSHIP HEALTH -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:12px;">
+                ${(() => {
+                    const getDSLA3 = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((today-new Date(la))/86400000); };
+                    const active = this.data.contacts.filter(c => getDSLA3(c) <= 30).length;
+                    const warming = this.data.contacts.filter(c => getDSLA3(c) > 30 && getDSLA3(c) <= 90).length;
+                    const cold = this.data.contacts.filter(c => getDSLA3(c) > 90).length;
+                    const total = this.data.contacts.length || 1;
+                    return `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-success); margin-bottom:4px;">Active (≤30D)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-success);">${active}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(active/total*100)}%</div>
+                    </div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-warning); margin-bottom:4px;">Cooling (30-90D)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-warning);">${warming}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(warming/total*100)}%</div>
+                    </div>
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:12px; text-align:center; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-error); margin-bottom:4px;">Cold (90D+)</div>
+                        <div style="font-size:24px; font-weight:300; color:var(--sf-error);">${cold}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak);">${Math.round(cold/total*100)}%</div>
+                    </div>`;
+                })()}
+            </div>
+
+            <!-- THIS WEEK -->
+            <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
+                <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:14px;">📊 This Week</div>
+                <div style="padding:12px 16px;">
+                    ${(() => {
+                        const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate()-7);
+                        const weekStr = weekAgo.toISOString().split('T')[0];
+                        const weekActs = this.data.activities.filter(a => (a.dueDate||a.due_date||a.createdAt||'') >= weekStr);
+                        const byType = {};
+                        weekActs.forEach(a => { byType[a.type] = (byType[a.type]||0)+1; });
+                        const ti = {Call:'📞',Text:'💬',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+                        const uniq = new Set(weekActs.map(a => a.contactId||a.contact_id).filter(Boolean)).size;
+                        return `<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px;">
+                            <div><span style="font-size:20px; font-weight:600;">${weekActs.length}</span> <span style="font-size:12px; color:var(--sf-text-weak);">activities</span></div>
+                            <div><span style="font-size:20px; font-weight:600;">${uniq}</span> <span style="font-size:12px; color:var(--sf-text-weak);">contacts touched</span></div>
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">${Object.entries(byType).map(([t,n]) => `<span style="background:var(--sf-bg); padding:3px 8px; border-radius:12px; font-size:11px;">${ti[t]||''} ${t}: ${n}</span>`).join('')}</div>`;
+                    })()}
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    // Sorting
+    _sortState: {view: '', col: '', dir: 'asc'},
+    sortBy(view, col) {
+        if (this._sortState.view === view && this._sortState.col === col) {
+            this._sortState.dir = this._sortState.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this._sortState = {view, col, dir: 'asc'};
+        }
+        localStorage.setItem('matthewsCRM_sortState', JSON.stringify(this._sortState));
+        this.render();
+    },
+    _sortIndicator(view, col) {
+        if (this._sortState.view === view && this._sortState.col === col) {
+            return this._sortState.dir === 'asc' ? ' ▲' : ' ▼';
+        }
+        return '';
+    },
+    _applySortToList(list, view) {
+        const s = this._sortState;
+        if (s.view !== view || !s.col) return list;
+        const sorted = [...list].sort((a, b) => {
+            let va = a[s.col], vb = b[s.col];
+            if (va == null) va = '';
+            if (vb == null) vb = '';
+            if (typeof va === 'number' && typeof vb === 'number') return va - vb;
+            return String(va).localeCompare(String(vb), undefined, {numeric: true, sensitivity: 'base'});
+        });
+        return s.dir === 'desc' ? sorted.reverse() : sorted;
+    },
+
+    contactFilters: {tier: '', text: '', dsla: '', _ob: '', company: ''},
+    _contactCols: null,
+    _allContactCols: [
+        {key:'name', label:'Name', editable:true, type:'text'},
+        {key:'pe_email', label:'PE@', editable:true, type:'email'},
+        {key:'we_email', label:'WE@', editable:true, type:'email'},
+        {key:'pc_number', label:'PC#', editable:true, type:'tel'},
+        {key:'wc_number', label:'WC#', editable:true, type:'tel'},
+        {key:'mobile', label:'Mobile', editable:true, type:'tel'},
+        {key:'phone', label:'Phone', editable:true, type:'tel'},
+        {key:'_company', label:'Company', editable:false},
+        {key:'title', label:'Title', editable:true, type:'text'},
+        {key:'tier', label:'Tier', editable:true, type:'select', options:['1-VIP','2','3','4','5']},
+        {key:'tags', label:'Tags', editable:true, type:'text'},
+        {key:'address', label:'Address', editable:true, type:'text'},
+        {key:'lead_source', label:'Lead Source', editable:true, type:'text'},
+        {key:'birthdate', label:'Birthday', editable:true, type:'date'},
+        {key:'la', label:'LA', editable:false},
+        {key:'_dsla', label:'DSLA', editable:false},
+        {key:'instagram', label:'Instagram', editable:true, type:'text'},
+        {key:'facebook', label:'Facebook', editable:true, type:'url'},
+        {key:'linkedin', label:'LinkedIn', editable:true, type:'url'},
+        {key:'obligation', label:'Obligation', editable:true, type:'multi-obligation'},
+        {key:'notes', label:'Notes', editable:true, type:'text'},
+        {key:'general_notes', label:'*Notes', editable:true, type:'text'},
+        {key:'playbook', label:'Playbook', editable:true, type:'text'},
+        {key:'referred_by', label:'Referred By', editable:true, type:'text'},
+        {key:'_completeness', label:'Profile %', editable:false},
+        {key:'pinned', label:'Pinned', editable:true, type:'select', options:['','⭐']},
+    ],
+    _getContactCols() {
+        if (!this._contactCols) {
+            const saved = localStorage.getItem('matthewsCRM_contactCols');
+            this._contactCols = saved ? JSON.parse(saved) : ['name','email','mobile','_company','tier','la','_dsla'];
+        }
+        return this._contactCols;
+    },
+    _saveContactCols() {
+        localStorage.setItem('matthewsCRM_contactCols', JSON.stringify(this._contactCols));
+    },
+    toggleContactCol(key) {
+        const cols = this._getContactCols();
+        const idx = cols.indexOf(key);
+        if (idx >= 0) { if (cols.length > 2) cols.splice(idx, 1); }
+        else cols.push(key);
+        this._contactCols = cols;
+        this._saveContactCols();
+        this.renderContacts();
+    },
+    _showColPicker: false,
+    _dragCol: null,
+
+    initColumnDrag() {
+        const ths = document.querySelectorAll('#contactsTable thead th[data-colkey]');
+        ths.forEach(th => {
+            th.setAttribute('draggable', 'true');
+            th.addEventListener('dragstart', (e) => {
+                this._dragCol = th.dataset.colkey;
+                th.style.opacity = '0.4';
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            th.addEventListener('dragend', () => { th.style.opacity = ''; });
+            th.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.style.borderLeft = '3px solid var(--sf-brand)'; });
+            th.addEventListener('dragleave', () => { th.style.borderLeft = ''; });
+            th.addEventListener('drop', (e) => {
+                e.preventDefault();
+                th.style.borderLeft = '';
+                const from = this._dragCol;
+                const to = th.dataset.colkey;
+                if (from && to && from !== to) {
+                    const cols = this._getContactCols();
+                    const fi = cols.indexOf(from);
+                    const ti = cols.indexOf(to);
+                    if (fi >= 0 && ti >= 0) {
+                        cols.splice(fi, 1);
+                        cols.splice(ti, 0, from);
+                        this._contactCols = cols;
+                        this._saveContactCols();
+                        this.renderContacts();
+                    }
+                }
+                this._dragCol = null;
+            });
+        });
+    },
+
+    _getColWidths() {
+        try { return JSON.parse(localStorage.getItem('matthewsCRM_colWidths') || '{}'); } catch { return {}; }
+    },
+    _saveColWidth(key, width) {
+        const widths = this._getColWidths();
+        widths[key] = width;
+        localStorage.setItem('matthewsCRM_colWidths', JSON.stringify(widths));
+    },
+    initColumnResize() {
+        document.querySelectorAll('.col-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const th = handle.parentElement;
+                const colKey = th.dataset.colkey;
+                const startX = e.clientX;
+                const startW = th.offsetWidth;
+                handle.classList.add('dragging');
+                const onMove = (ev) => {
+                    const newW = Math.max(40, startW + ev.clientX - startX);
+                    th.style.width = newW + 'px';
+                };
+                const onUp = () => {
+                    handle.classList.remove('dragging');
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    if (colKey) this._saveColWidth(colKey, th.offsetWidth);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    },
+
+    _bulkSelected: new Set(),
+    _bulkType: null,
+
+    toggleBulkSelect(id) {
+        if (this._bulkSelected.has(id)) this._bulkSelected.delete(id);
+        else this._bulkSelected.add(id);
+        this._updateBulkBar();
+    },
+
+    toggleBulkSelectAll(type) {
+        const items = type === 'contacts' ? this.data.contacts : type === 'accounts' ? this.data.accounts : this.data.activities;
+        if (this._bulkSelected.size === items.length) this._bulkSelected.clear();
+        else items.forEach(i => this._bulkSelected.add(i.id));
+        this.render();
+    },
+
+    _updateBulkBar() {
+        const bar = document.getElementById('bulkBar');
+        if (!bar) return;
+        if (this._bulkSelected.size > 0) {
+            bar.style.display = 'flex';
+            bar.querySelector('.bulk-count').textContent = this._bulkSelected.size + ' selected';
+        } else {
+            bar.style.display = 'none';
+        }
+    },
+
+    openBulkUpdate(type) {
+        this._bulkType = type;
+        const fields = type === 'contacts' ? [
+            {key:'tier', label:'Tier', type:'select', options:['1-VIP','2','3','4','5']},
+            {key:'lead_source', label:'Lead Source', type:'text'},
+            {key:'tags', label:'Tags', type:'text'},
+            {key:'address', label:'Address', type:'text'},
+        ] : type === 'accounts' ? [
+            {key:'type', label:'Type', type:'select', options:['Client','Prospect','Partner','Own Company','Vendor','Other']},
+            {key:'industry', label:'Industry', type:'text'},
+        ] : type === 'events' ? [
+            {key:'status', label:'Status', type:'select', options:['Scheduled','Completed','Cancelled']},
+            {key:'type', label:'Type', type:'select', options:['Meeting','Conference','Lunch','Dinner','Call','Presentation','Networking','Other']},
+        ] : [
+            {key:'status', label:'Status', type:'select', options:['Not Started','In Progress','Completed','Waiting','Deferred']},
+            {key:'priority', label:'Priority', type:'select', options:['High','Normal','Low']},
+            {key:'type', label:'Type', type:'select', options:['Call','Email','Meeting','Task','Follow-up','Note']},
+        ];
+        document.getElementById('bulkUpdateHeader').textContent = `Bulk Update ${this._bulkSelected.size} ${type}`;
+        document.getElementById('bulkUpdateFields').innerHTML = fields.map(f => `
+            <div class="form-group">
+                <label><input type="checkbox" class="bulk-field-check" data-field="${f.key}" style="width:auto; min-height:auto; margin-right:6px;">${f.label}</label>
+                ${f.type === 'select' ? `<select id="bulk_${f.key}" disabled style="margin-top:4px;"><option value="">--Select--</option>${f.options.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`
+                : `<input type="text" id="bulk_${f.key}" disabled style="margin-top:4px;">`}
+            </div>
+        `).join('');
+        document.querySelectorAll('.bulk-field-check').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const input = document.getElementById('bulk_' + cb.dataset.field);
+                if (input) input.disabled = !cb.checked;
+            });
+        });
+        this.openModal('modalBulkUpdate');
+    },
+
+    executeBulkUpdate() {
+        const type = this._bulkType;
+        const items = type === 'contacts' ? this.data.contacts : type === 'accounts' ? this.data.accounts : this.data.activities;
+        const checks = document.querySelectorAll('.bulk-field-check:checked');
+        let updated = 0;
+        checks.forEach(cb => {
+            const field = cb.dataset.field;
+            const input = document.getElementById('bulk_' + field);
+            if (!input || !input.value) return;
+            const val = input.value;
+            items.forEach(item => {
+                if (this._bulkSelected.has(item.id)) {
+                    item[field] = val;
+                    const col = type === 'contacts' ? 'contacts' : type === 'accounts' ? 'accounts' : 'activities';
+                    firestoreUpsert(col, item);
+                    updated++;
+                }
+            });
+        });
+        this.persist();
+        this._bulkSelected.clear();
+        this.closeModal('modalBulkUpdate');
+        this.render();
+        if (updated) alert(`Updated ${updated} field(s) across ${this._bulkSelected.size || 'selected'} records.`);
+    },
+
+    toggleRowMenu(id) {
+        const menu = document.getElementById('rowMenu_' + id);
+        if (!menu) return;
+        const showing = menu.style.display !== 'none';
+        document.querySelectorAll('[id^="rowMenu_"]').forEach(m => m.style.display = 'none');
+        if (!showing) {
+            menu.style.display = 'block';
+            const close = (e) => { if (!menu.contains(e.target)) { menu.style.display = 'none'; document.removeEventListener('click', close); }};
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+    },
+
+    inlineEdit(contactId, field, el) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const colDef = this._allContactCols.find(c => c.key === field);
+        if (!colDef || !colDef.editable) return;
+        const currentVal = contact[field] || '';
+        const td = el;
+        td.dataset.editing = 'true';
+
+        if (colDef.type === 'select') {
+            td.innerHTML = `<select onchange="app.saveInlineEdit('${contactId}','${field}',this.value)" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px;">
+                ${colDef.options.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}
+            </select>`;
+            td.querySelector('select').focus();
+        } else if (colDef.type === 'multi-obligation') {
+            const opts = ['Colleague','Client','Service Provider','Family','Friend'];
+            const selected = currentVal.split(',').map(s=>s.trim()).filter(Boolean);
+            td.innerHTML = `<div style="display:flex; gap:4px; flex-wrap:wrap; padding:2px 0;">
+                ${opts.map(o => `<label style="display:flex; align-items:center; gap:2px; font-size:11px; cursor:pointer; white-space:nowrap;"><input type="checkbox" class="ob-tbl-cb" data-cid="${contactId}" value="${o}" ${selected.includes(o)?'checked':''} onchange="app.saveObligationFromTable('${contactId}')" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+            </div>`;
+        } else if (field === 'general_notes' || field === 'notes') {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
+            overlay.onclick = (ev) => { if (ev.target === overlay) { overlay.remove(); } };
+            overlay.innerHTML = `<div style="background:#fff;border-radius:8px;padding:20px;width:600px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                <div style="font-weight:700;font-size:14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">${field === 'general_notes' ? '*Notes' : 'Notes'}<button onclick="this.closest('[style*=fixed]').remove();" style="border:none;background:none;font-size:18px;cursor:pointer;color:var(--sf-text-weak);">✕</button></div>
+                <textarea id="notesPopout" style="flex:1;min-height:300px;padding:10px;font-size:13px;font-family:inherit;border:1px solid var(--sf-border);border-radius:4px;resize:vertical;">${currentVal.replace(/</g,'&lt;')}</textarea>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+                    <button onclick="this.closest('[style*=fixed]').remove();" style="padding:6px 14px;font-size:13px;">Cancel</button>
+                    <button class="btn-primary" onclick="app.saveInlineEdit('${contactId}','${field}',document.getElementById('notesPopout').value); this.closest('[style*=fixed]').remove();" style="padding:6px 14px;font-size:13px;">Save</button>
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+            document.getElementById('notesPopout').focus();
+            return;
+        } else {
+            td.innerHTML = `<input type="${colDef.type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveInlineEdit('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" style="width:100%; min-height:24px; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
+            const input = td.querySelector('input');
+            input.focus();
+            input.select();
+        }
+    },
+
+    inlineDetailEdit(contactId, field, type, el) {
+        if (el.querySelector('select') || el.querySelector('input') || el.querySelector('textarea')) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const currentVal = contact[field] || '';
+        if (type === 'select-tier') {
+            el.innerHTML = `<select onchange="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">
+                ${['1-VIP','2','3','4','5'].map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}
+            </select>`;
+            const sel = el.querySelector('select');
+            sel.focus();
+            sel.click();
+        } else if (type === 'multi-obligation') {
+            const opts = ['Colleague','Client','Service Provider','Family','Friend'];
+            const selected = currentVal.split(',').map(s=>s.trim()).filter(Boolean);
+            el.innerHTML = `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:4px 0;">
+                ${opts.map(o => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" class="ob-inline-cb" value="${o}" ${selected.includes(o)?'checked':''} onchange="app.saveObligationFromCheckboxes('${contactId}')" style="width:auto; min-height:auto;"> ${o}</label>`).join('')}
+            </div>`;
+        } else if (type === 'textarea') {
+            el.innerHTML = `<textarea onblur="app.saveDetailField('${contactId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
+            el.querySelector('textarea').focus();
+        } else {
+            el.innerHTML = `<input type="${type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveDetailField('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter')this.blur();" style="width:100%; padding:2px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px;">`;
+            const input = el.querySelector('input');
+            input.focus();
+            input.select();
+        }
+    },
+
+    // === Quick Links (reusable for contacts, accounts, deals) ===
+    addQuickLink(type, recordId) {
+        const name = prompt('Link name (e.g. "OneNote - Project Notes", "LBO Model"):');
+        if (!name) return;
+        const url = prompt('URL (Google Drive link, OneNote link, any URL):');
+        if (!url) return;
+        const arr = type === 'contact' ? this.data.contacts : type === 'account' ? this.data.accounts : this.data.deals;
+        const record = arr.find(r => r.id === recordId);
+        if (!record) return;
+        if (!record.quickLinks) record.quickLinks = [];
+        record.quickLinks.push({name, url, added: new Date().toISOString()});
+        this.persist();
+        const col = type === 'contact' ? 'contacts' : type === 'account' ? 'accounts' : 'deals';
+        firestoreUpsert(col, record);
+        this.render();
+    },
+
+    removeQuickLink(type, recordId, idx) {
+        const arr = type === 'contact' ? this.data.contacts : type === 'account' ? this.data.accounts : this.data.deals;
+        const record = arr.find(r => r.id === recordId);
+        if (!record || !record.quickLinks) return;
+        record.quickLinks.splice(idx, 1);
+        this.persist();
+        const col = type === 'contact' ? 'contacts' : type === 'account' ? 'accounts' : 'deals';
+        firestoreUpsert(col, record);
+        this.render();
+    },
+
+    renderQuickLinks(type, record) {
+        const links = record.quickLinks || [];
+        return `<div class="related-list card" style="margin-bottom:12px;">
+            <div class="card-header">
+                <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#4285f4;">🔗</span>
+                Quick Links <span class="related-count">(${links.length})</span>
+                <button class="btn-small" style="margin-left:auto;" onclick="app.addQuickLink('${type}','${record.id}')">Add Link</button>
+            </div>
+            <div style="padding:8px 16px;">
+            ${links.length ? links.map((l, i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                <a href="${l.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">🔗 ${l.name}</a>
+                <div style="display:flex; gap:4px;">
+                    <button class="btn-small" onclick="navigator.clipboard.writeText('${l.url.replace(/'/g,"\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1000);" style="padding:1px 6px; font-size:10px;">Copy</button>
+                    <button class="btn-small" onclick="app.removeQuickLink('${type}','${record.id}',${i})" style="padding:1px 6px; font-size:10px; color:var(--sf-error);">✕</button>
+                </div>
+            </div>`).join('') : '<div style="font-size:12px; color:var(--sf-text-weak);">No links yet. Add Drive folders, OneNote pages, or any URL.</div>'}
+            </div>
+        </div>`;
+    },
+
+    searchGoogleDrive(query) {
+        window.open(`https://drive.google.com/drive/search?q=${encodeURIComponent(query)}`, '_blank');
+    },
+
+    addContactFile(contactId) {
+        const name = prompt('File name:');
+        if (!name) return;
+        const url = prompt('OneDrive URL:');
+        if (!url) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        if (!contact.files) contact.files = [];
+        contact.files.push({name, url});
+        firestoreUpsert('contacts', contact);
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    removeContactFile(contactId, idx) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact || !contact.files) return;
+        contact.files.splice(idx, 1);
+        firestoreUpsert('contacts', contact);
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    saveGeneralNotes(contactId, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        contact.general_notes = value || null;
+        firestoreUpsert('contacts', contact);
+        this.persist();
+    },
+
+    saveObligationFromTable(contactId) {
+        const vals = [...document.querySelectorAll(`.ob-tbl-cb[data-cid="${contactId}"]:checked`)].map(cb => cb.value).join(', ');
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (contact) { contact.obligation = vals || null; firestoreUpsert('contacts', contact); this.persist(); }
+    },
+
+    saveObligationFromCheckboxes(contactId) {
+        const vals = [...document.querySelectorAll('.ob-inline-cb:checked')].map(cb => cb.value).join(', ');
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (contact) { contact.obligation = vals || null; firestoreUpsert('contacts', contact); this.persist(); }
+    },
+
+    saveDetailField(contactId, field, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
+        this.persist();
+        if (field === 'address' && value) this.geocodeAddress(value);
+        this.renderContactDetail();
+    },
+
+    saveInlineEdit(contactId, field, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const oldVal = contact[field] || '';
+        if (oldVal !== (value||'')) this.logChange('contact', contactId, contact.name, [{field, from: oldVal||'(empty)', to: value||'(empty)'}]);
+        contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
+        this.persist();
+        if (field === 'address' && value) this.geocodeAddress(value);
+        this.renderContacts();
+    },
+
+    renderContacts() {
+        const f = this.contactFilters;
+        const visibleCols = this._getContactCols();
+        const cols = visibleCols.map(k => this._allContactCols.find(c => c.key === k)).filter(Boolean);
+        const allTags = [...new Set(this.data.contacts.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
+        let filtered = this.data.contacts;
+        if (f.tier) filtered = filtered.filter(c => c.tier === f.tier);
+        if (f._ob === 'Other') filtered = filtered.filter(c => !c.obligation || c.obligation.trim() === '');
+        else if (f._ob) filtered = filtered.filter(c => (c.obligation||'').includes(f._ob));
+        if (f.company) filtered = filtered.filter(c => (c.accountId||c.account_id) === f.company);
+        if (f.text) {
+            const lt = f.text.toLowerCase();
+            filtered = filtered.filter(c => {
+                const searchable = [c.name, c.pe_email, c.we_email, c.mobile, c.phone, c.title, c.address, c.tags, c.notes, c.lead_source, c.obligation].filter(Boolean).join(' ').toLowerCase();
+                return searchable.includes(lt);
+            });
+        }
+        if (f.dsla) {
+            const now = new Date();
+            filtered = filtered.filter(c => {
+                const la = c.la || c.last_activity_display;
+                const days = la ? Math.floor((now - new Date(la)) / 86400000) : 999;
+                if (f.dsla === 'active') return days <= 30;
+                if (f.dsla === 'cooling') return days > 30 && days <= 90;
+                if (f.dsla === 'cold') return days > 90;
+                return true;
+            });
+        }
+
+        const sorted = this._applySortToList(filtered.map(c => {
+            const cpy = this.data.accounts.find(a => a.id === (c.accountId || c.account_id));
+            return {...c, _company: cpy ? cpy.name : '', _dsla: this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity ?? 9999, _completeness: this.contactCompleteness(c)};
+        }), 'contacts');
+
+        const html = `
+            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
+                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('contacts')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderContacts();">Deselect All</button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Contacts</h2>
+                <div style="display:flex; gap:6px;">
+                    <button onclick="app._showColPicker=!app._showColPicker; app.renderContacts();" style="padding:2px 10px; font-size:12px; height:26px;">Edit Columns</button>
+                    <button class="btn-primary" onclick="app.openContactForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Contact</button>
+                </div>
+            </div>
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(10, 1fr);">
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${!f.tier&&!f._ob?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.clearContactFilters();">
+                    <div class="label" style="font-size:9px;">Total</div>
+                    <div class="value" style="font-size:18px;">${this.fmt(this.data.contacts.length)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Client'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Client'?'':'Client'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Client</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Client')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Colleague'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Colleague'?'':'Colleague'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Colleague</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Colleague')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Service Provider'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Service Provider'?'':'Service Provider'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Service Provider</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Service Provider')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='1-VIP'?'border-bottom:3px solid #166534;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='1-VIP'?'':'1-VIP'}')">
+                    <div class="label" style="font-size:9px;">1-VIP</div>
+                    <div class="value" style="font-size:18px; color:#166534;">${this.data.contacts.filter(c=>c.tier==='1-VIP').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f.tier==='2'?'border-bottom:3px solid #1e40af;':''}" onclick="app.contactFilters._ob=''; app.updateContactFilter('tier','${f.tier==='2'?'':'2'}')">
+                    <div class="label" style="font-size:9px;">Tier 2</div>
+                    <div class="value" style="font-size:18px; color:#1e40af;">${this.data.contacts.filter(c=>c.tier==='2').length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Family'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Family'?'':'Family'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Family</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Family')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Friend'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Friend'?'':'Friend'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Friend</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>(c.obligation||'').includes('Friend')).length}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${f._ob==='Other'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app.contactFilters.tier=''; app.contactFilters._ob='${f._ob==='Other'?'':'Other'}'; app.renderContacts();">
+                    <div class="label" style="font-size:9px;">Other</div>
+                    <div class="value" style="font-size:18px;">${this.data.contacts.filter(c=>!c.obligation || c.obligation.trim()==='').length}</div>
+                </div>
+            </div>
+            ${this._showColPicker ? `<div class="card" style="padding:10px 14px; margin-bottom:8px;">
+                <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Show/Hide Columns:</div>
+                <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                    ${this._allContactCols.map(c => `<label style="display:flex; align-items:center; gap:3px; font-size:12px; padding:3px 8px; border-radius:3px; background:${visibleCols.includes(c.key)?'var(--sf-brand)':'var(--sf-bg)'}; color:${visibleCols.includes(c.key)?'#fff':'var(--sf-text)'}; cursor:pointer;">
+                        <input type="checkbox" ${visibleCols.includes(c.key)?'checked':''} onchange="app.toggleContactCol('${c.key}')" style="width:auto; min-height:auto;"> ${c.label}
+                    </label>`).join('')}
+                </div>
+            </div>` : ''}
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <input type="text" placeholder="Search contacts…" value="${f.text}" oninput="app.updateContactFilter('text', this.value)" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                ${f.dsla ? `<span style="font-size:11px;padding:3px 8px;border-radius:3px;background:var(--sf-brand);color:#fff;font-weight:600;">${f.dsla==='active'?'Active ≤30D':f.dsla==='cooling'?'Cooling 30-90D':'Cold 90D+'}</span>` : ''}
+                ${f.company ? `<span style="font-size:11px;padding:3px 8px;border-radius:3px;background:#7f8de1;color:#fff;font-weight:600;">${(this.data.accounts.find(a=>a.id===f.company)||{}).name||'Account'}</span>` : ''}
+                ${f.text || f.tier || f._ob || f.dsla || f.company ? `<button class="btn-small" onclick="app.clearContactFilters()">Clear</button>` : ''}
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
+            </div>
+            <div class="card" style="overflow:hidden;">
+                <div class="table-container" style="overflow-y:auto;">
+                    <table class="compact-table" id="contactsTable">
+                        <thead style="position:sticky;top:0;z-index:5;background:#fff;">
+                            <tr>
+                                <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('contacts')" ${this._bulkSelected.size === sorted.length && sorted.length ? 'checked' : ''} style="width:10px;height:10px;cursor:pointer;"></th>
+                                ${(() => { const cw = this._getColWidths(); return cols.map(c => `<th data-colkey="${c.key}" onclick="app.sortBy('contacts','${c.key}')" style="cursor:pointer;${cw[c.key] ? 'width:'+cw[c.key]+'px;' : ''}">${c.label}${this._sortIndicator('contacts',c.key)}<div class="col-resize-handle" onmousedown="event.stopPropagation();"></div></th>`).join(''); })()}
+                                <th style="width:30px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sorted.map(c => {
+                                const dsla = this.calculateDSLA(c.la || c.last_activity_display) ?? c.days_since_last_activity;
+                                const asClass = 'as-' + this.calculateAS(dsla);
+                                return `<tr><td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(c.id)?'checked':''} onclick="app.toggleBulkSelect('${c.id}')" style="width:10px;height:10px;cursor:pointer;"></td>${cols.map(col => {
+                                    const editable = col.editable ? `ondblclick="app.inlineEdit('${c.id}','${col.key}',this)"` : '';
+                                    const cursor = col.editable ? 'cursor:cell;' : '';
+                                    let val = '';
+                                    if (col.key === 'name') val = `<a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a>`;
+                                    else if (col.key === '_company') val = c._company;
+                                    else if (col.key === 'tier') val = `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span>`;
+                                    else if (col.key === '_dsla') val = dsla != null ? `<span class="activity-score ${asClass}"></span>${String(dsla).trim()}D` : '';
+                                    else if (col.key === 'tags') val = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="tag-pill">${t}</span>`).join(' ');
+                                    else if (col.key === 'obligation') val = (c.obligation||'').split(',').map(o=>o.trim()).filter(Boolean).map(o=>`<span class="tag-pill">${o}</span>`).join(' ');
+                                    else if (col.key === 'pe_email' && c.pe_email) val = `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>`;
+                                    else if (col.key === 'we_email' && c.we_email) val = `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>`;
+                                    else if (col.key === 'birthdate' && c.birthdate) { const bd = new Date(c.birthdate+'T12:00:00'); val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); }
+                                    else if (col.key === 'la') { const raw = c.la || c.last_activity_display; if (raw) { const bd = new Date(raw.includes('T') ? raw : raw+'T12:00:00'); if (!isNaN(bd)) val = bd.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(bd.getFullYear()).slice(-2); else val = raw; } }
+                                    else if (col.key === '_completeness') { const pct = c._completeness; const color = pct >= 80 ? 'var(--sf-success)' : pct >= 50 ? 'var(--sf-warning)' : 'var(--sf-error)'; val = `<span style="color:${color}; font-weight:600;">${pct}%</span>`; }
+                                    else if (col.key === 'pinned') val = c.pinned || '';
+                                    else if (col.key === 'referred_by') val = c.referred_by || '';
+                                    else if (col.key === 'instagram' && c.instagram) { const handle = (c.instagram||'').replace('@',''); val = `<a href="https://instagram.com/${esc(handle)}" target="_blank" onclick="event.stopPropagation();" style="color:var(--sf-brand);">@${esc(handle)}</a>`; }
+                                    else if (col.key === 'facebook' && c.facebook) val = `<a href="${esc(c.facebook)}" target="_blank" onclick="event.stopPropagation();" style="color:var(--sf-brand);">Profile</a>`;
+                                    else if (col.key === 'linkedin' && c.linkedin) val = `<a href="${esc(c.linkedin)}" target="_blank" onclick="event.stopPropagation();" style="color:var(--sf-brand);">Profile</a>`;
+                                    else val = c[col.key] || '';
+                                    return `<td ${editable} style="${cursor}" title="${col.editable ? 'Double-click to edit' : ''}">${val}</td>`;
+                                }).join('')}<td style="position:relative;"><button class="btn-small" onclick="app.toggleRowMenu('${c.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_${c.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.editContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.viewContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; white-space:nowrap;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.deleteContact('${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error); white-space:nowrap;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td></tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Mobile card list (hidden on desktop) -->
+            <div class="mobile-list">
+                ${sorted.map(c => {
+                    const initials = (c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+                    const tierColor = c.tier === '1-VIP' ? '#166534' : c.tier === '2' ? '#1e40af' : '#94a3b8';
+                    const phone = c.pc_number||c.mobile||c.wc_number||c.phone||'';
+                    const email = c.pe_email||c.we_email||'';
+                    return `<div class="mobile-list-item">
+                        <div class="ml-avatar" style="background:${tierColor};" onclick="app.viewContact('${c.id}')">${initials}</div>
+                        <div class="ml-info" onclick="app.viewContact('${c.id}')">
+                            <div class="ml-name">${c.pinned?'⭐ ':''}${c.name}</div>
+                            <div class="ml-sub">${c._company||''} ${c.obligation ? '· '+c.obligation.split(',')[0].trim() : ''}</div>
+                            <div class="ml-actions">
+                                ${phone ? `<a href="#" class="ml-action ml-action-call" onclick="event.stopPropagation(); event.preventDefault(); app.logCallFromTap('${c.id}','${phone}');">📞</a>` : ''}
+                                ${phone ? `<a href="#" class="ml-action ml-action-text" onclick="event.stopPropagation(); event.preventDefault(); app.logTextFromTap('${c.id}','${phone}');">💬</a>` : ''}
+                                ${email ? `<a href="mailto:${email}" class="ml-action ml-action-email" onclick="event.stopPropagation();">📧</a>` : ''}
+                                ${c.instagram ? `<a href="https://instagram.com/${c.instagram.replace('@','')}" target="_blank" class="ml-action ml-action-ig" onclick="event.stopPropagation();">📷</a>` : ''}
+                            </div>
+                        </div>
+                        <div class="ml-right" onclick="app.viewContact('${c.id}')">
+                            <div class="ml-badge" style="background:${c.tier==='1-VIP'?'#dcfce7':c.tier==='2'?'#dbeafe':'#f3f4f6'}; color:${tierColor};">${c.tier||'5'}</div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        this.initColumnResize();
+        this.initColumnDrag();
+    },
+
+    updateContactFilter(key, val) {
+        this.contactFilters[key] = val;
+        localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
+        this.renderContacts();
+    },
+    clearContactFilters() {
+        this.contactFilters = {tier: '', text: '', dsla: '', _ob: '', company: ''};
+        localStorage.setItem('matthewsCRM_contactFilters', JSON.stringify(this.contactFilters));
+        this.renderContacts();
+    },
+
+    // Dashboard drill-down helpers
+    dashFilterDeals(filter) {
+        this.currentView = 'deals';
+        this.render();
+        // if filter === 'won', scroll to Closed Won column
+    },
+    dashFilterActivities(filter) {
+        this.currentView = 'activities';
+        this.render();
+    },
+
+    // Recently viewed tracking
+    recentlyViewed: [],
+    trackView(type, id, name) {
+        this.recentlyViewed = this.recentlyViewed.filter(r => !(r.type === type && r.id === id));
+        this.recentlyViewed.unshift({type, id, name, time: Date.now()});
+        if (this.recentlyViewed.length > 15) this.recentlyViewed.length = 15;
+    },
+
+    // Email auto-link: match incoming email to contact by email address
+    autoLinkEmail(emailRecord) {
+        if (!emailRecord.contact_id && emailRecord.from_addr) {
+            const match = this.data.contacts.find(c => c.email && c.email.toLowerCase() === emailRecord.from_addr.toLowerCase());
+            if (match) emailRecord.contact_id = match.id;
+        }
+        if (!emailRecord.contact_id && emailRecord.to_addr) {
+            const match = this.data.contacts.find(c => c.email && c.email.toLowerCase() === emailRecord.to_addr.toLowerCase());
+            if (match) emailRecord.contact_id = match.id;
+        }
+        return emailRecord;
+    },
+
+    _acctFilter: {type: '', text: ''},
+
+    _acctViewMode: 'list',
+
+    renderAccounts() {
+        if (this._acctViewMode === 'portfolio') { this._renderPortfolioDashboard(); return; }
+        const af = this._acctFilter;
+        const types = [...new Set(this.data.accounts.map(a => a.type).filter(Boolean))].sort();
+        const clientCount = this.data.accounts.filter(a => a.type === 'Client').length;
+        const prospectCount = this.data.accounts.filter(a => a.type === 'Prospect').length;
+        const partnerCount = this.data.accounts.filter(a => a.type === 'Partner').length;
+
+        let filtered = [...this.data.accounts];
+        if (af.type) filtered = filtered.filter(a => a.type === af.type);
+        if (af.text) { const lt = af.text.toLowerCase(); filtered = filtered.filter(a => (a.name||'').toLowerCase().includes(lt) || (a.industry||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt) || (a.address||'').toLowerCase().includes(lt)); }
+
+        const sorted = this._applySortToList(filtered.map(a => {
+            const conCount = this.data.contacts.filter(c => (c.accountId || c.account_id) === a.id).length;
+            const dealCount = this.data.deals.filter(d => (d.accountId || d.account_id) === a.id).length;
+            const dealVal = this.data.deals.filter(d => (d.accountId || d.account_id) === a.id).reduce((s,d) => s + (d.value||0), 0);
+            return {...a, _conCount: conCount, _dealCount: dealCount, _dealVal: dealVal};
+        }), 'accounts');
+
+        const html = `
+            <div id="bulkBar" style="display:${this._bulkSelected.size?'flex':'none'}; align-items:center; gap:8px; background:#eef4fc; border:1px solid var(--sf-brand); border-radius:4px; padding:6px 12px; margin-bottom:8px;">
+                <span class="bulk-count" style="font-size:13px; font-weight:600;">${this._bulkSelected.size} selected</span>
+                <button class="btn-small btn-primary" onclick="app.openBulkUpdate('accounts')">Bulk Update</button>
+                <button class="btn-small" onclick="app._bulkSelected.clear(); app.renderAccounts();">Deselect All</button>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                <h2 style="margin:0;">Accounts</h2>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <div class="cal-view-tabs">
+                        <button class="cal-view-tab active" onclick="app._acctViewMode='list';app.renderAccounts();">All Accounts</button>
+                        <button class="cal-view-tab" onclick="app._acctViewMode='portfolio';app.renderAccounts();">Portfolio</button>
+                    </div>
+                    <button class="btn-primary" onclick="app.openAccountForm()" style="padding:2px 10px; font-size:12px; height:26px;">New Account</button>
+                </div>
+            </div>
+            <div class="stat-cards" style="margin-bottom:8px; grid-template-columns:repeat(5, 1fr);">
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${!af.type?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._acctFilter.type=''; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Total</div>
+                    <div class="value" style="font-size:18px;">${this.fmt(this.data.accounts.length)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Client'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._acctFilter.type='${af.type==='Client'?'':'Client'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Client</div>
+                    <div class="value" style="font-size:18px; color:var(--sf-success);">${clientCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Prospect'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._acctFilter.type='${af.type==='Prospect'?'':'Prospect'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Prospect</div>
+                    <div class="value" style="font-size:18px; color:var(--sf-brand);">${prospectCount}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; padding:8px; ${af.type==='Partner'?'border-bottom:3px solid #8b5cf6;':''}" onclick="app._acctFilter.type='${af.type==='Partner'?'':'Partner'}'; app.renderAccounts();">
+                    <div class="label" style="font-size:9px;">Partner</div>
+                    <div class="value" style="font-size:18px; color:#8b5cf6;">${partnerCount}</div>
+                </div>
+                <div class="stat-card" style="padding:8px;">
+                    <div class="label" style="font-size:9px;">Pipeline</div>
+                    <div class="value" style="font-size:18px;">$${this.data.deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <input type="text" placeholder="Search accounts…" value="${af.text}" oninput="app._acctFilter.text=this.value; app.renderAccounts();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                ${af.text||af.type ? `<button class="btn-small" onclick="app._acctFilter={type:'',text:''}; app.renderAccounts();">Clear</button>` : ''}
+                <span style="font-size:11px; color:var(--sf-text-weakest);">${this.fmt(sorted.length)} results</span>
+            </div>
+            <div class="card" style="overflow:hidden;">
+                <div class="table-container" style="max-height:calc(100vh - 260px); overflow-y:auto;">
+                    <table class="compact-table">
+                        <thead>
+                            <tr>
+                                <th style="width:28px; padding:2px;"><input type="checkbox" onclick="app.toggleBulkSelectAll('accounts')" style="width:10px;height:10px;cursor:pointer;"></th>
+                                <th onclick="app.sortBy('accounts','name')" style="cursor:pointer;">Name${this._sortIndicator('accounts','name')}</th>
+                                <th onclick="app.sortBy('accounts','type')" style="cursor:pointer;">Type${this._sortIndicator('accounts','type')}</th>
+                                <th onclick="app.sortBy('accounts','industry')" style="cursor:pointer;">Industry${this._sortIndicator('accounts','industry')}</th>
+                                <th onclick="app.sortBy('accounts','_conCount')" style="cursor:pointer;">Contacts${this._sortIndicator('accounts','_conCount')}</th>
+                                <th onclick="app.sortBy('accounts','_dealCount')" style="cursor:pointer;">Processes${this._sortIndicator('accounts','_dealCount')}</th>
+                                <th>Address</th>
+                                <th style="width:30px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sorted.map(a => `<tr>
+                                <td style="text-align:center; padding:2px;"><input type="checkbox" ${this._bulkSelected.has(a.id)?'checked':''} onclick="app.toggleBulkSelect('${a.id}')" style="width:10px;height:10px;cursor:pointer;vertical-align:middle;"></td>
+                                <td><a onclick="app.viewAccount('${a.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${a.name}</a></td>
+                                <td>${a.type||''}</td>
+                                <td>${a.industry||''}</td>
+                                <td><a onclick="app.contactFilters.company='${a.id}'; app.contactFilters._ob=''; app.navigate('contacts');" style="cursor:pointer; color:var(--sf-brand);">${a._conCount}</a></td>
+                                <td>${a._dealCount}</td>
+                                <td>${a.address||''}</td>
+                                <td style="position:relative; overflow:visible;"><button class="btn-small" onclick="app.toggleRowMenu('acct_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button><div id="rowMenu_acct_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;"><div onclick="app.viewAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">View</div><div onclick="app.editAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div><div onclick="app.deleteAccount('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div></div></td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        // Mobile accounts list
+        const mobileAccts = `<div class="mobile-list">${sorted.map(a => `<div class="mobile-list-item" onclick="app.viewAccount('${a.id}')">
+            <div class="ml-avatar" style="background:#7f8de1;">${(a.name||'').split(' ').filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase()||'A'}</div>
+            <div class="ml-info">
+                <div class="ml-name">${a.name}</div>
+                <div class="ml-sub">${a.type||''} ${a.industry ? '· '+a.industry : ''}</div>
+            </div>
+            <div class="ml-right">
+                <div style="font-size:12px; font-weight:600; color:var(--sf-brand);">${a._conCount} 👤</div>
+            </div>
+        </div>`).join('')}</div>`;
+        document.getElementById('content').innerHTML = html + mobileAccts;
+    },
+
+    _renderPortfolioDashboard() {
+        const portfolio = this.data.accounts.filter(a => a.type === 'Portfolio Company');
+        const active = portfolio.filter(a => a.portStatus !== 'Exited' && a.portStatus !== 'Written Off');
+        const exited = portfolio.filter(a => a.portStatus === 'Exited');
+        const totalInvested = portfolio.reduce((s,a) => s + (a.invested||0), 0);
+        const totalCurrent = active.reduce((s,a) => s + (a.currentVal||0), 0);
+        const totalRevenue = active.reduce((s,a) => s + (a.revenue||0), 0);
+        const totalEBITDA = active.reduce((s,a) => s + (a.ebitda||0), 0);
+        const grossMOIC = totalInvested > 0 ? (totalCurrent / totalInvested) : 0;
+        const exitedVal = exited.reduce((s,a) => s + (a.currentVal||0), 0);
+        const exitedInvested = exited.reduce((s,a) => s + (a.invested||0), 0);
+        const totalValue = totalCurrent + exitedVal;
+        const tvpi = totalInvested > 0 ? (totalValue / totalInvested) : 0;
+        const dpi = totalInvested > 0 ? (exitedVal / totalInvested) : 0;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<h2 style="margin:0;">Portfolio Dashboard</h2>'
+            + '<div style="display:flex;gap:6px;align-items:center;"><div class="cal-view-tabs">'
+            + '<button class="cal-view-tab" onclick="app._acctViewMode=\'list\';app.renderAccounts();">All Accounts</button>'
+            + '<button class="cal-view-tab active" onclick="app._acctViewMode=\'portfolio\';app.renderAccounts();">Portfolio</button>'
+            + '</div><button class="btn-primary" onclick="app.openAccountForm();setTimeout(()=>{document.getElementById(\'accountType\').value=\'Portfolio Company\';document.getElementById(\'portfolioFields\').style.display=\'\';},100);" style="padding:2px 10px;font-size:12px;height:26px;">+ Portfolio Co</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Companies</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalInvested.toFixed(0) + 'M</div><div class="ps-label">Total Invested</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCurrent.toFixed(0) + 'M</div><div class="ps-label">Current Value</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + grossMOIC.toFixed(1) + 'x</div><div class="ps-label">Gross MOIC</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + tvpi.toFixed(2) + 'x</div><div class="ps-label">TVPI</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + dpi.toFixed(2) + 'x</div><div class="ps-label">DPI</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalRevenue.toFixed(0) + 'M</div><div class="ps-label">Portfolio Revenue</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalEBITDA.toFixed(0) + 'M</div><div class="ps-label">Portfolio EBITDA</div></div>'
+            + '</div>';
+
+        if (active.length) {
+            html += '<div class="card"><div class="card-header">Active Portfolio Companies</div><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Company</th><th>Industry</th><th>Ownership</th><th>Invested</th><th>Current Val</th><th>MOIC</th><th>Revenue</th><th>EBITDA</th><th>Acquired</th></tr></thead><tbody>';
+            active.forEach(a => {
+                const moic = a.invested ? ((a.currentVal||0) / a.invested).toFixed(1) : '—';
+                const moicColor = parseFloat(moic) >= 2 ? 'var(--sf-success)' : parseFloat(moic) >= 1 ? 'var(--sf-warning)' : 'var(--sf-error)';
+                html += '<tr style="cursor:pointer;" onclick="app.viewAccount(\'' + a.id + '\')">'
+                    + '<td style="font-weight:600;color:var(--sf-brand);">' + a.name + '</td>'
+                    + '<td>' + (a.industry||'') + '</td>'
+                    + '<td>' + (a.ownership ? a.ownership + '%' : '—') + '</td>'
+                    + '<td>$' + (a.invested||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.currentVal||0).toFixed(1) + 'M</td>'
+                    + '<td style="font-weight:700;color:' + moicColor + ';">' + moic + 'x</td>'
+                    + '<td>$' + (a.revenue||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.ebitda||0).toFixed(1) + 'M</td>'
+                    + '<td>' + (a.acqDate||'—') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        if (exited.length) {
+            html += '<div class="card" style="margin-top:12px;"><div class="card-header">Exited Investments</div><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Company</th><th>Industry</th><th>Invested</th><th>Exit Val</th><th>MOIC</th><th>Acquired</th></tr></thead><tbody>';
+            exited.forEach(a => {
+                const moic = a.invested ? ((a.currentVal||0) / a.invested).toFixed(1) : '—';
+                html += '<tr style="cursor:pointer;" onclick="app.viewAccount(\'' + a.id + '\')">'
+                    + '<td style="font-weight:600;color:var(--sf-brand);">' + a.name + '</td>'
+                    + '<td>' + (a.industry||'') + '</td>'
+                    + '<td>$' + (a.invested||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (a.currentVal||0).toFixed(1) + 'M</td>'
+                    + '<td style="font-weight:700;">' + moic + 'x</td>'
+                    + '<td>' + (a.acqDate||'—') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        if (!portfolio.length) html += '<div style="text-align:center;padding:40px;color:var(--sf-text-weak);">No portfolio companies yet. Create an account with type "Portfolio Company" to get started.</div>';
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    _dealView: 'pipeline',
+    _stageColors: {'Prospect':'#6b7280','Pitch':'#3b82f6','Mandate':'#8b5cf6','Due Diligence':'#f59e0b','Negotiation':'#f97316','Closed Won':'#22c55e','Closed Lost':'#ef4444'},
+    _stageChecklist: {
+        'Prospect': ['Identify target','Initial research','Qualify opportunity'],
+        'Pitch': ['Prepare pitch deck','Schedule meeting','Send CIM/teaser'],
+        'Mandate': ['Engagement letter signed','Fee structure agreed','Timeline set'],
+        'Due Diligence': ['Data room open','Financial model complete','Management meetings','Legal review'],
+        'Negotiation': ['LOI submitted','PSA draft','Financing confirmed','Board approval'],
+        'Closed Won': ['Wire confirmed','Announcement drafted'],
+        'Closed Lost': ['Post-mortem notes']
+    },
+
+    _dealScore(d) {
+        let score = 0;
+        const stageWeights = {'Prospect':10,'Pitch':25,'Mandate':45,'Due Diligence':65,'Negotiation':80,'Closed Won':100,'Closed Lost':0};
+        score += stageWeights[d.stage] || 0;
+        score += Math.min((d.probability||0) * 0.3, 30);
+        const health = this._dealHealth(d);
+        score += health === 'green' ? 15 : health === 'yellow' ? 5 : -10;
+        if (d.value >= 50) score += 10;
+        else if (d.value >= 10) score += 5;
+        const ddDone = d._ddStatus ? Object.values(d._ddStatus).filter(Boolean).length : 0;
+        score += Math.min(ddDone * 2, 15);
+        const icApprovals = (d._icVotes||[]).filter(v => v.vote === 'Approve').length;
+        score += icApprovals * 5;
+        return Math.min(Math.max(Math.round(score), 0), 100);
+    },
+
+    _dealHealth(d) {
+        const lastAct = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).sort((a,b)=>(b.date||b.dueDate||'').localeCompare(a.date||a.dueDate||'')).shift();
+        const days = lastAct ? Math.floor((new Date() - new Date(lastAct.date || lastAct.dueDate)) / 86400000) : 999;
+        if (d.stage === 'Closed Won' || d.stage === 'Closed Lost') return 'green';
+        if (days <= 7) return 'green';
+        if (days <= 14) return 'yellow';
+        return 'red';
+    },
+
+    renderDeals() {
+        if (this._dealView === 'detail') { this._renderDealDetail(); return; }
+        if (this._dealView === 'analytics') { this._renderDealAnalytics(); return; }
+        const stages = ['Prospect','Pitch','Mandate','Due Diligence','Negotiation','Closed Won','Closed Lost'];
+        const active = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const totalPipeline = active.reduce((s,d) => s + (d.value||0), 0);
+        const weighted = active.reduce((s,d) => s + (d.value||0) * ((d.probability||0)/100), 0);
+        const stalled = active.filter(d => this._dealHealth(d) === 'red').length;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:10px;">'
+            + '<div class="obj-icon obj-icon-deal" style="width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;">P</div>'
+            + '<div><div style="font-size:11px;color:var(--sf-text-weak);">Pipeline</div><h2 style="margin:0;">Processes</h2></div></div>'
+            + '<div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab active" onclick="app._dealView=\'pipeline\';app.renderDeals();">Board</button>'
+            + '<button class="cal-view-tab" onclick="app._dealView=\'analytics\';app.renderDeals();">Analytics</button></div>'
+            + '<button class="btn-primary" onclick="app.openDealForm()">+ New Deal</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalPipeline.toFixed(0) + 'M</div><div class="ps-label">Total Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + weighted.toFixed(0) + 'M</div><div class="ps-label">Weighted</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Deals</div></div>'
+            + '<div class="pipeline-stat" style="' + (stalled ? 'border-color:var(--sf-error);' : '') + '"><div class="ps-value" style="' + (stalled ? 'color:var(--sf-error);' : '') + '">' + stalled + '</div><div class="ps-label">Stalled (14D+)</div></div>'
+            + '</div>';
+
+        const barTotal = Math.max(totalPipeline, 1);
+        html += '<div class="pipeline-bar">' + stages.filter(s => s!=='Closed Lost').map(s => {
+            const v = this.data.deals.filter(d => d.stage === s).reduce((sum,d) => sum + (d.value||0), 0);
+            const pct = (v / barTotal * 100);
+            return pct > 0 ? '<div style="width:' + pct + '%;background:' + this._stageColors[s] + ';" title="' + s + ': $' + v.toFixed(0) + 'M"></div>' : '';
+        }).join('') + '</div>';
+
+        html += '<div class="kanban-board">' + stages.map(stage => {
+            const deals = this.data.deals.filter(d => d.stage === stage);
+            const stageVal = deals.reduce((s,d) => s + (d.value||0), 0);
+            return '<div class="kanban-column" data-stage="' + stage + '" ondragover="event.preventDefault();this.classList.add(\'drag-over\');" ondragleave="this.classList.remove(\'drag-over\');" ondrop="this.classList.remove(\'drag-over\');app.dropDeal(event,\'' + stage + '\');">'
+                + '<div class="kanban-header"><span>' + stage + ' <span class="kh-count">' + deals.length + '</span></span><span class="kh-value">$' + stageVal.toFixed(0) + 'M</span></div>'
+                + deals.map(d => {
+                    const health = this._dealHealth(d);
+                    const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+                    const daysInStage = d._stageDate ? Math.floor((new Date()-new Date(d._stageDate))/86400000) : '';
+                    return '<div class="kanban-card health-' + health + '" draggable="true" ondragstart="app.dragDeal(event,\'' + d.id + '\')" onclick="app.viewDealDetail(\'' + d.id + '\')">'
+                        + '<div class="kanban-card-title">' + (d.name||'') + '</div>'
+                        + '<div class="kanban-card-meta">' + (acct ? acct.name + ' · ' : '') + '$' + (d.value||0) + 'M · ' + (d.probability||0) + '% · <span style="font-weight:700;color:' + (this._dealScore(d) >= 70 ? '#22c55e' : this._dealScore(d) >= 40 ? '#f59e0b' : '#9ca3af') + ';">Score: ' + this._dealScore(d) + '</span></div>'
+                        + '<div class="kanban-card-tags">'
+                        + (d.sector ? '<span class="kanban-card-tag" style="background:#e0e7ff;color:#3730a3;">' + d.sector + '</span>' : '')
+                        + (d.closeDate ? '<span class="kanban-card-tag" style="background:#fef3c7;color:#92400e;">Close ' + d.closeDate.slice(5) + '</span>' : '')
+                        + (daysInStage ? '<span class="kanban-card-tag" style="background:#f3f4f6;color:#374151;">' + daysInStage + 'D</span>' : '')
+                        + '</div>'
+                        + (d.driveLink ? '<div style="margin-top:4px;"><a href="' + d.driveLink + '" target="_blank" onclick="event.stopPropagation();" style="font-size:10px;color:var(--sf-brand);">📁 Drive</a></div>' : '')
+                        + '</div>';
+                }).join('') + '</div>';
+        }).join('') + '</div>';
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    dragDeal(e, id) { e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); },
+
+    dropDeal(e, newStage) {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const deal = this.data.deals.find(d => d.id === id);
+        if (!deal || deal.stage === newStage) return;
+        this.logChange('deal', id, deal.name, [{field:'stage', from: deal.stage, to: newStage}]);
+        deal.stage = newStage;
+        deal._stageDate = new Date().toISOString().slice(0,10);
+        firestoreUpsert('deals', deal);
+        this.persist();
+        this.renderDeals();
+    },
+
+    viewDealDetail(id) {
+        this._currentDealId = id;
+        this._dealView = 'detail';
+        this.renderDeals();
+    },
+
+    _renderDealDetail() {
+        const d = this.data.deals.find(x => x.id === this._currentDealId);
+        if (!d) { this._dealView = 'pipeline'; this.renderDeals(); return; }
+        const acct = this.data.accounts.find(a => a.id === (d.accountId||d.account_id));
+        const health = this._dealHealth(d);
+        const healthLabel = {green:'On Track', yellow:'Needs Attention', red:'Stalled'}[health];
+        const activities = (this.data.activities||[]).filter(a => a.deal_id === d.id || a.dealId === d.id).sort((a,b)=>(b.date||b.dueDate||'').localeCompare(a.date||a.dueDate||'')).slice(0,20);
+        const contacts = (this.data.dealContacts||[]).filter(dc => dc.deal_id === d.id).map(dc => {
+            const c = this.data.contacts.find(x => x.id === dc.contact_id); return c ? {...c, _role: dc.role} : null;
+        }).filter(Boolean);
+        const checklist = this._stageChecklist[d.stage] || [];
+        const completed = d._checklist || {};
+        const stageColor = this._stageColors[d.stage] || '#6b7280';
+
+        let html = '<div style="margin-bottom:12px;">'
+            + '<a href="#" onclick="event.preventDefault();app._dealView=\'pipeline\';app.renderDeals();" style="font-size:12px;color:var(--sf-brand);">← Back to Pipeline</a></div>';
+        html += '<div class="deal-detail-header"><div>'
+            + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">'
+            + '<h2 style="margin:0;">' + (d.name||'') + '</h2>'
+            + '<span class="deal-stage-badge" style="background:' + stageColor + ';">' + d.stage + '</span>'
+            + '<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:' + (health==='green'?'#dcfce7':health==='yellow'?'#fef3c7':'#fee2e2') + ';color:' + (health==='green'?'#166534':health==='yellow'?'#92400e':'#991b1b') + ';font-weight:600;">' + healthLabel + '</span></div>'
+            + (acct ? '<div style="font-size:13px;color:var(--sf-text-weak);"><a onclick="app.viewAccount(\'' + acct.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + acct.name + '</a></div>' : '')
+            + '</div><div style="display:flex;gap:6px;">'
+            + '<button class="btn-small" onclick="app.editDeal(\'' + d.id + '\')">Edit</button>'
+            + '<button class="btn-small" style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiAnalyzeDeal(\'' + d.id + '\')">✨ AI Advisor</button>'
+            + '<button class="btn-small" style="color:var(--sf-error);" onclick="if(confirm(\'Delete this deal?\')){app.data.deals=app.data.deals.filter(x=>x.id!==\'' + d.id + '\');firestoreDelete(\'deals\',\'' + d.id + '\');app.persist();app._dealView=\'pipeline\';app.renderDeals();}">Delete</button>'
+            + '</div></div>'
+            + '<div id="aiDealPanel"></div>';
+
+        html += '<div class="deal-metrics">'
+            + '<div class="deal-metric"><div class="deal-metric-label">Deal Size</div><div class="deal-metric-value">$' + (d.value||0) + 'M</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Probability</div><div class="deal-metric-value">' + (d.probability||0) + '%</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Weighted Value</div><div class="deal-metric-value">$' + ((d.value||0)*(d.probability||0)/100).toFixed(1) + 'M</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Close Date</div><div class="deal-metric-value">' + (d.closeDate||'TBD') + '</div></div>'
+            + '<div class="deal-metric"><div class="deal-metric-label">Deal Score</div><div class="deal-metric-value" style="color:' + (this._dealScore(d) >= 70 ? '#22c55e' : this._dealScore(d) >= 40 ? '#f59e0b' : '#9ca3af') + ';">' + this._dealScore(d) + '/100</div></div>'
+            + (d.feeStructure ? '<div class="deal-metric"><div class="deal-metric-label">Fee Structure</div><div class="deal-metric-value" style="font-size:13px;">' + d.feeStructure + '</div></div>' : '')
+            + (d.sector ? '<div class="deal-metric"><div class="deal-metric-label">Sector</div><div class="deal-metric-value" style="font-size:13px;">' + d.sector + '</div></div>' : '')
+            + (d.continuationVehicle ? '<div class="deal-metric"><div class="deal-metric-label">Continuation Vehicle</div><div class="deal-metric-value" style="font-size:13px;">' + d.continuationVehicle + '</div></div>' : '')
+            + (d.askingPrice ? '<div class="deal-metric"><div class="deal-metric-label">Asking Price</div><div class="deal-metric-value">$' + d.askingPrice + 'K</div></div>' : '')
+            + (d.sde ? '<div class="deal-metric"><div class="deal-metric-label">SDE</div><div class="deal-metric-value">$' + d.sde + 'K/yr' + (d.askingPrice ? ' <span style="font-size:11px;color:var(--sf-text-weak);">(' + (d.askingPrice/d.sde).toFixed(1) + 'x)</span>' : '') + '</div></div>' : '')
+            + (d.ownerInvolvement ? '<div class="deal-metric"><div class="deal-metric-label">Owner Involvement</div><div class="deal-metric-value" style="font-size:13px;">' + d.ownerInvolvement + '</div></div>' : '')
+            + (d.source ? '<div class="deal-metric"><div class="deal-metric-label">Deal Source</div><div class="deal-metric-value" style="font-size:13px;">' + d.source + (d.sourceContact ? ' <span style="color:var(--sf-text-weak);font-size:11px;">via ' + d.sourceContact + '</span>' : '') + '</div></div>' : '')
+            + '</div>';
+
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
+
+        html += '<div class="card"><div class="card-header">Stage Checklist — ' + d.stage + '</div><div style="padding:12px;"><ul class="deal-checklist">';
+        checklist.forEach((item,i) => {
+            html += '<li><input type="checkbox" ' + (completed[d.stage+'_'+i] ? 'checked' : '') + ' onchange="app.toggleDealCheck(\'' + d.id + '\',\'' + d.stage + '_' + i + '\',this.checked)"><span>' + item + '</span></li>';
+        });
+        html += '</ul></div></div>';
+
+        // Investment Committee Tracker
+        const icVotes = d._icVotes || [];
+        html += '<div class="card"><div class="card-header">Investment Committee <button class="btn-small" style="float:right;" onclick="app.addICVote(\'' + d.id + '\')">+ Record Vote</button></div><div style="padding:12px;">';
+        if (icVotes.length) {
+            icVotes.forEach(v => {
+                const vColor = v.vote === 'Approve' ? '#22c55e' : v.vote === 'Reject' ? '#ef4444' : '#f59e0b';
+                html += '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<span style="width:8px;height:8px;border-radius:50%;background:' + vColor + ';"></span>'
+                    + '<span style="font-weight:600;min-width:100px;">' + (v.member||'') + '</span>'
+                    + '<span style="padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;background:' + vColor + '22;color:' + vColor + ';">' + v.vote + '</span>'
+                    + '<span style="color:var(--sf-text-weak);flex:1;">' + (v.notes||'') + '</span>'
+                    + '<span style="color:var(--sf-text-weak);">' + (v.date||'').slice(0,10) + '</span></div>';
+            });
+            const approvals = icVotes.filter(v => v.vote === 'Approve').length;
+            const rejections = icVotes.filter(v => v.vote === 'Reject').length;
+            html += '<div style="margin-top:8px;font-size:11px;font-weight:600;">Result: <span style="color:#22c55e;">' + approvals + ' Approve</span> / <span style="color:#ef4444;">' + rejections + ' Reject</span> / <span style="color:#f59e0b;">' + (icVotes.length-approvals-rejections) + ' Conditional</span></div>';
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No IC votes recorded yet.</div>'; }
+        html += '</div></div>';
+
+        // Due Diligence Framework
+        const ddCategories = {
+            'Financial': ['Historical financials reviewed','Financial model built','Quality of earnings analysis','Working capital analysis','Debt/cap structure reviewed'],
+            'Legal': ['NDA executed','LOI/term sheet signed','Legal counsel engaged','Material contracts reviewed','Litigation check complete','IP review'],
+            'Operations': ['Management meetings conducted','Customer interviews','Supplier analysis','IT/systems review','Insurance review'],
+            'Market': ['Market sizing complete','Competitive landscape mapped','Regulatory environment assessed','Growth drivers identified'],
+            'Tax & Structure': ['Tax structure reviewed','Entity structure confirmed','Transfer pricing analysis','Tax due diligence report']
+        };
+        const ddStatus = d._ddStatus || {};
+        html += '<div class="card" style="grid-column:1/-1;"><div class="card-header">Due Diligence Framework</div><div style="padding:12px;">';
+        Object.entries(ddCategories).forEach(([cat, items]) => {
+            const done = items.filter((_,i) => ddStatus[cat+'_'+i]).length;
+            const pct = Math.round(done/items.length*100);
+            html += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+                + '<span style="font-size:12px;font-weight:700;">' + cat + '</span>'
+                + '<span style="font-size:11px;color:' + (pct===100?'var(--sf-success)':pct>=50?'var(--sf-warning)':'var(--sf-text-weak)') + ';font-weight:600;">' + pct + '% (' + done + '/' + items.length + ')</span></div>';
+            html += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin-bottom:6px;overflow:hidden;"><div style="width:' + pct + '%;background:' + (pct===100?'#22c55e':pct>=50?'#f59e0b':'#3b82f6') + ';border-radius:2px;"></div></div>';
+            items.forEach((item,i) => {
+                html += '<div style="padding:2px 0;font-size:12px;"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ' + (ddStatus[cat+'_'+i]?'checked':'') + ' onchange="app.toggleDD(\'' + d.id + '\',\'' + cat + '_' + i + '\',this.checked)"> ' + item + '</label></div>';
+            });
+            html += '</div>';
+        });
+        html += '</div></div>';
+
+        html += '<div class="card"><div class="card-header">Key Contacts <button class="btn-small" style="float:right;" onclick="app.addDealContact(\'' + d.id + '\')">+ Add</button></div><div style="padding:12px;">';
+        if (contacts.length) {
+            contacts.forEach(c => {
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--sf-border-weak);"><div><a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;font-weight:600;font-size:13px;">' + c.name + '</a><div style="font-size:11px;color:var(--sf-text-weak);">' + (c._role||'') + ' · ' + (c.title||'') + '</div></div></div>';
+            });
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No contacts linked yet.</div>'; }
+        html += '</div></div>';
+
+        html += '<div class="card"><div class="card-header">Activity Timeline</div><div style="padding:12px;">';
+        if (activities.length) {
+            activities.forEach(a => {
+                html += '<div class="deal-timeline-item"><div class="deal-timeline-dot" style="background:' + (a.type==='Call'?'#22c55e':a.type==='Email'?'#3b82f6':'#f59e0b') + ';"></div><div><div style="font-weight:600;">' + (a.subject||a.type||'') + '</div><div style="color:var(--sf-text-weak);">' + (a.date||a.dueDate||'') + (a.notes ? ' · ' + a.notes.slice(0,80) : '') + '</div></div></div>';
+            });
+        } else { html += '<div style="font-size:12px;color:var(--sf-text-weak);">No activities yet.</div>'; }
+        html += '<button class="btn-small" style="margin-top:8px;" onclick="app.openActivityForm();setTimeout(()=>{document.getElementById(\'activityDeal\').value=\'' + d.id + '\';},100);">+ Log Activity</button>';
+        html += '</div></div>';
+
+        html += '<div class="card"><div class="card-header">Notes & Details</div><div style="padding:12px;">';
+        if (d.techNotes) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Technical Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + esc(d.techNotes) + '</div></div>';
+        if (d.counterparties) html += '<div style="margin-bottom:8px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Counterparties</div><div style="font-size:12px;">' + esc(d.counterparties) + '</div></div>';
+        if (d.notes) html += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Notes</div><div style="font-size:12px;white-space:pre-wrap;">' + esc(d.notes) + '</div></div>';
+        if (!d.techNotes && !d.counterparties && !d.notes) html += '<div style="font-size:12px;color:var(--sf-text-weak);">No notes yet. Click Edit to add.</div>';
+        html += '</div></div>';
+
+        // Audit Log for this deal
+        const dealLog = (this.data._auditLog||[]).filter(l => l.id === d.id).slice(0,20);
+        if (dealLog.length) {
+            html += '<div class="card" style="grid-column:1/-1;"><div class="card-header">📋 Change Log</div><div style="padding:12px;max-height:200px;overflow-y:auto;">';
+            dealLog.forEach(l => {
+                const date = new Date(l.ts).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + new Date(l.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+                l.changes.forEach(c => {
+                    html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:11px;">'
+                        + '<span style="color:var(--sf-text-weak);min-width:110px;">' + date + '</span>'
+                        + '<span style="font-weight:600;min-width:80px;">' + c.field + '</span>'
+                        + '<span style="color:var(--sf-error);">' + c.from + '</span>'
+                        + '<span style="color:var(--sf-text-weak);">→</span>'
+                        + '<span style="color:var(--sf-success);">' + c.to + '</span>'
+                        + '</div>';
+                });
+            });
+            html += '</div></div>';
+        }
+
+        html += '</div>';
+        document.getElementById('content').innerHTML = html;
+    },
+
+    addICVote(dealId) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        const member = prompt('IC member name:');
+        if (!member) return;
+        const vote = prompt('Vote (Approve/Reject/Conditional):', 'Approve') || 'Approve';
+        const notes = prompt('Notes/conditions:', '') || '';
+        if (!d._icVotes) d._icVotes = [];
+        d._icVotes.push({member, vote, notes, date: new Date().toISOString()});
+        this.logChange('deal', dealId, d.name, [{field:'IC Vote', from:'', to: member + ': ' + vote}]);
+        firestoreUpsert('deals', d);
+        this.persist();
+        this._renderDealDetail();
+    },
+
+    toggleDD(dealId, key, checked) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        if (!d._ddStatus) d._ddStatus = {};
+        d._ddStatus[key] = checked;
+        firestoreUpsert('deals', d);
+        this.persist();
+    },
+
+    toggleDealCheck(dealId, key, checked) {
+        const d = this.data.deals.find(x => x.id === dealId);
+        if (!d) return;
+        if (!d._checklist) d._checklist = {};
+        d._checklist[key] = checked;
+        firestoreUpsert('deals', d);
+        this.persist();
+    },
+
+    addDealContact(dealId) {
+        const name = prompt('Contact name to link:');
+        if (!name) return;
+        const c = this.data.contacts.find(x => (x.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!c) { alert('Contact not found.'); return; }
+        const role = prompt('Role (e.g. Buyer, Seller, Counsel, Lender):', 'Buyer');
+        if (!this.data.dealContacts) this.data.dealContacts = [];
+        const dc = {id: 'dc-' + Date.now(), deal_id: dealId, contact_id: c.id, role: role||''};
+        this.data.dealContacts.push(dc);
+        firestoreUpsert('dealContacts', dc);
+        this.persist();
+        this._renderDealDetail();
+    },
+
+    _renderDealAnalytics() {
+        const stages = ['Prospect','Pitch','Mandate','Due Diligence','Negotiation','Closed Won','Closed Lost'];
+        const active = this.data.deals.filter(d => d.stage !== 'Closed Won' && d.stage !== 'Closed Lost');
+        const won = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lost = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const totalPipeline = active.reduce((s,d) => s + (d.value||0), 0);
+        const weighted = active.reduce((s,d) => s + (d.value||0)*((d.probability||0)/100), 0);
+        const wonVal = won.reduce((s,d) => s + (d.value||0), 0);
+        const winRate = (won.length + lost.length) > 0 ? Math.round(won.length / (won.length + lost.length) * 100) : 0;
+        const stalled = active.filter(d => this._dealHealth(d) === 'red');
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'
+            + '<h2 style="margin:0;">Pipeline Analytics</h2>'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab" onclick="app._dealView=\'pipeline\';app.renderDeals();">Board</button>'
+            + '<button class="cal-view-tab active" onclick="app._dealView=\'analytics\';app.renderDeals();">Analytics</button></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalPipeline.toFixed(0) + 'M</div><div class="ps-label">Total Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + weighted.toFixed(0) + 'M</div><div class="ps-label">Weighted Pipeline</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + wonVal.toFixed(0) + 'M</div><div class="ps-label">Closed Won</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + winRate + '%</div><div class="ps-label">Win Rate</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + active.length + '</div><div class="ps-label">Active Deals</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + this.data.deals.length + '</div><div class="ps-label">All Time</div></div>'
+            + '</div>';
+
+        html += '<div class="card"><div class="card-header">Deals by Stage</div><div style="padding:16px;">';
+        const maxVal = Math.max(...stages.map(s => this.data.deals.filter(d => d.stage===s).reduce((sum,d)=>sum+(d.value||0),0)), 1);
+        stages.forEach(s => {
+            const deals = this.data.deals.filter(d => d.stage===s);
+            const val = deals.reduce((sum,d)=>sum+(d.value||0),0);
+            const pct = val/maxVal*100;
+            html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+                + '<div style="width:100px;font-size:12px;font-weight:600;text-align:right;">' + s + '</div>'
+                + '<div style="flex:1;background:var(--sf-bg);border-radius:4px;height:24px;"><div style="width:' + pct + '%;background:' + (this._stageColors[s]||'#888') + ';height:100%;border-radius:4px;min-width:' + (val>0?'2px':'0') + ';"></div></div>'
+                + '<div style="width:80px;font-size:12px;color:var(--sf-text-weak);">' + deals.length + ' · $' + val.toFixed(0) + 'M</div></div>';
+        });
+        html += '</div></div>';
+
+        if (stalled.length) {
+            html += '<div class="card" style="border-color:var(--sf-error);"><div class="card-header" style="color:var(--sf-error);">⚠ Stalled Deals (14+ days no activity)</div><div style="padding:12px;">';
+            stalled.forEach(d => {
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--sf-border-weak);cursor:pointer;" onclick="app.viewDealDetail(\'' + d.id + '\')">'
+                    + '<div><div style="font-weight:600;font-size:13px;">' + d.name + '</div><div style="font-size:11px;color:var(--sf-text-weak);">' + d.stage + ' · $' + (d.value||0) + 'M</div></div>'
+                    + '<button class="btn-small" onclick="event.stopPropagation();app.openActivityForm();setTimeout(()=>{document.getElementById(\'activityDeal\').value=\'' + d.id + '\';},100);">Log Activity</button></div>';
+            });
+            html += '</div></div>';
+        }
+
+        // Deal Source Analytics
+        const sources = {};
+        this.data.deals.forEach(d => {
+            const s = d.source || 'Unknown';
+            if (!sources[s]) sources[s] = {count: 0, value: 0, won: 0, wonValue: 0};
+            sources[s].count++;
+            sources[s].value += (d.value||0);
+            if (d.stage === 'Closed Won') { sources[s].won++; sources[s].wonValue += (d.value||0); }
+        });
+        const srcEntries = Object.entries(sources).sort((a,b) => b[1].value - a[1].value);
+        if (srcEntries.length) {
+            const maxSrcVal = Math.max(...srcEntries.map(([,v]) => v.value), 1);
+            html += '<div class="card"><div class="card-header">Deal Source Attribution</div><div style="padding:16px;">';
+            srcEntries.forEach(([name, data]) => {
+                const convRate = data.count > 0 ? Math.round(data.won / data.count * 100) : 0;
+                html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+                    + '<div style="width:120px;font-size:12px;font-weight:600;text-align:right;">' + name + '</div>'
+                    + '<div style="flex:1;background:var(--sf-bg);border-radius:4px;height:24px;"><div style="width:' + (data.value/maxSrcVal*100) + '%;background:var(--sf-brand);height:100%;border-radius:4px;min-width:' + (data.value>0?'2px':'0') + ';"></div></div>'
+                    + '<div style="width:160px;font-size:11px;color:var(--sf-text-weak);">' + data.count + ' deals · $' + data.value.toFixed(0) + 'M · <span style="color:' + (convRate >= 50 ? 'var(--sf-success)' : convRate >= 25 ? 'var(--sf-warning)' : 'var(--sf-text-weak)') + ';font-weight:600;">' + convRate + '% won</span></div></div>';
+            });
+            html += '</div></div>';
+        }
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    // === EVENTS (separate from Activities) ===
+
+    saveEvent(e) {
+        e.preventDefault();
+        const id = document.getElementById('eventId').value;
+        const evt = {
+            name: document.getElementById('eventName').value,
+            type: document.getElementById('eventType').value,
+            status: document.getElementById('eventStatus').value,
+            start: document.getElementById('eventStart').value || null,
+            end: document.getElementById('eventEnd').value || null,
+            address: document.getElementById('eventAddress').value || null,
+            accountId: document.getElementById('eventAccount').value || null,
+            contactId: document.getElementById('eventContact').value || null,
+            attendees: document.getElementById('eventAttendees').value || null,
+            description: document.getElementById('eventDescription').value || null,
+        };
+        if (id) {
+            const idx = this.data.events.findIndex(x => x.id === id);
+            if (idx >= 0) { this.data.events[idx] = {...this.data.events[idx], ...evt}; firestoreUpsert('events', this.data.events[idx]); }
+        } else {
+            const newEvt = {...evt, id: 'evt-' + Date.now(), createdAt: new Date().toISOString()};
+            if (this._pendingTemplate) { if (this._pendingTemplate._checklist) newEvt._checklist = JSON.parse(JSON.stringify(this._pendingTemplate._checklist)); this._pendingTemplate = null; }
+            this.data.events.push(newEvt);
+            firestoreUpsert('events', newEvt);
+        }
+        this.persist();
+        if (evt.address) this.geocodeAddress(evt.address);
+        this.closeModal('modalEvent');
+        this.render();
+    },
+
+    openEventForm() {
+        ['eventId','eventName','eventStart','eventEnd','eventAddress','eventAccount','eventContact','eventAttendees','eventDescription'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        document.getElementById('eventType').value = 'Meeting';
+        document.getElementById('eventStatus').value = 'Scheduled';
+        this.openModal('modalEvent');
+    },
+
+    editEvent(id) {
+        const evt = this.data.events.find(x => x.id === id);
+        if (!evt) return;
+        document.getElementById('eventId').value = evt.id;
+        document.getElementById('eventName').value = evt.name || '';
+        document.getElementById('eventType').value = evt.type || 'Meeting';
+        document.getElementById('eventStatus').value = evt.status || 'Scheduled';
+        document.getElementById('eventStart').value = evt.start || '';
+        document.getElementById('eventEnd').value = evt.end || '';
+        document.getElementById('eventAddress').value = evt.address || '';
+        document.getElementById('eventAccount').value = evt.accountId || '';
+        document.getElementById('eventContact').value = evt.contactId || '';
+        document.getElementById('eventAttendees').value = evt.attendees || '';
+        document.getElementById('eventDescription').value = evt.description || '';
+        this.openModal('modalEvent');
+    },
+
+    deleteEvent(id) {
+        if (!confirm('Delete this event?')) return;
+        this.data.events = this.data.events.filter(x => x.id !== id); firestoreDelete('events', id);
+        this.persist();
+        if (this.currentView === 'activityDetail') { this.currentView = 'activities'; }
+        this.render();
+    },
+
+    viewEvent(id) {
+        this.currentRecord = this.data.events.find(x => x.id === id);
+        if (!this.currentRecord) return;
+        this.currentView = 'activityDetail';
+        location.hash = 'activityDetail:' + id;
+        this.render();
+    },
+
+    _evtFilter: {type: '', status: '', text: ''},
+
+    _fmtDate(dd) {
+        if (!dd) return '';
+        const d = new Date(dd + (dd.includes('T') ? '' : 'T12:00:00'));
+        if (isNaN(d)) return dd;
+        return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " " + String.fromCharCode(39) + String(d.getFullYear()).slice(-2);
+    },
+
+    _evtViewMode: 'cards',
+
+    renderEvents() {
+        const ef = this._evtFilter;
+        const scheduled = this.data.events.filter(e => e.status === 'Scheduled').length;
+        const completed = this.data.events.filter(e => e.status === 'Completed').length;
+        const cancelled = this.data.events.filter(e => e.status === 'Cancelled').length;
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', 'Birthday Party':'🎂', 'Happy Hour':'🍻', Other:'📋'};
+
+        let filtered = [...this.data.events];
+        if (ef.type) filtered = filtered.filter(e => e.type === ef.type);
+        if (ef.status === 'scheduled') filtered = filtered.filter(e => e.status === 'Scheduled');
+        else if (ef.status === 'completed') filtered = filtered.filter(e => e.status === 'Completed');
+        else if (ef.status === 'cancelled') filtered = filtered.filter(e => e.status === 'Cancelled');
+        if (ef.text) { const lt = ef.text.toLowerCase(); filtered = filtered.filter(e => {
+            const con = this.data.contacts.find(c => c.id === e.contactId);
+            const acct = this.data.accounts.find(a => a.id === e.accountId);
+            return (e.name||'').toLowerCase().includes(lt) || (e.address||'').toLowerCase().includes(lt) || (e.description||'').toLowerCase().includes(lt) || (con && con.name.toLowerCase().includes(lt)) || (acct && acct.name.toLowerCase().includes(lt));
+        }); }
+
+        const sorted = this._applySortToList(filtered.map(e => {
+            const con = this.data.contacts.find(c => c.id === e.contactId);
+            const acct = this.data.accounts.find(a => a.id === e.accountId);
+            const contactCount = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees||'').toLowerCase().includes((c.name||'').toLowerCase())).length;
+            return {...e, _contact: con ? con.name : '', _account: acct ? acct.name : '', _start: e.start || '', _contactCount: contactCount, _accountCount: acct ? 1 : 0};
+        }), 'events');
+        if (!this._sortState.col || this._sortState.view !== 'events') {
+            sorted.sort((a,b) => (b._start||'').localeCompare(a._start||''));
+        }
+
+        const upcoming = this.data.events.filter(e => e.status === 'Scheduled' && e.start && e.start >= new Date().toISOString().slice(0,10)).sort((a,b) => (a.start||'').localeCompare(b.start||''));
+        const bdaySuggestions = this.data.contacts.filter(c => {
+            if (!c.birthdate) return false;
+            const now = new Date(), bd = new Date(c.birthdate);
+            bd.setFullYear(now.getFullYear());
+            if (bd < now) bd.setFullYear(now.getFullYear() + 1);
+            const diff = Math.floor((bd - now) / 86400000);
+            return diff >= 0 && diff <= 30;
+        });
+        const neglected = this.data.contacts.filter(c => {
+            const attended = (this.data.events||[]).some(ev => (ev.attendees||'').toLowerCase().includes((c.name||'').toLowerCase()) || ev.contactId === c.id);
+            return !attended && c.tier === '1-VIP';
+        }).slice(0, 5);
+        const vm = this._evtViewMode || 'cards';
+
+        const html = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                <h2 style="margin:0;">Events</h2>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <div class="cal-view-tabs">
+                        <button class="cal-view-tab ${vm==='cards'?'active':''}" onclick="app._evtViewMode='cards'; app.renderEvents();">Cards</button>
+                        <button class="cal-view-tab ${vm==='list'?'active':''}" onclick="app._evtViewMode='list'; app.renderEvents();">List</button>
+                        <button class="cal-view-tab ${vm==='timeline'?'active':''}" onclick="app._evtViewMode='timeline'; app.renderEvents();">Timeline</button>
+                    </div>
+                    <button class="btn-primary" onclick="app.openEventForm()" style="padding:2px 10px; font-size:12px; height:26px;">+ New Event</button>
+                </div>
+            </div>
+            <!-- Upcoming nudges -->
+            ${bdaySuggestions.length ? '<div style="background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;"><span style="font-weight:700;">🎂 Upcoming birthdays:</span> ' + bdaySuggestions.map(c => { const bd = new Date(c.birthdate); bd.setFullYear(new Date().getFullYear()); if(bd<new Date()) bd.setFullYear(new Date().getFullYear()+1); const diff = Math.floor((bd-new Date())/86400000); return '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name.split(' ')[0] + '</a> (' + diff + 'd)'; }).join(', ') + ' — <a href="#" onclick="event.preventDefault();app.openEventForm();" style="color:var(--sf-brand);">Plan a party?</a></div>' : ''}
+            ${neglected.length ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;"><span style="font-weight:700;">💡 VIPs never invited to an event:</span> ' + neglected.map(c => '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name + '</a>').join(', ') + '</div>' : ''}
+            <div class="stat-cards" style="margin-bottom:8px;">
+                <div class="stat-card" style="cursor:pointer; ${!ef.status?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status=''; app.renderEvents();">
+                    <div class="label">Total</div><div class="value">${this.fmt(this.data.events.length)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='scheduled'?'border-bottom:3px solid var(--sf-brand);':''}" onclick="app._evtFilter.status='${ef.status==='scheduled'?'':'scheduled'}'; app.renderEvents();">
+                    <div class="label">Upcoming</div><div class="value" style="color:var(--sf-brand);">${this.fmt(scheduled)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='completed'?'border-bottom:3px solid var(--sf-success);':''}" onclick="app._evtFilter.status='${ef.status==='completed'?'':'completed'}'; app.renderEvents();">
+                    <div class="label">Past</div><div class="value" style="color:var(--sf-success);">${this.fmt(completed)}</div>
+                </div>
+                <div class="stat-card" style="cursor:pointer; ${ef.status==='cancelled'?'border-bottom:3px solid var(--sf-text-weakest);':''}" onclick="app._evtFilter.status='${ef.status==='cancelled'?'':'cancelled'}'; app.renderEvents();">
+                    <div class="label">Cancelled</div><div class="value" style="color:var(--sf-text-weakest);">${this.fmt(cancelled)}</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:10px;">
+                <input type="text" placeholder="Search events…" value="${ef.text}" oninput="app._evtFilter.text=this.value; app.renderEvents();" style="flex:1; min-height:32px; padding:4px 10px; font-size:13px;">
+                <select onchange="app._evtFilter.type=this.value; app.renderEvents();" style="min-height:32px; padding:4px; font-size:12px;">
+                    <option value="" ${!ef.type?'selected':''}>All Types</option>
+                    ${Object.keys(typeIcons).map(t => `<option value="${t}" ${ef.type===t?'selected':''}>${typeIcons[t]} ${t}</option>`).join('')}
+                </select>
+                ${ef.text||ef.type||ef.status ? `<button class="btn-small" onclick="app._evtFilter={type:'',status:'',text:''}; app.renderEvents();">Clear</button>` : ''}
+            </div>
+            ${vm === 'cards' ? this._renderEventCards(sorted, typeIcons) : vm === 'timeline' ? this._renderEventTimeline(sorted, typeIcons) : this._renderEventList(sorted, typeIcons)}
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    _evtTheme(type) {
+        const themes = {
+            'Dinner': {grad:'linear-gradient(135deg,#92400e,#b45309)', icon:'🍷', bg:'#fffbeb'},
+            'Lunch': {grad:'linear-gradient(135deg,#9a3412,#ea580c)', icon:'🍽️', bg:'#fff7ed'},
+            'Birthday Party': {grad:'linear-gradient(135deg,#7e22ce,#c026d3)', icon:'🎂', bg:'#faf5ff'},
+            'Happy Hour': {grad:'linear-gradient(135deg,#1d4ed8,#2563eb)', icon:'🍻', bg:'#eff6ff'},
+            'Meeting': {grad:'linear-gradient(135deg,#0f766e,#14b8a6)', icon:'📅', bg:'#f0fdfa'},
+            'Conference': {grad:'linear-gradient(135deg,#4338ca,#6366f1)', icon:'🏛️', bg:'#eef2ff'},
+            'Networking': {grad:'linear-gradient(135deg,#b91c1c,#ef4444)', icon:'🤝', bg:'#fef2f2'},
+            'Presentation': {grad:'linear-gradient(135deg,#0369a1,#0ea5e9)', icon:'📊', bg:'#f0f9ff'},
+            'Call': {grad:'linear-gradient(135deg,#166534,#22c55e)', icon:'📞', bg:'#f0fdf4'},
+        };
+        return themes[type] || {grad:'linear-gradient(135deg,#374151,#6b7280)', icon:'📋', bg:'#f9fafb'};
+    },
+
+    _contactReliability(contactId) {
+        const events = this.data.events.filter(e => {
+            const statuses = e.contactStatuses || {};
+            return statuses[contactId];
+        });
+        if (events.length === 0) return null;
+        const attended = events.filter(e => (e.contactStatuses||{})[contactId] === 'Attended').length;
+        const invited = events.length;
+        return {attended, invited, pct: Math.round(attended / invited * 100)};
+    },
+
+    _renderEventCards(sorted, ti) {
+        const now = new Date();
+        let html = '<div style="display:flex;gap:6px;margin-bottom:12px;"><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Dinner Party\')">🍷 Quick Dinner</button><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Birthday Party\')">🎂 Quick Birthday</button><button class="btn-small" onclick="app._evtCreateFromTemplate(\'Happy Hour\')">🍻 Quick Happy Hour</button></div>';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;">';
+        sorted.forEach(e => {
+            const guests = this._getEventGuests(e);
+            const rsvp = this._getEventRSVP(e, guests);
+            const startD = e.start ? new Date(e.start) : null;
+            const diff = startD ? Math.ceil((startD - now) / 86400000) : null;
+            const countdown = diff !== null ? (diff > 0 ? (diff === 1 ? 'Tomorrow' : diff + ' days away') : diff === 0 ? 'TODAY' : Math.abs(diff) + 'd ago') : '';
+            const cdColor = diff !== null ? (diff === 0 ? '#22c55e' : diff <= 3 && diff > 0 ? '#f59e0b' : diff > 0 ? '#3b82f6' : '#9ca3af') : '#9ca3af';
+            const theme = this._evtTheme(e.type);
+            const budget = (e._budget||[]).reduce((s,b)=>s+b.amount,0);
+            const checkDone = (e._checklist||[]).filter(c=>c.done).length;
+            const checkTotal = (e._checklist||[]).length;
+            const costPerHead = guests.length > 0 && budget > 0 ? '$' + Math.round(budget/guests.length) : '';
+
+            html += '<div style="background:#fff;border-radius:12px;overflow:hidden;cursor:pointer;transition:all 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.08);" onmouseover="this.style.boxShadow=\'0 8px 24px rgba(0,0,0,0.12)\';this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.boxShadow=\'0 1px 3px rgba(0,0,0,0.08)\';this.style.transform=\'none\'" onclick="app.viewEvent(\'' + e.id + '\')">';
+            html += '<div style="' + theme.grad + ';padding:16px 18px 14px;color:#fff;position:relative;">';
+            html += '<div style="position:absolute;top:12px;right:14px;font-size:32px;opacity:0.3;">' + theme.icon + '</div>';
+            html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;opacity:0.85;font-weight:600;">' + (e.type||'Event') + '</div>';
+            html += '<div style="font-size:18px;font-weight:800;margin:6px 0 4px;line-height:1.2;">' + (e.name||'Untitled') + '</div>';
+            if (startD) html += '<div style="font-size:12px;opacity:0.9;">' + startD.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) + ' · ' + startD.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + '</div>';
+            if (e.address) html += '<div style="font-size:11px;opacity:0.75;margin-top:3px;">📍 ' + esc(e.address) + '</div>';
+            html += '</div>';
+
+            html += '<div style="padding:12px 18px;">';
+            if (countdown) html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:' + cdColor + ';background:' + cdColor + '15;padding:3px 10px;border-radius:12px;margin-bottom:8px;">' + (diff === 0 ? '🔴 ' : '') + countdown + '</div> ';
+            if (e.status === 'Completed') html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:#22c55e;background:#dcfce7;padding:3px 10px;border-radius:12px;margin-bottom:8px;">✓ Completed</div> ';
+
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">';
+            html += '<div style="display:flex;gap:2px;">';
+            const rsvpBar = rsvp.total > 0 ? [
+                {pct: rsvp.yes/rsvp.total*100, color:'#22c55e'},
+                {pct: rsvp.maybe/rsvp.total*100, color:'#f59e0b'},
+                {pct: rsvp.no/rsvp.total*100, color:'#ef4444'},
+                {pct: rsvp.pending/rsvp.total*100, color:'#e5e7eb'}
+            ] : [];
+            html += '<div style="display:flex;width:80px;height:6px;border-radius:3px;overflow:hidden;background:#e5e7eb;">';
+            rsvpBar.forEach(b => { if (b.pct > 0) html += '<div style="width:' + b.pct + '%;background:' + b.color + ';"></div>'; });
+            html += '</div></div>';
+            html += '<div style="font-size:11px;color:var(--sf-text-weak);">' + guests.length + ' guest' + (guests.length!==1?'s':'') + '</div>';
+            html += '</div>';
+
+            html += '<div style="display:flex;gap:8px;font-size:10px;font-weight:600;">';
+            html += '<span style="color:#22c55e;">' + rsvp.yes + ' yes</span>';
+            html += '<span style="color:#f59e0b;">' + rsvp.maybe + ' maybe</span>';
+            html += '<span style="color:#ef4444;">' + rsvp.no + ' no</span>';
+            html += '<span style="color:#9ca3af;">' + rsvp.pending + ' pending</span>';
+            html += '</div>';
+
+            const bottomTags = [];
+            if (budget > 0) bottomTags.push('💰 $' + budget.toFixed(0));
+            if (costPerHead) bottomTags.push('👤 ' + costPerHead + '/head');
+            if (checkTotal > 0) bottomTags.push('☑ ' + checkDone + '/' + checkTotal);
+            if ((e._potluck||[]).length) bottomTags.push('🍽 ' + (e._potluck||[]).filter(p=>p.claimed).length + '/' + (e._potluck||[]).length + ' claimed');
+            if (bottomTags.length) {
+                html += '<div style="display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;font-size:10px;color:var(--sf-text-weak);flex-wrap:wrap;">';
+                bottomTags.forEach(t => { html += '<span>' + t + '</span>'; });
+                html += '</div>';
+            }
+
+            if (guests.length) {
+                html += '<div style="display:flex;margin-top:8px;">';
+                guests.slice(0,8).forEach((g,i) => {
+                    const colors = ['#a094ed','#7f8de1','#e6853d','#48c3cc','#f472b6','#22c55e','#f59e0b','#6366f1'];
+                    html += '<div style="width:26px;height:26px;border-radius:50%;background:' + colors[i%8] + ';color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:' + (i>0?'-6':'0') + 'px;" title="' + (g.name||'') + '">' + (g.name||'').split(' ').map(s=>s[0]).join('').slice(0,2) + '</div>';
+                });
+                if (guests.length > 8) html += '<div style="width:26px;height:26px;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px;">+' + (guests.length-8) + '</div>';
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+        });
+        html += '</div>';
+        return html;
+    },
+
+    duplicateEvent(id) {
+        const orig = this.data.events.find(x => x.id === id);
+        if (!orig) return;
+        const clone = JSON.parse(JSON.stringify(orig));
+        clone.id = 'evt-' + Date.now();
+        clone.name = (clone.name||'') + ' (Copy)';
+        clone.status = 'Scheduled';
+        clone.createdAt = new Date().toISOString();
+        if (clone._checklist) clone._checklist.forEach(c => c.done = false);
+        if (clone.contactStatuses) Object.keys(clone.contactStatuses).forEach(k => clone.contactStatuses[k] = 'Invited');
+        delete clone._recap;
+        this.data.events.push(clone);
+        firestoreUpsert('events', clone);
+        this.persist();
+        this.viewEvent(clone.id);
+    },
+
+    _evtCreateFromTemplate(type) {
+        const templates = {
+            'Dinner Party': {type:'Dinner', name:'Dinner Party', _checklist:[{text:'Choose restaurant/venue',done:false},{text:'Send invitations',done:false},{text:'Confirm headcount',done:false},{text:'Make reservation',done:false},{text:'Plan menu/wine',done:false}]},
+            'Birthday Party': {type:'Birthday Party', name:'Birthday Party', _checklist:[{text:'Choose venue',done:false},{text:'Order cake',done:false},{text:'Send invitations',done:false},{text:'Plan decorations',done:false},{text:'Arrange gifts',done:false},{text:'Music/playlist',done:false}]},
+            'Happy Hour': {type:'Happy Hour', name:'Happy Hour', _checklist:[{text:'Pick bar/venue',done:false},{text:'Send invite',done:false},{text:'Confirm headcount',done:false}]}
+        };
+        const tmpl = templates[type] || {};
+        this.openEventForm();
+        setTimeout(() => {
+            if (tmpl.type) document.getElementById('eventType').value = tmpl.type;
+            if (tmpl.name) document.getElementById('eventName').value = tmpl.name;
+        }, 100);
+        this._pendingTemplate = tmpl;
+    },
+
+    _renderEventTimeline(sorted, ti) {
+        const grouped = {};
+        sorted.forEach(e => { const m = (e.start||'').slice(0,7) || 'No date'; if (!grouped[m]) grouped[m] = []; grouped[m].push(e); });
+        let html = '<div style="padding-left:20px;">';
+        Object.keys(grouped).sort().reverse().forEach(m => {
+            const label = m === 'No date' ? 'No Date' : new Date(m+'-15').toLocaleDateString('en-US',{month:'long',year:'numeric'});
+            html += '<div style="font-size:13px;font-weight:700;color:var(--sf-text-weak);margin:16px 0 8px -20px;">' + label + '</div>';
+            grouped[m].forEach(e => {
+                const guests = this._getEventGuests(e);
+                html += '<div class="deal-timeline-item" style="cursor:pointer;" onclick="app.viewEvent(\'' + e.id + '\')">'
+                    + '<div class="deal-timeline-dot" style="background:' + (e.status==='Completed'?'#22c55e':'#3b82f6') + ';"></div>'
+                    + '<div style="flex:1;"><div style="font-weight:600;">' + (ti[e.type]||'') + ' ' + (e.name||'') + '</div>'
+                    + '<div style="font-size:11px;color:var(--sf-text-weak);">' + (e.start ? new Date(e.start).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '') + (e.address ? ' · ' + e.address : '') + ' · ' + guests.length + ' guests</div></div></div>';
+            });
+        });
+        return html + '</div>';
+    },
+
+    _renderEventList(sorted, ti) {
+        return '<div class="card" style="overflow:hidden;"><div class="table-container" style="max-height:calc(100vh - 300px);overflow-y:auto;"><table class="compact-table"><thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Location</th><th>Guests</th><th>RSVP</th><th>Status</th></tr></thead><tbody>'
+            + sorted.map(e => {
+                const guests = this._getEventGuests(e);
+                const rsvp = this._getEventRSVP(e, guests);
+                return '<tr style="cursor:pointer;" onclick="app.viewEvent(\'' + e.id + '\')"><td style="color:var(--sf-brand);font-weight:600;">' + (e.name||'') + '</td><td>' + (ti[e.type]||'') + ' ' + (e.type||'') + '</td><td>' + (e.start ? new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '') + '</td><td>' + (e.address||'') + '</td><td>' + guests.length + '</td><td style="font-size:11px;"><span style="color:var(--sf-success);">' + rsvp.yes + '✓</span> <span style="color:var(--sf-warning);">' + rsvp.maybe + '?</span> <span style="color:var(--sf-error);">' + rsvp.no + '✕</span></td><td>' + (e.status||'') + '</td></tr>';
+            }).join('') + '</tbody></table></div></div>';
+    },
+
+    _getEventGuests(e) {
+        const guests = [];
+        if (e.contactId) { const c = this.data.contacts.find(x => x.id === e.contactId); if (c) guests.push(c); }
+        if (e.attendees) {
+            e.attendees.split(',').map(s=>s.trim()).filter(Boolean).forEach(name => {
+                const c = this.data.contacts.find(x => (x.name||'').toLowerCase() === name.toLowerCase());
+                if (c && !guests.find(g => g.id === c.id)) guests.push(c);
+                else if (!c) guests.push({id: null, name: name});
+            });
+        }
+        if (e._guests) e._guests.forEach(g => { if (!guests.find(x => x.id === g.id)) guests.push(g); });
+        return guests;
+    },
+
+    _getEventRSVP(e, guests) {
+        const statuses = e.contactStatuses || {};
+        let yes=0, no=0, maybe=0, pending=0;
+        guests.forEach(g => {
+            const s = statuses[g.id] || 'Invited';
+            if (s === 'Attending' || s === 'Attended') yes++;
+            else if (s === 'Declined') no++;
+            else if (s === 'Maybe') maybe++;
+            else pending++;
+        });
+        return {yes, no, maybe, pending, total: guests.length};
+    },
+
+    evtSendUpdate(eventId) {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        const emails = guests.map(g => g.pe_email || g.we_email || g.email).filter(Boolean);
+        if (!emails.length) { alert('No guest emails found.'); return; }
+        const subject = prompt('Email subject:', 'Update: ' + e.name);
+        if (!subject) return;
+        const body = prompt('Message:');
+        if (!body) return;
+        const mailto = 'mailto:' + emails.join(',') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+        window.open(mailto);
+    },
+
+    evtAddGuests(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const name = prompt('Contact name to add as guest:');
+        if (!name) return;
+        const c = this.data.contacts.find(x => (x.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!c) { alert('Contact not found. Try a different name.'); return; }
+        const current = (e.attendees||'').split(',').map(s=>s.trim()).filter(Boolean);
+        if (!current.includes(c.name)) { current.push(c.name); e.attendees = current.join(', '); }
+        if (!e.contactStatuses) e.contactStatuses = {};
+        e.contactStatuses[c.id] = 'Invited';
+        firestoreUpsert('events', e);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    evtAddBudgetItem(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('Budget item (e.g. Venue, Catering, Decor):');
+        if (!item) return;
+        const amount = parseFloat(prompt('Amount ($):','0')) || 0;
+        if (!e._budget) e._budget = [];
+        e._budget.push({item, amount, paid: false});
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    evtToggleBudgetPaid(eventId, idx) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e || !e._budget) return;
+        e._budget[idx].paid = !e._budget[idx].paid;
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    evtAddChecklist(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('Checklist item:');
+        if (!item) return;
+        if (!e._checklist) e._checklist = [];
+        e._checklist.push({text: item, done: false});
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    evtToggleCheck(eventId, idx) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e || !e._checklist) return;
+        e._checklist[idx].done = !e._checklist[idx].done;
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    evtAddPotluck(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const item = prompt('What to bring (e.g. Appetizer, Wine, Dessert):');
+        if (!item) return;
+        const who = prompt('Who is bringing it? (leave blank for unclaimed):','');
+        if (!e._potluck) e._potluck = [];
+        e._potluck.push({item, who: who||'', claimed: !!who});
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    evtMarkAttendance(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        if (!e.contactStatuses) e.contactStatuses = {};
+        guests.forEach(g => {
+            if (g.id && e.contactStatuses[g.id] === 'Attending') {
+                e.contactStatuses[g.id] = 'Attended';
+                const today = new Date().toISOString().split('T')[0];
+                const contact = this.data.contacts.find(c => c.id === g.id);
+                if (contact) { contact.la = today; contact.updated_at = new Date().toISOString(); firestoreUpsert('contacts', contact); }
+            }
+        });
+        e.status = 'Completed';
+        firestoreUpsert('events', e);
+        this.persist(); this.renderEventDetail();
+    },
+
+    evtSendThankYou(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const guests = this._getEventGuests(e);
+        const attended = guests.filter(g => g.id && (e.contactStatuses||{})[g.id] === 'Attended');
+        const emails = attended.map(g => g.pe_email || g.we_email || g.email).filter(Boolean);
+        if (!emails.length) { alert('No attendee emails found.'); return; }
+        const mailto = 'mailto:' + emails.join(',') + '?subject=' + encodeURIComponent('Thank you for coming to ' + e.name) + '&body=' + encodeURIComponent('Hi everyone,\n\nThank you so much for coming to ' + e.name + '! It was great seeing you.\n\nBest regards');
+        window.open(mailto);
+    },
+
+    evtSaveRecap(eventId) {
+        const e = this.data.events.find(x => x.id === eventId);
+        if (!e) return;
+        const recap = prompt('Event recap notes:', e._recap || '');
+        if (recap === null) return;
+        e._recap = recap;
+        firestoreUpsert('events', e); this.persist(); this.renderEventDetail();
+    },
+
+    renderEventDetail() {
+        const e = this.currentRecord;
+        if (!e) { this.currentView = 'activities'; this.render(); return; }
+        const con = this.data.contacts.find(c => c.id === e.contactId);
+        const acct = this.data.accounts.find(a => a.id === e.accountId);
+        const relatedContacts = this.data.contacts.filter(c => c.id === e.contactId || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
+        const relatedAccounts = acct ? [acct] : [];
+        const actTypeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+        const relatedActivities = this.data.activities.filter(a => (e.activityIds || []).includes(a.id));
+        const typeIcons = {Meeting:'📅', Conference:'🏛️', Lunch:'🍽️', Dinner:'🍷', Call:'📞', Presentation:'📊', Networking:'🤝', 'Birthday Party':'🎂', 'Happy Hour':'🍻', Other:'📋'};
+        const guests = this._getEventGuests(e);
+        const rsvp = this._getEventRSVP(e, guests);
+        const sfField = (label, value, fieldKey, type) => {
+            if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
+            return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineEventEdit('${e.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
+        };
+        const html = `
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div style="width:40px; height:40px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; background:var(--sf-bg);">${typeIcons[e.type]||'📋'}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">${e.type || 'Event'}</div>
+                        <div class="sf-hl-title">${e.name || '(no name)'}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button onclick="app.editEvent('${e.id}')">Edit</button>
+                        <button onclick="app.duplicateEvent('${e.id}')">Duplicate</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiMeetingPrep('${e.id}')">✨ Prep Me</button>
+                        ${e.status === 'Scheduled' ? `<button onclick="app.data.events.find(x=>x.id==='${e.id}').status='Completed'; app.persist(); app.renderEventDetail();">Mark Complete</button>` : ''}
+                        <button onclick="if(confirm('Delete this event?')){app.deleteEvent('${e.id}')}" style="color:var(--sf-error);">Delete</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">Start</div><div class="sf-hl-field-value">${e.start ? new Date(e.start).toLocaleString() : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">End</div><div class="sf-hl-field-value">${e.end ? new Date(e.end).toLocaleString() : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Address</div><div class="sf-hl-field-value">${e.address||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Status</div><div class="sf-hl-field-value">${e.status||'—'}</div></div>
+                    <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${acct ? `<a onclick="app.viewAccount('${acct.id}')" style="cursor:pointer; color:var(--sf-brand);">${acct.name}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Contact</div><div class="sf-hl-field-value">${con ? `<a onclick="app.viewContact('${con.id}')" style="cursor:pointer; color:var(--sf-brand);">${con.name}</a>` : '—'}</div></div>
+                </div>
+            </div>
+
+            <div id="aiMeetingPanel"></div>
+            <!-- Two-column layout like contacts -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN — Details -->
+                <div style="flex:1; min-width:0;">
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:20px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Event Information</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Event Name', e.name, 'name')}
+                            ${sfField('Type', (typeIcons[e.type]||'') + ' ' + (e.type||''), 'type', 'select-event-type')}
+                            ${sfField('Status', e.status, 'status', 'select-event-status')}
+                            ${sfField('Start Date/Time', e.start ? new Date(e.start).toLocaleString() : null, 'start', 'datetime-local')}
+                            ${sfField('End Date/Time', e.end ? new Date(e.end).toLocaleString() : null, 'end', 'datetime-local')}
+                            ${sfField('Address', e.address, 'address')}
+                        </div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Relationships</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Account', acct ? `<a onclick="app.viewAccount('${acct.id}')" style="color:var(--sf-brand); cursor:pointer;">${acct.name}</a>` : null)}
+                        </div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
+                        <div class="sf-detail-field"><div class="sf-detail-field-value" style="cursor:pointer; white-space:pre-wrap;" onclick="app.inlineEventEdit('${e.id}','description','textarea',this)" title="Click to edit">${e.description || '—'}</div></div>
+                    </div>
+
+                    <!-- Activities -->
+                    <div class="related-list card" style="margin-bottom:12px;">
+                        <div class="card-header">
+                            <span class="obj-icon obj-icon-activity" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
+                            Activities <span class="related-count">(${relatedActivities.length})</span>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search activities…" oninput="app.searchRelatedActivity(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtActivityResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:240px;"></div>
+                            </div>
+                        </div>
+                        <div class="card-body-flush">
+                        ${relatedActivities.length ? `<table><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Date</th><th>Status</th></tr></thead><tbody>
+                            ${relatedActivities.slice(0,10).map(a => {
+                                const aCon = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                                return `<tr style="cursor:pointer;" onclick="app.editActivity('${a.id}')">
+                                    <td>${actTypeIcons[a.type]||''} ${a.type||''}</td>
+                                    <td style="color:var(--sf-brand); font-weight:600;">${a.subject||''}</td>
+                                    <td>${aCon ? aCon.name : ''}</td>
+                                    <td>${this._fmtDate(a.dueDate||a.due_date||'')}</td>
+                                    <td>${a.status||''}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related activities.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Contacts -->
+                    <div class="related-list card" style="margin-bottom:12px;">
+                        <div class="card-header">
+                            <span class="obj-icon obj-icon-contact" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">C</span>
+                            Contacts <span class="related-count">(${relatedContacts.length})</span>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search contacts…" oninput="app.searchRelatedContact(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtContactResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:200px;"></div>
+                            </div>
+                        </div>
+                        <div class="card-body-flush">
+                        ${relatedContacts.length ? `<table><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Reliability</th><th>RSVP</th></tr></thead><tbody>
+                            ${relatedContacts.map(c => { const evtStatus = (e.contactStatuses||{})[c.id] || 'Invited'; const rel = this._contactReliability(c.id); return `<tr>
+                                <td><a onclick="app.viewContact('${c.id}')" style="cursor:pointer; color:var(--sf-brand); font-weight:600;">${c.name}</a></td>
+                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pc_number','tel',this)">${c.pc_number||c.mobile||''}</td>
+                                <td style="cursor:cell;" ondblclick="app.inlineEditContactFromEvent('${c.id}','pe_email','email',this)">${c.pe_email||c.email||''}</td>
+                                <td>${rel ? '<span style="font-size:11px;font-weight:600;color:' + (rel.pct >= 80 ? '#22c55e' : rel.pct >= 50 ? '#f59e0b' : '#ef4444') + ';">' + rel.pct + '% (' + rel.attended + '/' + rel.invited + ')</span>' : '<span style="font-size:11px;color:var(--sf-text-weak);">New</span>'}</td>
+                                <td><select onchange="app.setEventContactStatus('${e.id}','${c.id}',this.value)" style="padding:1px 4px; font-size:11px; min-height:20px;"><option value="Invited" ${evtStatus==='Invited'?'selected':''}>⏳ Invited</option><option value="Attending" ${evtStatus==='Attending'?'selected':''}>✓ Attending</option><option value="Maybe" ${evtStatus==='Maybe'?'selected':''}>? Maybe</option><option value="Declined" ${evtStatus==='Declined'?'selected':''}>✕ Declined</option><option value="Attended" ${evtStatus==='Attended'?'selected':''}>✓ Attended</option></select></td>
+                            </tr>`; }).join('')}
+                        </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related contacts.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Accounts -->
+                    <div class="related-list card" style="margin-bottom:12px;">
+                        <div class="card-header">
+                            <span class="obj-icon obj-icon-account" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">A</span>
+                            Accounts <span class="related-count">(${relatedAccounts.length})</span>
+                            <div style="margin-left:auto; position:relative;">
+                                <input type="text" placeholder="Search accounts…" oninput="app.searchRelatedAccount(this,'${e.id}')" style="width:160px; padding:2px 8px; font-size:11px; min-height:24px;">
+                                <div id="evtAccountResults" style="display:none; position:absolute; right:0; top:28px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:200; max-height:200px; overflow-y:auto; min-width:200px;"></div>
+                            </div>
+                        </div>
+                        <div class="card-body-flush">
+                        ${relatedAccounts.length ? `<table><thead><tr><th>Name</th><th>Industry</th><th>Type</th></tr></thead><tbody>
+                            ${relatedAccounts.map(a => `<tr style="cursor:pointer;" onclick="app.viewAccount('${a.id}')">
+                                <td style="color:var(--sf-brand); font-weight:600;">${a.name}</td>
+                                <td>${a.industry||''}</td>
+                                <td>${a.type||''}</td>
+                            </tr>`).join('')}
+                        </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No related accounts.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Files -->
+                    <div class="related-list card">
+                        <div class="card-header">
+                            <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
+                            Files <span class="related-count">(${(e.files||[]).length})</span>
+                            <button class="btn-small" style="margin-left:auto;" onclick="app.addEventFile('${e.id}')">Add File</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                        ${(e.files||[]).length ? (e.files||[]).map((f,i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                            <a href="${f.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">📄 ${f.name}</a>
+                            <button class="btn-small" onclick="app.removeEventFile('${e.id}',${i})" style="padding:1px 6px; font-size:11px; color:var(--sf-error);">✕</button>
+                        </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files.</div>'}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN — Planning & Post-Event -->
+                <div style="width:380px; flex-shrink:0; position:sticky; top:0;">
+                    <!-- RSVP Summary & Actions -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Guest Management</div>
+                        <div style="padding:12px 16px;">
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-success);">${rsvp.yes}</div><div style="font-size:9px;color:var(--sf-text-weak);">YES</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-warning);">${rsvp.maybe}</div><div style="font-size:9px;color:var(--sf-text-weak);">MAYBE</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-error);">${rsvp.no}</div><div style="font-size:9px;color:var(--sf-text-weak);">NO</div></div>
+                                <div><div style="font-size:18px;font-weight:700;color:var(--sf-text-weak);">${rsvp.pending}</div><div style="font-size:9px;color:var(--sf-text-weak);">PENDING</div></div>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:4px;">
+                                <button class="btn-small" onclick="app.evtAddGuests('${e.id}')" style="width:100%;">+ Add Guests from CRM</button>
+                                <button class="btn-small" onclick="app.evtSendUpdate('${e.id}')" style="width:100%;">📧 Send Update to Guests</button>
+                                ${e.status !== 'Completed' ? '<button class="btn-small" onclick="app.evtMarkAttendance(\'' + e.id + '\')" style="width:100%;">✓ Mark Attendance & Complete</button>' : '<button class="btn-small" onclick="app.evtSendThankYou(\'' + e.id + '\')" style="width:100%;">💌 Send Thank You</button>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Budget -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">💰 Budget</span>
+                            <button class="btn-small" onclick="app.evtAddBudgetItem('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._budget||[]).length ? (e._budget||[]).map((b,i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ${b.paid?'checked':''} onchange="app.evtToggleBudgetPaid('${e.id}',${i})"><span style="${b.paid?'text-decoration:line-through;color:var(--sf-text-weak);':''}">${b.item}</span></label>
+                                <span style="font-weight:600;">$${b.amount.toFixed(0)}</span>
+                            </div>`).join('') + '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;font-weight:700;"><span>Total</span><span>$' + (e._budget||[]).reduce((s,b)=>s+b.amount,0).toFixed(0) + '</span></div>' : '<div style="font-size:12px;color:var(--sf-text-weak);">No budget items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Checklist -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">☑ Planning Checklist</span>
+                            <button class="btn-small" onclick="app.evtAddChecklist('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._checklist||[]).length ? (e._checklist||[]).map((c,i) => `<div style="padding:3px 0;font-size:12px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ${c.done?'checked':''} onchange="app.evtToggleCheck('${e.id}',${i})"><span style="${c.done?'text-decoration:line-through;color:var(--sf-text-weak);':''}">${c.text}</span></label>
+                            </div>`).join('') : '<div style="font-size:12px;color:var(--sf-text-weak);">No checklist items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Potluck -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">🍽 Potluck / Contributions</span>
+                            <button class="btn-small" onclick="app.evtAddPotluck('${e.id}')">+ Add</button>
+                        </div>
+                        <div style="padding:8px 16px;">
+                            ${(e._potluck||[]).length ? (e._potluck||[]).map(p => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid var(--sf-border-weak);">
+                                <span>${p.item}</span><span style="color:${p.claimed?'var(--sf-success)':'var(--sf-warning)'}; font-weight:600;">${p.who || 'Unclaimed'}</span>
+                            </div>`).join('') : '<div style="font-size:12px;color:var(--sf-text-weak);">No items yet.</div>'}
+                        </div>
+                    </div>
+
+                    <!-- Post-Event Recap -->
+                    ${e.status === 'Completed' ? `<div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">📝 Event Recap</span>
+                            <button class="btn-small" onclick="app.evtSaveRecap('${e.id}')">Edit</button>
+                        </div>
+                        <div style="padding:12px 16px;font-size:12px;white-space:pre-wrap;color:var(--sf-text-weak);">${e._recap || 'No recap yet. Click Edit to add notes about what went well.'}</div>
+                    </div>` : ''}
+
+                    <!-- Notes -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-bottom:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Notes</div>
+                        <div style="padding:12px 16px;">
+                            <textarea onblur="app.saveEventNotes('${e.id}', this.value)" style="width:100%; min-height:80px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(e.notes || '').replace(/</g,'&lt;')}</textarea>
+                        </div>
+                    </div>
+
+                    ${e.address ? `
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">📍 Map</div>
+                        <div id="eventMapContainer" style="height:200px; border-radius:0 0 4px 4px;"></div>
+                    </div>` : ''}
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'activities\'; app.render();">Events</a> / ' + esc(e.name || '(no name)');
+        if (e.address) this._initEventMap(e.address);
+    },
+
+    async _initEventMap(address) {
+        const container = document.getElementById('eventMapContainer');
+        if (!container || !window.google?.maps?.Map) return;
+        const coords = await this.geocodeAddress(address);
+        if (!coords) { container.innerHTML = `<iframe src="https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed" style="width:100%;height:100%;border:none;"></iframe>`; return; }
+        const map = new google.maps.Map(container, {center: coords, zoom: 15, gestureHandling: 'greedy'});
+        const pin = document.createElement('div');
+        pin.innerHTML = '<div style="width:30px;height:30px;border-radius:50%;background:#e6853d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📅</div>';
+        const marker = new google.maps.Marker({position: coords, map, title: address});
+        const iw = new google.maps.InfoWindow({content: `<div style="font-weight:600;">${address}</div><div style="margin-top:4px;"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="color:#0176d3;">Directions ↗</a></div>`});
+        marker.addListener('click', () => iw.open({anchor: marker, map}));
+        iw.open({anchor: marker, map});
+    },
+
+    inlineEventEdit(eventId, field, type, el) {
+        if (el.querySelector('select') || el.querySelector('input') || el.querySelector('textarea')) return;
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        const currentVal = evt[field] || '';
+        if (type === 'select-event-type') {
+            const opts = ['Meeting','Conference','Lunch','Dinner','Call','Presentation','Networking','Other'];
+            el.innerHTML = `<select onchange="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">${opts.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}</select>`;
+            const sel = el.querySelector('select'); sel.focus(); sel.click(); return;
+        }
+        if (type === 'select-event-status') {
+            const opts = ['Scheduled','Completed','Cancelled'];
+            el.innerHTML = `<select onchange="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; cursor:pointer;">${opts.map(o => `<option value="${o}" ${currentVal===o?'selected':''}>${o}</option>`).join('')}</select>`;
+            const sel = el.querySelector('select'); sel.focus(); sel.click(); return;
+        }
+        if (type === 'textarea') {
+            el.innerHTML = `<textarea onblur="app.saveEventField('${eventId}','${field}',this.value)" style="width:100%; padding:4px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px; min-height:60px;">${currentVal.replace(/</g,'&lt;')}</textarea>`;
+            el.querySelector('textarea').focus();
+        } else {
+            el.innerHTML = `<input type="${type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveEventField('${eventId}','${field}',this.value)" onkeydown="if(event.key==='Enter')this.blur();" style="width:100%; padding:2px 6px; font-size:13px; border:1px solid var(--sf-brand); border-radius:3px;">`;
+            const input = el.querySelector('input');
+            input.focus(); input.select();
+        }
+    },
+
+    saveEventField(eventId, field, value) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt[field] = value || null;
+        firestoreUpsert('events', evt);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    saveEventNotes(eventId, value) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt.notes = value || null;
+        firestoreUpsert('events', evt);
+        this.persist();
+    },
+
+    inlineEditContactFromEvent(contactId, field, type, el) {
+        if (el.querySelector('input')) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const currentVal = contact[field] || '';
+        el.innerHTML = `<input type="${type||'text'}" value="${currentVal.replace(/"/g,'&quot;')}" onblur="app.saveContactFromEvent('${contactId}','${field}',this.value)" onkeydown="if(event.key==='Enter')this.blur();" style="width:100%; padding:1px 4px; font-size:12px; border:1px solid var(--sf-brand); border-radius:2px;">`;
+        const input = el.querySelector('input');
+        input.focus(); input.select();
+    },
+
+    saveContactFromEvent(contactId, field, value) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        contact[field] = value || null;
+        firestoreUpsert('contacts', contact);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    setEventContactStatus(eventId, contactId, status) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.contactStatuses) evt.contactStatuses = {};
+        evt.contactStatuses[contactId] = status;
+        firestoreUpsert('events', evt);
+        this.persist();
+    },
+
+    searchRelatedActivity(input, eventId) {
+        const dd = document.getElementById('evtActivityResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const evt = this.data.events.find(x => x.id === eventId);
+        const linked = evt ? (evt.activityIds || []) : [];
+        const matches = this.data.activities.filter(a => !linked.includes(a.id) && ((a.subject||'').toLowerCase().includes(term) || (a.type||'').toLowerCase().includes(term))).slice(0, 8);
+        const actIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkActivityToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${actIcons[a.type]||''} ${esc(a.subject||'(no subject)')}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkActivityToEvent(eventId, activityId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.activityIds) evt.activityIds = [];
+        if (!evt.activityIds.includes(activityId)) evt.activityIds.push(activityId);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    searchRelatedContact(input, eventId) {
+        const dd = document.getElementById('evtContactResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const matches = this.data.contacts.filter(c => (c.name||'').toLowerCase().includes(term)).slice(0, 8);
+        dd.innerHTML = matches.map(c => `<div onclick="app.linkContactToEvent('${eventId}','${c.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${esc(c.name)}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkContactToEvent(eventId, contactId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        if (!evt.contactId) { evt.contactId = contactId; }
+        else {
+            const existing = evt.attendees || '';
+            if (!existing.toLowerCase().includes(contact.name.toLowerCase())) {
+                evt.attendees = existing ? existing + ', ' + contact.name : contact.name;
+            }
+        }
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    searchRelatedAccount(input, eventId) {
+        const dd = document.getElementById('evtAccountResults');
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dd.style.display = 'none'; return; }
+        const matches = this.data.accounts.filter(a => (a.name||'').toLowerCase().includes(term)).slice(0, 8);
+        dd.innerHTML = matches.map(a => `<div onclick="app.linkAccountToEvent('${eventId}','${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">${esc(a.name)}</div>`).join('') || '<div style="padding:6px 12px; font-size:12px; color:var(--sf-text-weak);">No matches</div>';
+        dd.style.display = 'block';
+    },
+
+    linkAccountToEvent(eventId, accountId) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        evt.accountId = accountId;
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    addEventFile(eventId) {
+        const name = prompt('File name:');
+        if (!name) return;
+        const url = prompt('OneDrive URL:');
+        if (!url) return;
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt) return;
+        if (!evt.files) evt.files = [];
+        evt.files.push({name, url});
+        firestoreUpsert('events', evt);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    removeEventFile(eventId, idx) {
+        const evt = this.data.events.find(x => x.id === eventId);
+        if (!evt || !evt.files) return;
+        evt.files.splice(idx, 1);
+        firestoreUpsert('events', evt);
+        this.persist();
+        this.renderEventDetail();
+    },
+
+    // === Calendar ===
+    _calMonth: null,
+    _calYear: null,
+    _calView: 'month',
+    _gcalEvents: [],
+    _gcalCalendars: [],
+    _gcalHiddenCals: {},
+    _travelEvents: [],
+
+    async fetchCalendarList() {
+        if (!this.isGmailConnected()) return;
+        try {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            this._gcalCalendars = (data.items || []).map(c => ({id: c.id, name: c.summary, color: c.backgroundColor || '#4285f4', primary: c.primary || false}));
+            const saved = localStorage.getItem('matthewsCRM_hiddenCals');
+            if (saved) try { this._gcalHiddenCals = JSON.parse(saved); } catch {}
+        } catch {}
+    },
+
+    async fetchAllCalendarEvents(start, end) {
+        if (!this.isGmailConnected()) return [];
+        if (!this._gcalCalendars.length) await this.fetchCalendarList();
+        const visible = this._gcalCalendars.filter(c => !this._gcalHiddenCals[c.id]);
+        const all = [];
+        for (const cal of visible) {
+            try {
+                const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(cal.id) + '/events?timeMin=' + start + '&timeMax=' + end + '&maxResults=250&singleEvents=true&orderBy=startTime', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                (data.items || []).forEach(e => {
+                    const attendees = (e.attendees || []);
+                    const myStatus = attendees.find(a => a.self)?.responseStatus || '';
+                    all.push({
+                        id: e.id, calId: cal.id, name: e.summary || '(no title)',
+                        start: e.start?.dateTime || e.start?.date || '',
+                        end: e.end?.dateTime || e.end?.date || '',
+                        address: e.location || '', description: e.description || '',
+                        _source: 'gcal', _color: cal.color, _calName: cal.name,
+                        _htmlLink: e.htmlLink, _attendees: attendees,
+                        _myStatus: myStatus, _organizer: e.organizer?.email || '',
+                        _allDay: !e.start?.dateTime
+                    });
+                });
+            } catch {}
+        }
+        return all;
+    },
+
+    async fetchGoogleCalendar(start, end) {
+        return this.fetchAllCalendarEvents(start, end);
+    },
+
+    toggleCalendarVisibility(calId) {
+        this._gcalHiddenCals[calId] = !this._gcalHiddenCals[calId];
+        localStorage.setItem('matthewsCRM_hiddenCals', JSON.stringify(this._gcalHiddenCals));
+        this._gcalEvents = [];
+        this.renderCalendar();
+    },
+
+    async rsvpEvent(calId, eventId, status) {
+        if (!this.isGmailConnected()) return;
+        try {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            if (!res.ok) return;
+            const evt = await res.json();
+            const attendees = (evt.attendees || []).map(a => a.self ? {...a, responseStatus: status} : a);
+            await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                method: 'PATCH',
+                headers: {'Authorization': 'Bearer ' + this._gmailToken, 'Content-Type': 'application/json'},
+                body: JSON.stringify({attendees})
+            });
+            this._gcalEvents = [];
+            this.renderCalendar();
+        } catch(e) { console.log('RSVP failed:', e); }
+    },
+
+    async createGcalEvent(summary, startDT, endDT, location, description, attendeeEmails) {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        const body = {summary, start: {dateTime: startDT, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}, end: {dateTime: endDT, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}};
+        if (location) body.location = location;
+        if (description) body.description = description;
+        if (attendeeEmails && attendeeEmails.length) body.attendees = attendeeEmails.map(e => ({email: e}));
+        try {
+            const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + this._gmailToken, 'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (res.ok) { this._gcalEvents = []; this.renderCalendar(); this.updateStatus('Event created on Google Calendar', true); }
+        } catch(e) { console.log('Create gcal event failed:', e); }
+    },
+
+    async deleteGcalEvent(calId, eventId) {
+        if (!this.isGmailConnected()) return;
+        if (!confirm('Delete this event from Google Calendar?')) return;
+        try {
+            await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events/' + eventId, {
+                method: 'DELETE', headers: {'Authorization': 'Bearer ' + this._gmailToken}
+            });
+            this._gcalEvents = []; this.renderCalendar();
+        } catch {}
+    },
+
+    async searchGmailTravel() {
+        if (!this.isGmailConnected()) { this.connectGmail(); return; }
+        this._travelEvents = [];
+        const queries = ['from:flights@google.com', 'subject:flight confirmation', 'subject:booking confirmation hotel', 'subject:reservation confirmation', 'subject:itinerary', 'subject:e-ticket'];
+        const allMessages = [];
+        for (const q of queries) {
+            try {
+                const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?q=' + encodeURIComponent(q) + '&maxResults=10', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (data.messages) allMessages.push(...data.messages);
+            } catch {}
+        }
+        const seen = new Set();
+        const unique = allMessages.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; }).slice(0, 20);
+        for (const msg of unique) {
+            try {
+                const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + msg.id + '?format=metadata&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=From', {
+                    headers: {'Authorization': 'Bearer ' + this._gmailToken}
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                const headers = data.payload?.headers || [];
+                const subject = headers.find(h => h.name === 'Subject')?.value || '';
+                const date = headers.find(h => h.name === 'Date')?.value || '';
+                const from = headers.find(h => h.name === 'From')?.value || '';
+                const snippet = data.snippet || '';
+                const type = this._detectTravelType(subject, from, snippet);
+                if (type) {
+                    this._travelEvents.push({id: msg.id, subject, date, from, snippet, type, _parsed: this._parseTravelSnippet(snippet, subject, type)});
+                }
+            } catch {}
+        }
+        this.renderCalendar();
+    },
+
+    _detectTravelType(subject, from, snippet) {
+        const s = (subject + ' ' + from + ' ' + snippet).toLowerCase();
+        if (s.includes('flight') || s.includes('airline') || s.includes('boarding') || s.includes('e-ticket') || from.includes('flights@google.com')) return 'flight';
+        if (s.includes('hotel') || s.includes('resort') || s.includes('check-in') || s.includes('accommodation')) return 'hotel';
+        if (s.includes('rental car') || s.includes('car rental') || s.includes('hertz') || s.includes('enterprise') || s.includes('avis')) return 'car';
+        if (s.includes('reservation') || s.includes('booking') || s.includes('itinerary')) return 'travel';
+        return null;
+    },
+
+    _parseTravelSnippet(snippet, subject, type) {
+        const result = {dates: [], confirmation: '', details: subject};
+        const dateRe = /\b(\w{3,9}\s+\d{1,2},?\s+\d{4})\b/g;
+        let m; while ((m = dateRe.exec(snippet)) !== null) result.dates.push(m[1]);
+        const confRe = /(?:confirmation|booking|record locator|PNR)[:\s#]*([A-Z0-9]{5,8})/i;
+        const confM = confRe.exec(snippet);
+        if (confM) result.confirmation = confM[1];
+        return result;
+    },
+
+    renderCalendar() {
+        const today = new Date();
+        if (!this._calYear) this._calYear = today.getFullYear();
+        if (this._calMonth == null) this._calMonth = today.getMonth();
+        const year = this._calYear, month = this._calMonth;
+        const MN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const todayStr = today.toISOString().split('T')[0];
+        const v = this._calView || 'month';
+        const cals = this._gcalCalendars || [];
+        const calToggles = cals.length ? cals.map(c => '<label class="cal-toggle"><input type="checkbox" ' + (this._gcalHiddenCals[c.id] ? '' : 'checked') + ' onchange="app.toggleCalendarVisibility(\'' + c.id.replace(/'/g,"\\'") + '\')"><span class="cal-toggle-dot" style="background:' + c.color + '"></span>' + c.name + '</label>').join('') : '<div style="font-size:11px;color:var(--sf-text-weak);">Connect Google to see calendars</div>';
+        const header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<button class="btn-small" onclick="app._gcalEvents=[];app.calNav(-1);">◀</button>'
+            + '<h2 style="margin:0;min-width:180px;text-align:center;">' + MN[month] + ' ' + year + '</h2>'
+            + '<button class="btn-small" onclick="app._gcalEvents=[];app.calNav(1);">▶</button>'
+            + '<button class="btn-small" onclick="app._calMonth=' + today.getMonth() + ';app._calYear=' + today.getFullYear() + ';app._gcalEvents=[];app.renderCalendar();">Today</button>'
+            + '</div>'
+            + '<div style="display:flex;align-items:center;gap:6px;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='month'?'active':'') + '" onclick="app._calView=\'month\';app.renderCalendar();">Month</button>'
+            + '<button class="cal-view-tab ' + (v==='week'?'active':'') + '" onclick="app._calView=\'week\';app.renderCalendar();">Week</button>'
+            + '<button class="cal-view-tab ' + (v==='day'?'active':'') + '" onclick="app._calView=\'day\';app.renderCalendar();">Day</button>'
+            + '<button class="cal-view-tab ' + (v==='agenda'?'active':'') + '" onclick="app._calView=\'agenda\';app.renderCalendar();">Agenda</button>'
+            + '</div>'
+            + (this.isGmailConnected() ? '' : '<button class="btn-small" onclick="app.connectGmail()">Connect Google</button>')
+            + '<button class="btn-small" onclick="app.searchGmailTravel();">✈ Travel</button>'
+            + '<button class="btn-small" onclick="app.openCalNewEvent();">+ Event</button>'
+            + '</div></div>';
+        let body = '';
+        if (v === 'month') body = this._renderCalMonth(year, month, todayStr);
+        else if (v === 'week') body = this._renderCalWeek(year, month, todayStr);
+        else if (v === 'day') body = this._renderCalDay(year, month, todayStr);
+        else if (v === 'agenda') body = this._renderCalAgenda(todayStr);
+        const sidebar = '<div class="cal-sidebar">'
+            + '<div class="cal-sidebar-section"><div class="cal-sidebar-title">My Calendars</div>' + calToggles + '</div>'
+            + '<div class="cal-sidebar-section"><div class="cal-sidebar-title">Legend</div>'
+            + '<div style="font-size:11px;display:flex;flex-direction:column;gap:4px;">'
+            + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e6853d;"></span> CRM Events</span>'
+            + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#dcfce7;"></span> Birthdays</span>'
+            + '</div></div>'
+            + (this._travelEvents.length ? '<div class="cal-sidebar-section"><div class="cal-sidebar-title">✈ Travel</div>' + this._travelEvents.slice(0,5).map(t => '<div class="cal-travel-card"><div style="font-size:10px;text-transform:uppercase;color:' + (t.type==='flight'?'#1a73e8':t.type==='hotel'?'#e8710a':'#666') + ';font-weight:700;">' + t.type + '</div><div style="font-size:12px;font-weight:600;margin:2px 0;">' + esc(t.subject.slice(0,50)) + '</div>' + (t._parsed.confirmation ? '<div class="flight-num">Conf: ' + esc(t._parsed.confirmation) + '</div>' : '') + '<div style="font-size:10px;color:#888;">' + esc(t._parsed.dates.join(' - ')) + '</div></div>').join('') + '</div>' : '')
+            + '</div>';
+        document.getElementById('content').innerHTML = '<div style="display:flex;gap:0;min-height:calc(100vh - 140px);">'
+            + '<div style="flex:1;min-width:0;">' + header + body + '</div>' + sidebar + '</div>';
+        if (this.isGmailConnected() && !this._gcalEvents.length) {
+            const s = new Date(year, month, 1).toISOString();
+            const e = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+            this.fetchGoogleCalendar(s, e).then(evts => { this._gcalEvents = evts; if (evts.length) this.renderCalendar(); });
+            if (!this._gcalCalendars.length) this.fetchCalendarList().then(() => this.renderCalendar());
+        }
+    },
+
+    calNav(dir) {
+        this._calMonth += dir;
+        if (this._calMonth > 11) { this._calMonth = 0; this._calYear++; }
+        if (this._calMonth < 0) { this._calMonth = 11; this._calYear--; }
+        this.renderCalendar();
+    },
+
+    openCalNewEvent(dateStr) {
+        this.openEventForm();
+        if (dateStr) setTimeout(() => { const el = document.getElementById('eventStart'); if (el) el.value = dateStr + 'T09:00'; }, 100);
+    },
+
+    _getEventsForDate(dateStr) {
+        const crm = this.data.events.filter(e => (e.start||'').slice(0,10) === dateStr).map(e => ({...e, _source:'crm', _color:'#e6853d'}));
+        const gcal = this._gcalEvents.filter(e => (e.start||'').slice(0,10) === dateStr);
+        const bdays = this.data.contacts.filter(c => { if (!c.birthdate) return false; const bd = c.birthdate.slice(5); return bd === dateStr.slice(5); }).map(c => ({id:c.id, name:'🎂 '+c.name.split(' ')[0], _source:'bday', _color:'#dcfce7', start:dateStr}));
+        return [...bdays, ...crm, ...gcal];
+    },
+
+    _renderCalMonth(year, month, todayStr) {
+        const first = new Date(year, month, 1), last = new Date(year, month+1, 0);
+        const startDay = first.getDay(), daysInMonth = last.getDate();
+        const days = [];
+        const prev = new Date(year, month, 0);
+        for (let i = startDay-1; i >= 0; i--) days.push({day: prev.getDate()-i, other: true});
+        for (let d = 1; d <= daysInMonth; d++) days.push({day: d, other: false});
+        const rem = 7 - (days.length % 7); if (rem < 7) for (let i = 1; i <= rem; i++) days.push({day: i, other: true});
+        return '<div class="cal-grid">' + 'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',').map(d => '<div class="cal-hdr">' + d + '</div>').join('')
+            + days.map(d => {
+                const ds = d.other ? '' : year + '-' + String(month+1).padStart(2,'0') + '-' + String(d.day).padStart(2,'0');
+                const evts = ds ? this._getEventsForDate(ds) : [];
+                return '<div class="cal-day ' + (d.other?'other':'') + ' ' + (ds===todayStr?'today':'') + '" onclick="' + (!d.other ? "app.openCalNewEvent('" + ds + "');" : '') + '">'
+                    + '<div class="cal-day-n">' + d.day + '</div>'
+                    + evts.slice(0,3).map(e => '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');" title="' + (e.name||'').replace(/"/g,'&quot;') + '">' + (e.name||'').slice(0,20) + '</div>').join('')
+                    + (evts.length > 3 ? '<div style="font-size:9px;color:var(--sf-text-weak);">+' + (evts.length-3) + ' more</div>' : '')
+                    + '</div>';
+            }).join('') + '</div>';
+    },
+
+    _renderCalWeek(year, month, todayStr) {
+        const d = new Date(year, month, new Date().getDate());
+        const sun = new Date(d); sun.setDate(d.getDate() - d.getDay());
+        const days = []; for (let i = 0; i < 7; i++) { const dd = new Date(sun); dd.setDate(sun.getDate()+i); days.push(dd); }
+        const hours = []; for (let h = 6; h <= 21; h++) hours.push(h);
+        let html = '<div class="cal-week-grid"><div class="cal-week-hdr"></div>';
+        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        days.forEach((dd,i) => { const ds = dd.toISOString().slice(0,10); html += '<div class="cal-week-hdr ' + (ds===todayStr?'today':'') + '">' + dayNames[i] + ' ' + dd.getDate() + '</div>'; });
+        hours.forEach(h => {
+            html += '<div class="cal-week-time">' + (h>12?h-12:h) + (h>=12?'p':'a') + '</div>';
+            days.forEach(dd => {
+                const ds = dd.toISOString().slice(0,10);
+                const hStr = String(h).padStart(2,'0');
+                const evts = this._getEventsForDate(ds).filter(e => (e.start||'').includes('T' + hStr));
+                html += '<div class="cal-week-cell" onclick="app.openCalNewEvent(\'' + ds + '\')">' + evts.map(e => '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">' + (e.name||'').slice(0,15) + '</div>').join('') + '</div>';
+            });
+        });
+        return html + '</div>';
+    },
+
+    _renderCalDay(year, month, todayStr) {
+        const ds = todayStr;
+        const hours = []; for (let h = 6; h <= 21; h++) hours.push(h);
+        const evts = this._getEventsForDate(ds);
+        let html = '<div class="cal-day-view-grid">';
+        hours.forEach(h => {
+            const hStr = String(h).padStart(2,'0');
+            const hEvts = evts.filter(e => (e.start||'').includes('T' + hStr));
+            html += '<div class="cal-week-time">' + (h>12?h-12:h) + ':00' + (h>=12?'pm':'am') + '</div>';
+            html += '<div class="cal-week-cell" style="height:50px;" onclick="app.openCalNewEvent(\'' + ds + '\')">';
+            hEvts.forEach(e => { html += '<div class="cal-e" style="background:' + (e._color||'#4285f4') + ';color:#fff;padding:2px 6px;" onclick="event.stopPropagation();app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">' + (e.name||'') + ' <span style="opacity:0.7;font-size:9px;">' + (e.start||'').slice(11,16) + '</span></div>'; });
+            html += '</div>';
+        });
+        return html + '</div>';
+    },
+
+    _renderCalAgenda(todayStr) {
+        const start = new Date(); const days = [];
+        for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate()+i); days.push(d.toISOString().slice(0,10)); }
+        let html = '<div style="border:1px solid var(--sf-border-weak);border-radius:4px;overflow:hidden;">';
+        let hasEvents = false;
+        days.forEach(ds => {
+            const evts = this._getEventsForDate(ds);
+            if (!evts.length) return;
+            hasEvents = true;
+            const d = new Date(ds+'T12:00:00');
+            const dayLabel = ds === todayStr ? 'Today' : ds === new Date(new Date().setDate(new Date().getDate()+1)).toISOString().slice(0,10) ? 'Tomorrow' : d.toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'});
+            html += '<div style="background:var(--sf-bg-alt);padding:6px 12px;font-size:11px;font-weight:700;color:var(--sf-text-weak);border-bottom:1px solid var(--sf-border-weak);">' + dayLabel + '</div>';
+            evts.forEach(e => {
+                const time = (e.start||'').includes('T') ? new Date(e.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : 'All day';
+                const contact = e._attendees ? this._findContactByEmail(e._attendees.map(a=>a.email)) : null;
+                html += '<div class="cal-agenda-item" onclick="app.calEventClick(\'' + e._source + '\',\'' + e.id + '\');">'
+                    + '<div class="cal-agenda-time">' + time + '</div>'
+                    + '<div class="cal-agenda-dot" style="background:' + (e._color||'#4285f4') + ';"></div>'
+                    + '<div class="cal-agenda-info"><div class="cal-agenda-title">' + (e.name||'') + '</div>'
+                    + '<div class="cal-agenda-meta">' + (e._calName||e._source||'') + (e.address ? ' · ' + e.address : '') + (contact ? ' · <a onclick="event.stopPropagation();app.viewContact(\'' + contact.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + contact.name + '</a>' : '') + '</div>'
+                    + (e._myStatus ? '<div style="margin-top:2px;">' + this._rsvpBadge(e._myStatus) + '</div>' : '')
+                    + '</div></div>';
+            });
+        });
+        if (!hasEvents) html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No events in the next 14 days.</div>';
+        return html + '</div>';
+    },
+
+    _rsvpBadge(status) {
+        const colors = {accepted:'#2e844a', tentative:'#fe9339', declined:'#ba0517', needsAction:'#888'};
+        const labels = {accepted:'Accepted', tentative:'Maybe', declined:'Declined', needsAction:'Pending'};
+        return '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:' + (colors[status]||'#888') + '22;color:' + (colors[status]||'#888') + ';font-weight:600;">' + (labels[status]||status) + '</span>';
+    },
+
+    _findContactByEmail(emails) {
+        if (!emails || !emails.length) return null;
+        return this.data.contacts.find(c => emails.some(e => e === c.pe_email || e === c.we_email || e === c.email));
+    },
+
+    calEventClick(source, id) {
+        if (source === 'crm') { this.viewEvent(id); return; }
+        if (source === 'bday') { this.viewContact(id); return; }
+        const evt = this._gcalEvents.find(e => e.id === id);
+        if (!evt) return;
+        const contact = evt._attendees ? this._findContactByEmail(evt._attendees.map(a=>a.email)) : null;
+        const rsvpHtml = evt._attendees && evt._attendees.length ? '<div style="margin-top:8px;"><div style="font-size:11px;font-weight:700;margin-bottom:4px;">RSVP</div><div style="display:flex;gap:4px;">'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='accepted'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'accepted\')">Accept</button>'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='tentative'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'tentative\')">Maybe</button>'
+            + '<button class="rsvp-btn ' + (evt._myStatus==='declined'?'active':'') + '" onclick="app.rsvpEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\',\'declined\')">Decline</button>'
+            + '</div></div>' : '';
+        const attendeeList = (evt._attendees||[]).slice(0,10).map(a => { const c = this._findContactByEmail([a.email]); return '<div style="font-size:11px;padding:2px 0;">' + (c ? '<a onclick="app.viewContact(\'' + c.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + c.name + '</a>' : a.email) + ' ' + this._rsvpBadge(a.responseStatus) + '</div>'; }).join('');
+        const html = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:999;" onclick="this.remove();">'
+            + '<div class="cal-event-detail" style="top:50%;left:50%;transform:translate(-50%,-50%);position:fixed;" onclick="event.stopPropagation();">'
+            + '<div style="display:flex;justify-content:space-between;align-items:start;"><div>'
+            + '<div style="font-size:10px;text-transform:uppercase;color:' + (evt._color||'#4285f4') + ';font-weight:700;">' + (evt._calName||'Google Calendar') + '</div>'
+            + '<div style="font-size:16px;font-weight:700;margin:4px 0;">' + evt.name + '</div></div>'
+            + '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="background:none;border:none;font-size:18px;cursor:pointer;">✕</button></div>'
+            + '<div style="font-size:12px;color:var(--sf-text-weak);margin-bottom:8px;">' + new Date(evt.start).toLocaleString('en-US',{weekday:'long',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) + (evt.end ? ' - ' + new Date(evt.end).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '') + '</div>'
+            + (evt.address ? '<div style="font-size:12px;margin-bottom:6px;">📍 ' + esc(evt.address) + '</div>' : '')
+            + (evt.description ? '<div style="font-size:12px;margin-bottom:8px;color:var(--sf-text-weak);white-space:pre-wrap;">' + esc(evt.description.slice(0,300)) + '</div>' : '')
+            + (contact ? '<div style="margin-bottom:8px;padding:8px;background:var(--sf-bg);border-radius:6px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);margin-bottom:2px;">CRM CONTACT</div><a onclick="app.viewContact(\'' + contact.id + '\')" style="color:var(--sf-brand);font-weight:600;cursor:pointer;">' + contact.name + '</a><div style="font-size:11px;color:var(--sf-text-weak);">' + (contact.title||'') + '</div></div>' : '')
+            + (attendeeList ? '<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;margin-bottom:4px;">Attendees</div>' + attendeeList + '</div>' : '')
+            + rsvpHtml
+            + '<div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--sf-border-weak);padding-top:10px;">'
+            + (evt._htmlLink ? '<a href="' + evt._htmlLink + '" target="_blank" class="btn-small">Open in Google</a>' : '')
+            + '<button class="btn-small" style="color:var(--sf-error);" onclick="app.deleteGcalEvent(\'' + (evt.calId||'primary').replace(/'/g,"\\'") + '\',\'' + evt.id + '\');this.closest(\'[style*=fixed]\').remove();">Delete</button>'
+            + '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', html);
+    },
+
+    scheduleWithContact(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        const email = c.pe_email || c.we_email || c.email || '';
+        const summary = prompt('Meeting subject:', 'Meeting with ' + c.name);
+        if (!summary) return;
+        const dateStr = prompt('Date and time (YYYY-MM-DDTHH:MM):', new Date(Date.now()+86400000).toISOString().slice(0,16));
+        if (!dateStr) return;
+        const endStr = new Date(new Date(dateStr).getTime() + 3600000).toISOString().slice(0,19);
+        this.createGcalEvent(summary, dateStr + ':00', endStr, '', '', email ? [email] : []);
+    },
+
+    _geocodeCache: null,
+    _loadGeocodeCache() {
+        if (!this._geocodeCache) {
+            try { this._geocodeCache = JSON.parse(localStorage.getItem('matthewsCRM_geocache') || '{}'); }
+            catch { this._geocodeCache = {}; }
+        }
+        return this._geocodeCache;
+    },
+    _saveGeocodeCache() {
+        localStorage.setItem('matthewsCRM_geocache', JSON.stringify(this._geocodeCache || {}));
+    },
+
+    _geocoder: null,
+
+    async geocodeAddress(address) {
+        const cache = this._loadGeocodeCache();
+        const key = address.toLowerCase().trim();
+        if (cache[key]) return cache[key];
+
+        if (!this._geocoder && window.google?.maps?.Geocoder) this._geocoder = new google.maps.Geocoder();
+        let result = null;
+        if (this._geocoder) {
+            try {
+                const resp = await this._geocoder.geocode({address: address});
+                if (resp.results && resp.results.length > 0) {
+                    const loc = resp.results[0].geometry.location;
+                    result = {lat: loc.lat(), lng: loc.lng()};
+                }
+            } catch {}
+        }
+
+        if (result) {
+            cache[key] = result;
+            this._saveGeocodeCache();
+        }
+        return result;
+    },
+
+    mapInstance: null,
+    mapMarkers: [],
+
+    mapFilters: {type: 'all', tier: '', tag: '', text: ''},
+    _mapAllItems: [],
+
+    _showEvents: false,
+
+    renderMap() {
+        const contactsWithAddr = this.data.contacts.filter(c => c.address && c.address.trim());
+        const accountsWithAddr = this.data.accounts.filter(a => a.address && a.address.trim());
+        const getDSLA = c => { const la = c.la||c.last_activity_display; if(!la) return 999; return Math.floor((new Date()-new Date(la))/86400000); };
+        const allItems = [
+            ...contactsWithAddr.map(c => ({...c, _type:'contact', _initials:(c.name||'').split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase(), _dsla: getDSLA(c)})),
+            ...accountsWithAddr.map(a => ({...a, _type:'account', _initials:(a.name||'').split(' ').filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase(), _dsla: 0}))
+        ];
+        this._mapAllItems = allItems;
+        const f = this.mapFilters;
+
+        const recentChipOn = f._recent ? 'map-chip-on' : 'map-chip-off';
+        const html = `
+            <div class="map-v2">
+                <div id="crmMap" style="width:100%;height:100%;"></div>
+                <div class="map-loading" id="mapLoadingMsg" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.9);padding:16px 24px;border-radius:8px;z-index:500;font-size:14px;">Loading map…</div>
+                <!-- Floating search -->
+                <div class="map-float map-search">
+                    <input type="text" id="mapSearchInput" placeholder="Search contacts, cities, states…" value="${f.text||''}" onkeydown="if(event.key==='Enter'){app.updateMapFilter('text',this.value);}">
+                </div>
+                <!-- Filter chips -->
+                <div class="map-float map-chips">
+                    <button class="map-chip ${f.tier==='1-VIP'?'map-chip-on':'map-chip-off'}" onclick="app.updateMapFilter('tier', app.mapFilters.tier==='1-VIP'?'':'1-VIP')">VIP</button>
+                    <button class="map-chip ${f.tier==='2'?'map-chip-on':'map-chip-off'}" onclick="app.updateMapFilter('tier', app.mapFilters.tier==='2'?'':'2')">Tier 2</button>
+                    <button class="map-chip ${(f._ob||'')==='Client'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Client'?'':'Client'; app.applyMapFilters();">Clients</button>
+                    <button class="map-chip ${(f._ob||'')==='Friend'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Friend'?'':'Friend'; app.applyMapFilters();">Friends</button>
+                    <button class="map-chip ${(f._ob||'')==='Family'?'map-chip-on':'map-chip-off'}" onclick="app.mapFilters._ob=app.mapFilters._ob==='Family'?'':'Family'; app.applyMapFilters();">Family</button>
+                    <button class="map-chip ${this._showEvents?'map-chip-on':'map-chip-off'}" onclick="app._showEvents=!app._showEvents; app.applyMapFilters();">Events</button>
+                    <button class="map-chip ${recentChipOn}" onclick="app.mapFilters._recent=!app.mapFilters._recent; app.applyMapFilters();">Recent 30D</button>
+                    ${f.text||f.tier||f._ob||f._recent ? '<button class="map-chip map-chip-off" onclick="app.clearMapFilters();">✕ Clear</button>' : ''}
+                    <span id="mapPinCount" style="font-size:11px; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,0.5); padding:4px;"></span>
+                </div>
+                <!-- Action buttons -->
+                <div class="map-float map-btns">
+                    <button class="map-btn" onclick="app.mapNearMe();" title="Near me">📍</button>
+                    <button class="map-btn" id="mapHeatBtn" onclick="app.mapToggleHeatmap();" title="Heatmap">🌡️</button>
+                    <button class="map-btn" id="mapProxBtn" onclick="app.mapToggleProximity();" title="Proximity search">📏</button>
+                    <button class="map-btn" id="mapRouteBtn" onclick="app.mapToggleRoute();" title="Route planner">🗺️</button>
+                    <button class="map-btn" id="mapSaveBtn" onclick="app.mapToggleSaved();" title="Saved views">⭐</button>
+                    <button class="map-btn" onclick="app.clearMapFilters();" title="Reset">🔄</button>
+                </div>
+                <!-- Proximity search panel -->
+                <div class="map-proximity-panel" id="mapProxPanel">
+                    <label>Radius (miles)</label>
+                    <input type="range" id="mapProxRadius" min="1" max="100" value="25" oninput="document.getElementById('mapProxVal').textContent=this.value+' mi'">
+                    <div class="prox-value" id="mapProxVal">25 mi</div>
+                    <button onclick="app.mapProximitySearch();">Find nearby contacts</button>
+                </div>
+                <!-- Saved views panel -->
+                <div class="map-saved-panel" id="mapSavedPanel">
+                    <div style="font-size:12px; font-weight:700; margin-bottom:8px;">Saved Views</div>
+                    <div id="mapSavedList"></div>
+                    <button style="width:100%; padding:6px; border:none; border-radius:6px; background:var(--sf-brand); color:#fff; font-size:12px; font-weight:600; cursor:pointer; margin-top:8px;" onclick="app.mapSaveCurrentView();">Save current view</button>
+                </div>
+                <!-- Nearby contacts list -->
+                <div class="map-nearby-list" id="mapNearbyList"></div>
+                <!-- Bottom card (mobile) -->
+                <div class="map-card" id="mapCard">
+                    <div class="map-card-handle"></div>
+                    <div id="mapCardContent"></div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        setTimeout(() => this.initMapWithMarkers(allItems), 100);
+    },
+
+    mapNearMe() {
+        if (!navigator.geolocation) { alert('Geolocation not available'); return; }
+        navigator.geolocation.getCurrentPosition(pos => {
+            if (this.mapInstance) {
+                this.mapInstance.setCenter({lat: pos.coords.latitude, lng: pos.coords.longitude});
+                this.mapInstance.setZoom(13);
+            }
+        }, () => alert('Location access denied'));
+    },
+
+    showMapCard(item) {
+        const card = document.getElementById('mapCard');
+        const content = document.getElementById('mapCardContent');
+        if (!card || !content) return;
+        const phone = item.pc_number||item.mobile||item.wc_number||item.phone||'';
+        const email = item.pe_email||item.we_email||'';
+        const isContact = item._type === 'contact';
+        const dsla = item._dsla;
+        const dslaColor = dsla <= 30 ? 'var(--sf-success)' : dsla <= 90 ? 'var(--sf-warning)' : 'var(--sf-error)';
+        content.innerHTML = `
+            <div class="map-card-name">${item.name}</div>
+            <div class="map-card-sub">${item.title||item.type||''} ${item.address ? '· '+item.address : ''} ${isContact && dsla < 999 ? `· <span style="color:${dslaColor};font-weight:600;">${dsla}D</span>` : ''}</div>
+            <div class="map-card-actions">
+                ${phone ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${item.id}','${phone}');" class="map-card-action"><div class="map-card-action-icon" style="background:#e8f5e9;">📞</div><div class="map-card-action-label">Call</div></a>` : ''}
+                ${phone ? `<a href="#" onclick="event.preventDefault(); app.logTextFromTap('${item.id}','${phone}');" class="map-card-action"><div class="map-card-action-icon" style="background:#e3f2fd;">💬</div><div class="map-card-action-label">Text</div></a>` : ''}
+                ${email ? `<a href="mailto:${email}" class="map-card-action"><div class="map-card-action-icon" style="background:#e8eaf6;">📧</div><div class="map-card-action-label">Email</div></a>` : ''}
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.address||'')}" target="_blank" class="map-card-action"><div class="map-card-action-icon" style="background:#fff3e0;">🧭</div><div class="map-card-action-label">Navigate</div></a>
+                <a href="#" onclick="event.preventDefault(); app.${isContact?'viewContact':'viewAccount'}('${item.id}');" class="map-card-action"><div class="map-card-action-icon" style="background:#f3f4f6;">👤</div><div class="map-card-action-label">View</div></a>
+            </div>
+        `;
+        card.classList.add('show');
+        card.onclick = (e) => { if (e.target === card || e.target.classList.contains('map-card-handle')) card.classList.remove('show'); };
+    },
+
+    updateMapFilter(key, val) {
+        this.mapFilters[key] = val;
+        this.applyMapFilters();
+    },
+
+    _itemPassesFilter(item) {
+        const f = this.mapFilters;
+        if (f.type !== 'all' && item._type !== f.type) return false;
+        if (f.tier && (item.tier || '') !== f.tier) return false;
+        if (f.tag && !(item.tags || '').toLowerCase().includes(f.tag.toLowerCase())) return false;
+        if (f.text) {
+            const t = f.text.toLowerCase();
+            const searchable = [
+                item.name, item.address, item.email,
+                item.mailing_city, item.mailing_state, item.mailing_country,
+                item.MailingCity, item.MailingState, item.MailingCountry,
+                item.industry, item.type
+            ].filter(Boolean).join(' ').toLowerCase();
+            if (!searchable.includes(t)) return false;
+        }
+        return true;
+    },
+
+    _mapClusterer: null,
+
+    applyMapFilters() {
+        if (!this.mapInstance) return;
+        let visibleCount = 0;
+        const f = this.mapFilters;
+        const visibleMarkers = [];
+        const bounds = new google.maps.LatLngBounds();
+        this.mapMarkers.forEach(m => {
+            let show = this._itemPassesFilter(m.item);
+            if (show && f._ob && !(m.item.obligation||'').includes(f._ob)) show = false;
+            if (show && f._recent && m.item._type === 'contact') {
+                const dsla = m.item._dsla || 999;
+                if (dsla > 30) show = false;
+            }
+            if (show) {
+                m.marker.setMap(null);
+                visibleMarkers.push(m.marker);
+                bounds.extend(m.coords);
+                visibleCount++;
+            } else {
+                m.marker.setMap(null);
+            }
+        });
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        if (window.markerClusterer && visibleMarkers.length > 0) {
+            this._mapClusterer = new markerClusterer.MarkerClusterer({map: this.mapInstance, markers: visibleMarkers});
+        } else {
+            visibleMarkers.forEach(m => m.setMap(this.mapInstance));
+        }
+        if (this._showEvents && this._eventMarkers) {
+            this._eventMarkers.forEach(m => { m.setMap(this.mapInstance); visibleCount++; bounds.extend(m.getPosition()); });
+        } else if (this._eventMarkers) {
+            this._eventMarkers.forEach(m => m.setMap(null));
+        }
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `${visibleCount} pins`;
+        const hasFilter = f.text || f.tier || f.tag || f._ob || f._recent || f.type !== 'all';
+        if (hasFilter && visibleCount > 0 && visibleCount < 200) this.mapInstance.fitBounds(bounds);
+    },
+
+    _infoWindow: null,
+    _createGoogleMarker(item, coords, map) {
+        const isContact = item._type === 'contact';
+        const dsla = item._dsla || 0;
+        const baseColor = isContact ? (item.tier === '1-VIP' ? '#166534' : item.tier === '2' ? '#1e40af' : '#a094ed') : '#7f8de1';
+        const opacity = isContact ? Math.max(0.3, 1 - (dsla / 200)) : 1;
+        const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="${baseColor}" fill-opacity="${opacity}" stroke="white" stroke-width="2"/><text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial">${item._initials}</text></svg>`;
+        const marker = new google.maps.Marker({position: coords, map, title: item.name, icon: {url: 'data:image/svg+xml,' + encodeURIComponent(svgIcon), scaledSize: new google.maps.Size(28,28)}, optimized: true});
+        marker._crmItem = item;
+        marker._crmCoords = coords;
+        marker.addListener('click', () => {
+            if (this._routeMode) { this._addRouteWaypoint(item, coords); return; }
+            if (window.innerWidth <= 768) { this.showMapCard(item); return; }
+            if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
+            const phone = item.pc_number||item.mobile||item.wc_number||'';
+            const dslaColor = dsla <= 30 ? '#2e844a' : dsla <= 90 ? '#fe9339' : '#ba0517';
+            const dslaHtml = (isContact && dsla && dsla < 999) ? ' · <span style="color:' + dslaColor + '">' + dsla + 'D</span>' : '';
+            const typeLabel = isContact ? 'Contact' : 'Account';
+            const viewFn = isContact ? 'viewContact' : 'viewAccount';
+            let html = '<div style="font-size:13px; max-width:260px;">';
+            html += '<div style="font-size:10px; text-transform:uppercase; color:#888;">' + typeLabel + dslaHtml + '</div>';
+            html += '<div style="font-weight:700; font-size:14px; margin:4px 0;"><a onclick="app.' + viewFn + '(\'' + item.id + '\')" style="color:#0176d3; cursor:pointer;">' + esc(item.name) + '</a></div>';
+            if (item.title) html += '<div style="color:#666;">' + esc(item.title) + '</div>';
+            if (phone) html += '<div style="margin:4px 0;"><a href="#" onclick="event.preventDefault();app.logCallFromTap(\'' + item.id + '\',\'' + phone + '\');">📞 Call</a> · <a href="#" onclick="event.preventDefault();app.logTextFromTap(\'' + item.id + '\',\'' + phone + '\');">💬 Text</a></div>';
+            html += '<div style="color:#888; margin-top:6px; padding-top:6px; border-top:1px solid #eee;">' + esc(item.address) + '</div>';
+            html += '<div style="margin-top:4px;"><a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(item.address) + '" target="_blank" style="color:#0176d3;">Directions ↗</a></div>';
+            html += '<div style="margin-top:4px;"><a href="#" onclick="event.preventDefault();app.mapShowNearby(\'' + item.id + '\');" style="color:#0176d3; font-size:11px;">Find nearby contacts</a></div>';
+            html += '</div>';
+            this._infoWindow.setContent(html);
+            this._infoWindow.open({anchor: marker, map});
+        });
+        return marker;
+    },
+
+    _eventMarkers: [],
+    _heatmapLayer: null,
+    _proximityCircle: null,
+    _routeWaypoints: [],
+
+    async initMapWithMarkers(items) {
+        this.mapMarkers = [];
+        this._eventMarkers = [];
+        this._mapRetries = (this._mapRetries || 0);
+        if (!window.google?.maps?.Map) {
+            this._mapRetries++;
+            const el = document.getElementById('mapLoadingMsg');
+            if (this._mapRetries > 10) {
+                if (el) el.innerHTML = '<div style="text-align:center;"><div style="font-size:16px;font-weight:700;margin-bottom:8px;">Google Maps failed to load</div><div style="font-size:13px;color:#666;max-width:400px;">Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#0176d3;">Google Cloud Console → Credentials</a>, click your API key, and:<br><br>1. Set <b>Application restrictions</b> to "None"<br>2. Set <b>API restrictions</b> to "Don\'t restrict key"<br>3. Make sure <b>Maps JavaScript API</b> is enabled under <a href="https://console.cloud.google.com/apis/library/maps-backend.googleapis.com" target="_blank" style="color:#0176d3;">APIs & Services</a><br><br>Changes take ~5 minutes to propagate.</div></div>';
+                return;
+            }
+            if (el) el.textContent = 'Loading Google Maps... (attempt ' + this._mapRetries + ')';
+            setTimeout(() => this.initMapWithMarkers(items), 1500);
+            return;
+        }
+        this._mapRetries = 0;
+        const mapEl = document.getElementById('crmMap');
+        if (!mapEl) return;
+
+        const savedView = this._loadSavedMapState();
+        const center = savedView?.center || {lat: 32.7767, lng: -96.7970};
+        const zoom = savedView?.zoom || 5;
+        const map = new google.maps.Map(mapEl, {center, zoom, gestureHandling: 'greedy', mapTypeControl: false, streetViewControl: false, fullscreenControl: false});
+        this.mapInstance = map;
+
+        const loadingEl = document.getElementById('mapLoadingMsg');
+        const cache = this._loadGeocodeCache();
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.address) continue;
+            const coords = cache[item.address.toLowerCase().trim()];
+            if (!coords) continue;
+            const marker = this._createGoogleMarker(item, coords, map);
+            this.mapMarkers.push({marker, coords, item, idx: i});
+        }
+        if (this.mapMarkers.length > 0) {
+            if (loadingEl) loadingEl.style.display = 'none';
+            this.applyMapFilters();
+        }
+
+        // Create event markers
+        const eventsWithAddr = (this.data.events || []).filter(e => e.address && e.status === 'Scheduled');
+        for (const evt of eventsWithAddr) {
+            const coords = cache[(evt.address||'').toLowerCase().trim()];
+            if (!coords) continue;
+            const svgIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#c2410c" stroke="white" stroke-width="2"/><text x="14" y="19" text-anchor="middle" fill="white" font-size="14" font-family="Arial">📅</text></svg>';
+            const marker = new google.maps.Marker({position: coords, title: evt.subject || evt.name || 'Event', icon: {url: 'data:image/svg+xml,' + encodeURIComponent(svgIcon), scaledSize: new google.maps.Size(28,28)}, optimized: true});
+            marker.addListener('click', () => {
+                if (!this._infoWindow) this._infoWindow = new google.maps.InfoWindow();
+                this._infoWindow.setContent('<div style="font-size:13px;max-width:240px;"><div style="font-size:10px;text-transform:uppercase;color:#c2410c;">Event</div><div style="font-weight:700;margin:4px 0;">' + (evt.subject||evt.name||'') + '</div><div style="color:#666;">' + (evt.start||'').slice(0,10) + '</div><div style="color:#888;margin-top:4px;">' + (evt.address||'') + '</div></div>');
+                this._infoWindow.open({anchor: marker, map});
+            });
+            this._eventMarkers.push(marker);
+        }
+
+        // Geocode uncached addresses
+        const uncached = items.filter((item, i) => item.address && !this.mapMarkers.some(m => m.idx === i));
+        if (uncached.length > 0) {
+            const countEl = document.getElementById('mapPinCount');
+            let remaining = uncached.length;
+            if (loadingEl && this.mapMarkers.length === 0) {
+                loadingEl.textContent = `Geocoding ${remaining} addresses…`;
+            } else if (countEl) {
+                countEl.textContent += ` (geocoding ${remaining} more…)`;
+            }
+            for (const item of uncached) {
+                const coords = await this.geocodeAddress(item.address);
+                remaining--;
+                if (coords) {
+                    const idx = items.indexOf(item);
+                    const marker = this._createGoogleMarker(item, coords, this.mapInstance);
+                    this.mapMarkers.push({marker, coords, item, idx});
+                    if (!this._itemPassesFilter(item)) marker.setMap(null);
+                }
+                if (countEl) countEl.textContent = `${this.mapMarkers.length} pins` + (remaining > 0 ? ` (geocoding ${remaining} more…)` : '');
+            }
+            if (loadingEl) loadingEl.style.display = 'none';
+            this.applyMapFilters();
+        }
+
+        // Auto-detect location on first load
+        if (!savedView && navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                if (this.mapInstance && this.mapMarkers.length < 3) {
+                    this.mapInstance.setCenter({lat: pos.coords.latitude, lng: pos.coords.longitude});
+                    this.mapInstance.setZoom(10);
+                }
+            }, () => {});
+        }
+
+        // Save map state on idle
+        map.addListener('idle', () => {
+            const c = map.getCenter();
+            localStorage.setItem('matthewsCRM_mapState', JSON.stringify({center: {lat: c.lat(), lng: c.lng()}, zoom: map.getZoom()}));
+        });
+    },
+
+    _focusedIdx: null,
+
+    async focusMapItem(idx) {
+        let entry = this.mapMarkers.find(m => m.idx === idx);
+        if (!entry) {
+            const item = this._mapAllItems[idx];
+            if (!item || !item.address) return;
+            const coords = await this.geocodeAddress(item.address);
+            if (!coords) return;
+            const marker = this._createGoogleMarker(item, coords, this.mapInstance);
+            entry = {marker, coords, item, idx};
+            this.mapMarkers.push(entry);
+        }
+        this._focusedIdx = idx;
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        this.mapMarkers.forEach(m => m.marker.setMap(m === entry ? this.mapInstance : null));
+        this.mapInstance.setCenter(entry.coords);
+        this.mapInstance.setZoom(15);
+        google.maps.event.trigger(entry.marker, 'click');
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `Focused: ${entry.item.name}`;
+    },
+
+    // Call this to go back to showing all filtered pins (e.g. after focusing one)
+    clearMapFilters() {
+        this.mapFilters = {type: 'all', tier: '', tag: '', text: ''};
+        this._focusedIdx = null;
+        this._showEvents = false;
+        const search = document.getElementById('mapSearchInput');
+        if (search) search.value = '';
+        document.querySelectorAll('.map-proximity-panel,.map-saved-panel,.map-nearby-list').forEach(el => el.classList.remove('show'));
+        if (this._heatmapLayer) { this._heatmapLayer.setMap(null); this._heatmapLayer = null; }
+        if (this._proximityCircle) { this._proximityCircle.setMap(null); this._proximityCircle = null; }
+        this._routeWaypoints = [];
+        this.applyMapFilters();
+        if (this.mapInstance) { this.mapInstance.setCenter({lat: 32.7767, lng: -96.7970}); this.mapInstance.setZoom(5); }
+        this.renderMap();
+    },
+
+    showAllFilteredPins() {
+        this._focusedIdx = null;
+        this.applyMapFilters();
+    },
+
+    _loadSavedMapState() {
+        try { return JSON.parse(localStorage.getItem('matthewsCRM_mapState')); } catch { return null; }
+    },
+
+    _haversineDistance(lat1, lng1, lat2, lng2) {
+        const R = 3959;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    },
+
+    mapToggleHeatmap() {
+        if (this._heatmapLayer) {
+            this._heatmapLayer.setMap(null);
+            this._heatmapLayer = null;
+            document.getElementById('mapHeatBtn')?.classList.remove('active');
+            return;
+        }
+        if (!window.google?.maps?.visualization) return;
+        const points = this.mapMarkers.filter(m => m.item._type === 'contact').map(m => ({location: new google.maps.LatLng(m.coords.lat, m.coords.lng), weight: m.item.tier === '1-VIP' ? 3 : m.item.tier === '2' ? 2 : 1}));
+        if (points.length === 0) return;
+        this._heatmapLayer = new google.maps.visualization.HeatmapLayer({data: points, map: this.mapInstance, radius: 40, opacity: 0.6});
+        document.getElementById('mapHeatBtn')?.classList.add('active');
+    },
+
+    mapToggleProximity() {
+        const panel = document.getElementById('mapProxPanel');
+        if (panel) panel.classList.toggle('show');
+        document.getElementById('mapSavedPanel')?.classList.remove('show');
+        document.getElementById('mapNearbyList')?.classList.remove('show');
+    },
+
+    mapProximitySearch() {
+        const radius = parseInt(document.getElementById('mapProxRadius')?.value || '25');
+        const center = this.mapInstance.getCenter();
+        const lat = center.lat(), lng = center.lng();
+        if (this._proximityCircle) this._proximityCircle.setMap(null);
+        this._proximityCircle = new google.maps.Circle({center: {lat, lng}, radius: radius * 1609.34, map: this.mapInstance, fillColor: '#0176d3', fillOpacity: 0.08, strokeColor: '#0176d3', strokeWeight: 1});
+        let count = 0;
+        if (this._mapClusterer) this._mapClusterer.clearMarkers();
+        const visibleMarkers = [];
+        this.mapMarkers.forEach(m => {
+            const dist = this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng);
+            if (dist <= radius) {
+                m.marker.setMap(null);
+                visibleMarkers.push(m.marker);
+                count++;
+            } else {
+                m.marker.setMap(null);
+            }
+        });
+        if (window.markerClusterer && visibleMarkers.length > 0) {
+            this._mapClusterer = new markerClusterer.MarkerClusterer({map: this.mapInstance, markers: visibleMarkers});
+        } else {
+            visibleMarkers.forEach(m => m.setMap(this.mapInstance));
+        }
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `${count} within ${radius} mi`;
+        this.mapInstance.fitBounds(this._proximityCircle.getBounds());
+        document.getElementById('mapProxPanel')?.classList.remove('show');
+    },
+
+    mapToggleRoute() {
+        if (this._routeMode) {
+            this._routeMode = false;
+            document.getElementById('mapRouteBtn')?.classList.remove('active');
+            if (this._routeWaypoints.length >= 2) this.mapOpenRoute();
+            this._routeWaypoints = [];
+            if (this._routeLine) { this._routeLine.setMap(null); this._routeLine = null; }
+            this._routeMarkerNums?.forEach(m => m.setMap(null));
+            this._routeMarkerNums = [];
+            this.applyMapFilters();
+            return;
+        }
+        this._routeMode = true;
+        this._routeWaypoints = [];
+        this._routeMarkerNums = [];
+        document.getElementById('mapRouteBtn')?.classList.add('active');
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = 'Route mode: tap pins to add stops. Tap 🗺️ to finish.';
+    },
+
+    _routeMode: false,
+    _routeLine: null,
+    _routeMarkerNums: [],
+
+    _addRouteWaypoint(item, coords) {
+        if (!this._routeMode) return false;
+        this._routeWaypoints.push({item, coords});
+        const num = this._routeWaypoints.length;
+        const label = new google.maps.Marker({position: coords, map: this.mapInstance, label: {text: String(num), color: '#fff', fontSize: '12px', fontWeight: 'bold'}, icon: {path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: '#c2410c', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2}, zIndex: 1000 + num});
+        this._routeMarkerNums.push(label);
+        if (this._routeWaypoints.length >= 2) {
+            const path = this._routeWaypoints.map(w => w.coords);
+            if (this._routeLine) this._routeLine.setMap(null);
+            this._routeLine = new google.maps.Polyline({path, map: this.mapInstance, strokeColor: '#c2410c', strokeWeight: 3, strokeOpacity: 0.7});
+        }
+        const countEl = document.getElementById('mapPinCount');
+        if (countEl) countEl.textContent = `Route: ${num} stop${num>1?'s':''} selected`;
+        return true;
+    },
+
+    mapOpenRoute() {
+        if (this._routeWaypoints.length < 2) return;
+        const origin = this._routeWaypoints[0];
+        const dest = this._routeWaypoints[this._routeWaypoints.length - 1];
+        const waypoints = this._routeWaypoints.slice(1, -1).map(w => encodeURIComponent(w.item.address || w.coords.lat + ',' + w.coords.lng)).join('|');
+        let url = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeURIComponent(origin.item.address || origin.coords.lat + ',' + origin.coords.lng) + '&destination=' + encodeURIComponent(dest.item.address || dest.coords.lat + ',' + dest.coords.lng);
+        if (waypoints) url += '&waypoints=' + waypoints;
+        url += '&travelmode=driving';
+        window.open(url, '_blank');
+    },
+
+    mapToggleSaved() {
+        const panel = document.getElementById('mapSavedPanel');
+        if (panel) {
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) this._renderSavedViews();
+        }
+        document.getElementById('mapProxPanel')?.classList.remove('show');
+        document.getElementById('mapNearbyList')?.classList.remove('show');
+    },
+
+    _renderSavedViews() {
+        const list = document.getElementById('mapSavedList');
+        if (!list) return;
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        if (views.length === 0) { list.innerHTML = '<div style="font-size:11px; color:var(--sf-text-weak); padding:8px 0;">No saved views yet.</div>'; return; }
+        list.innerHTML = views.map((v, i) => '<div class="saved-item" onclick="app.mapLoadView(' + i + ')"><span>' + esc(v.name) + '</span><span class="del-sv" onclick="event.stopPropagation();app.mapDeleteView(' + i + ');">✕</span></div>').join('');
+    },
+
+    mapSaveCurrentView() {
+        if (!this.mapInstance) return;
+        const name = prompt('Name this view:');
+        if (!name) return;
+        const c = this.mapInstance.getCenter();
+        const view = {name, center: {lat: c.lat(), lng: c.lng()}, zoom: this.mapInstance.getZoom(), filters: {...this.mapFilters}};
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        views.push(view);
+        localStorage.setItem('matthewsCRM_savedMapViews', JSON.stringify(views));
+        this._renderSavedViews();
+    },
+
+    mapLoadView(idx) {
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        const v = views[idx];
+        if (!v) return;
+        this.mapFilters = {...v.filters};
+        this.mapInstance.setCenter(v.center);
+        this.mapInstance.setZoom(v.zoom);
+        this.applyMapFilters();
+        document.getElementById('mapSavedPanel')?.classList.remove('show');
+        this.renderMap();
+    },
+
+    mapDeleteView(idx) {
+        const views = JSON.parse(localStorage.getItem('matthewsCRM_savedMapViews') || '[]');
+        views.splice(idx, 1);
+        localStorage.setItem('matthewsCRM_savedMapViews', JSON.stringify(views));
+        this._renderSavedViews();
+    },
+
+    mapShowNearby(contactId) {
+        const entry = this.mapMarkers.find(m => m.item.id === contactId);
+        if (!entry) return;
+        const lat = entry.coords.lat, lng = entry.coords.lng;
+        const nearby = this.mapMarkers
+            .filter(m => m.item.id !== contactId && m.item._type === 'contact')
+            .map(m => ({...m, dist: this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng)}))
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 15);
+        const panel = document.getElementById('mapNearbyList');
+        if (!panel) return;
+        let html = '<div style="font-size:12px; font-weight:700; margin-bottom:8px;">Near ' + entry.item.name + '</div>';
+        if (nearby.length === 0) { html += '<div style="font-size:11px;color:var(--sf-text-weak);">No nearby contacts found.</div>'; }
+        else { nearby.forEach(n => { html += '<div class="nearby-item" onclick="app.focusMapItem(' + n.idx + ')"><div>' + n.item.name + '</div><div class="nearby-dist">' + n.dist.toFixed(1) + ' mi · ' + (n.item.mailing_city||n.item.MailingCity||'') + '</div></div>'; }); }
+        html += '<div style="margin-top:8px;"><button style="width:100%;padding:6px;border:none;border-radius:6px;background:var(--sf-brand);color:#fff;font-size:12px;font-weight:600;cursor:pointer;" onclick="app.mapIntroduce(\'' + contactId + '\')">Suggest introductions</button></div>';
+        panel.innerHTML = html;
+        panel.classList.add('show');
+    },
+
+    mapIntroduce(contactId) {
+        const entry = this.mapMarkers.find(m => m.item.id === contactId);
+        if (!entry) return;
+        const lat = entry.coords.lat, lng = entry.coords.lng;
+        const nearby = this.mapMarkers
+            .filter(m => m.item.id !== contactId && m.item._type === 'contact')
+            .map(m => ({...m, dist: this._haversineDistance(lat, lng, m.coords.lat, m.coords.lng)}))
+            .filter(n => n.dist <= 25)
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 10);
+        if (nearby.length === 0) { alert('No contacts within 25 miles for introductions.'); return; }
+        const panel = document.getElementById('mapNearbyList');
+        if (!panel) return;
+        let html = '<div style="font-size:12px; font-weight:700; margin-bottom:8px;">Introduce ' + entry.item.name + ' to:</div>';
+        nearby.forEach(n => {
+            const shared = [];
+            if (n.item.industry && n.item.industry === entry.item.industry) shared.push(n.item.industry);
+            if (n.item.obligation && entry.item.obligation && n.item.obligation === entry.item.obligation) shared.push(n.item.obligation);
+            html += '<div class="nearby-item" onclick="app.focusMapItem(' + n.idx + ')"><div>' + n.item.name + ' <span class="nearby-dist">(' + n.dist.toFixed(1) + ' mi)</span></div>' + (shared.length ? '<div style="font-size:10px;color:var(--sf-brand);">Shared: ' + shared.join(', ') + '</div>' : '') + '</div>';
+        });
+        panel.innerHTML = html;
+        panel.classList.add('show');
+    },
+
+    _taskFilter: {type:'', priority:'', text:'', contact:''},
+    _taskView: 'board',
+
+    renderTaskBoard() {
+        const v = this._taskView;
+        const tf = this._taskFilter;
+        const typeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄',Text:'💬'};
+        const priorityColors = {High:'#ef4444',Normal:'#3b82f6',Low:'#9ca3af'};
+        let acts = [...this.data.activities].filter(a => this._showArchived || !a._archived);
+        if (tf.type) acts = acts.filter(a => a.type === tf.type);
+        if (tf.priority) acts = acts.filter(a => a.priority === tf.priority);
+        if (tf.contact) { const lt = tf.contact.toLowerCase(); acts = acts.filter(a => { const c = this.data.contacts.find(x => x.id === (a.contactId||a.contact_id)); return c && c.name.toLowerCase().includes(lt); }); }
+        if (tf.text) { const lt = tf.text.toLowerCase(); acts = acts.filter(a => (a.subject||'').toLowerCase().includes(lt) || (a.notes||'').toLowerCase().includes(lt) || (a.type||'').toLowerCase().includes(lt)); }
+        if (tf.label) acts = acts.filter(a => (a._labels||[]).includes(tf.label));
+
+        const statuses = ['Not Started','In Progress','Waiting','Deferred','Completed'];
+        const wipLimits = {'In Progress': 5, 'Waiting': 5};
+        const overdue = acts.filter(a => a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed').length;
+        const dueToday = acts.filter(a => a.dueDate && a.dueDate === new Date().toISOString().slice(0,10) && a.status !== 'Completed').length;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:10px;"><h2 style="margin:0;">Activities</h2>'
+            + (overdue ? '<span style="font-size:11px;padding:3px 10px;border-radius:12px;background:#fee2e2;color:#991b1b;font-weight:700;">' + overdue + ' overdue</span>' : '')
+            + (dueToday ? '<span style="font-size:11px;padding:3px 10px;border-radius:12px;background:#fef3c7;color:#92400e;font-weight:700;">' + dueToday + ' due today</span>' : '')
+            + '</div><div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='board'?'active':'') + '" onclick="app._taskView=\'board\';app.renderTaskBoard();">Board</button>'
+            + '<button class="cal-view-tab ' + (v==='list'?'active':'') + '" onclick="app._taskView=\'list\';app.renderTaskBoard();">List</button>'
+            + '<button class="cal-view-tab ' + (v==='calendar'?'active':'') + '" onclick="app._taskView=\'calendar\';app.renderTaskBoard();">Calendar</button>'
+            + '</div>'
+            + '<label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" ' + (this._showArchived?'checked':'') + ' onchange="app._showArchived=this.checked;app.renderTaskBoard();" style="width:auto;min-height:auto;">Archived</label>'
+            + '<button class="btn-small" onclick="app.saveTaskView();">⭐ Save View</button>'
+            + (() => { const sv = JSON.parse(localStorage.getItem('matthewsCRM_taskViews')||'[]'); return sv.length ? '<select onchange="if(this.value)app.loadTaskView(parseInt(this.value));this.value=\'\';" style="min-height:28px;padding:2px 4px;font-size:11px;"><option value="">Saved Views</option>' + sv.map((v,i) => '<option value="'+i+'">'+esc(v.name)+'</option>').join('') + '</select>' : ''; })()
+            + '<div style="position:relative;display:inline-block;"><button class="btn-small" onclick="document.getElementById(\'taskTmplMenu\').style.display=document.getElementById(\'taskTmplMenu\').style.display===\'block\'?\'none\':\'block\';">Templates ▾</button>'
+            + '<div id="taskTmplMenu" style="display:none;position:absolute;right:0;top:28px;background:#fff;border:1px solid var(--sf-border);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;min-width:180px;">'
+            + '<div onclick="app.createTaskFromTemplate(\'call\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📞 Follow-up Call</div>'
+            + '<div onclick="app.createTaskFromTemplate(\'email\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📧 Send Proposal</div>'
+            + '<div onclick="app.createTaskFromTemplate(\'meeting\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📅 Schedule Meeting</div>'
+            + '<div onclick="app.createTaskFromTemplate(\'dd\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📋 Due Diligence Task</div>'
+            + '<div onclick="app.createTaskFromTemplate(\'review\')" style="padding:6px 12px;cursor:pointer;font-size:12px;" onmouseover="this.style.background=\'var(--sf-bg)\'" onmouseout="this.style.background=\'\'">📝 Document Review</div>'
+            + '</div></div>'
+            + '<button class="btn-primary" onclick="app.openActivityForm()">+ Activity</button></div></div>';
+
+        html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'
+            + '<input type="text" placeholder="Search…" value="' + (tf.text||'') + '" oninput="app._taskFilter.text=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px 10px;font-size:12px;width:160px;">'
+            + '<select onchange="app._taskFilter.type=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px;font-size:12px;"><option value="">All Types</option>' + Object.keys(typeIcons).map(t => '<option value="' + t + '" ' + (tf.type===t?'selected':'') + '>' + typeIcons[t] + ' ' + t + '</option>').join('') + '</select>'
+            + '<select onchange="app._taskFilter.priority=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px;font-size:12px;"><option value="">All Priority</option><option value="High" ' + (tf.priority==='High'?'selected':'') + '>🔴 High</option><option value="Normal" ' + (tf.priority==='Normal'?'selected':'') + '>🔵 Normal</option><option value="Low" ' + (tf.priority==='Low'?'selected':'') + '>⚪ Low</option></select>'
+            + '<input type="text" placeholder="Filter by contact…" value="' + (tf.contact||'') + '" oninput="app._taskFilter.contact=this.value;app.renderTaskBoard();" style="min-height:30px;padding:4px 10px;font-size:12px;width:140px;">'
+            + (tf.text||tf.type||tf.priority||tf.contact||tf.label ? '<button class="btn-small" onclick="app._taskFilter={type:\'\',priority:\'\',text:\'\',contact:\'\',label:\'\'};app.renderTaskBoard();">Clear</button>' : '')
+            + '</div>';
+
+        // Label filter chips
+        html += '<div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;">';
+        Object.entries(this._taskLabels).forEach(([color, name]) => {
+            const active = tf.label === color;
+            html += '<span style="font-size:10px;padding:3px 8px;border-radius:12px;background:' + (active?color:'#f3f4f6') + ';color:' + (active?'#fff':'#666') + ';cursor:pointer;font-weight:600;" onclick="app._taskFilter.label=\'' + (active?'':color) + '\';app.renderTaskBoard();">' + name + '</span>';
+        });
+        html += '</div>';
+
+        if (v === 'board') {
+            html += '<div class="kanban-board" style="min-height:500px;">';
+            statuses.forEach(status => {
+                const col = acts.filter(a => a.status === status).sort((a,b) => {
+                    const po = {High:0,Normal:1,Low:2};
+                    return (po[a.priority]||1) - (po[b.priority]||1) || (a.dueDate||'9').localeCompare(b.dueDate||'9');
+                });
+                const colColor = status==='Completed'?'#22c55e':status==='In Progress'?'#3b82f6':status==='Waiting'?'#f59e0b':status==='Deferred'?'#9ca3af':'#6b7280';
+                html += '<div class="kanban-column" data-status="' + status + '" ondragover="event.preventDefault();this.classList.add(\'drag-over\');" ondragleave="this.classList.remove(\'drag-over\');" ondrop="this.classList.remove(\'drag-over\');app.dropActivity(event,\'' + status + '\');">';
+                const wipLimit = wipLimits[status];
+                const overWip = wipLimit && col.length > wipLimit;
+                html += '<div class="kanban-header" style="' + (overWip?'color:var(--sf-error);':'') + '"><span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:' + colColor + ';"></span>' + status + ' <span class="kh-count" style="' + (overWip?'background:#fee2e2;color:#991b1b;':'') + '">' + col.length + (wipLimit ? '/' + wipLimit : '') + '</span></span></div>';
+                col.forEach(a => {
+                    const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                    const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+                    const evt = this.data.events.find(e => (e.activityIds||[]).includes(a.id));
+                    const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+                    const pColor = priorityColors[a.priority] || '#3b82f6';
+                    const ageDays = a.createdAt ? Math.floor((Date.now() - new Date(a.createdAt).getTime()) / 86400000) : 0;
+                    const aging = (status !== 'Completed' && ageDays > 14) ? 'opacity:0.5;' : (status !== 'Completed' && ageDays > 7) ? 'opacity:0.7;' : '';
+                    html += '<div class="kanban-card" style="border-left:3px solid ' + pColor + ';' + aging + '" draggable="true" ondragstart="app.dragActivity(event,\'' + a.id + '\')" onclick="app.openTaskDetail(\'' + a.id + '\')">';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
+                    html += '<div class="kanban-card-title">' + (typeIcons[a.type]||'') + ' ' + (a.subject||a.type||'') + '</div>';
+                    if (isOverdue) html += '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:700;">OVERDUE</span>';
+                    html += '</div>';
+                    if (a.dueDate) html += '<div style="font-size:10px;color:' + (isOverdue?'#ef4444':'var(--sf-text-weak)') + ';margin:2px 0;">📅 ' + a.dueDate + '</div>';
+                    if (a.notes) html += '<div style="font-size:10px;color:var(--sf-text-weak);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">' + esc(a.notes.slice(0,60)) + '</div>';
+                    const tags = [];
+                    if (con) tags.push('<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">👤 ' + con.name.split(' ')[0] + '</a>');
+                    if (deal) tags.push('<a onclick="event.stopPropagation();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">💼 ' + (deal.name||'').slice(0,15) + '</a>');
+                    if (evt) tags.push('<span style="color:#e6853d;">📅 ' + (evt.name||'').slice(0,15) + '</span>');
+                    if (a.accountId) { const acc = this.data.accounts.find(x => x.id === a.accountId); if (acc) tags.push('<span style="color:#7f8de1;">🏢 ' + acc.name.split(' ')[0] + '</span>'); }
+                    if ((a._labels||[]).length) html += '<div style="display:flex;gap:2px;margin-top:3px;">' + a._labels.map(l => '<span style="width:20px;height:6px;border-radius:3px;background:'+l+';display:inline-block;"></span>').join('') + '</div>';
+                    const cardMeta = [];
+                    if ((a._checklist||[]).length) { const cd = a._checklist.filter(c=>c.done).length; cardMeta.push('☑ ' + cd + '/' + a._checklist.length); }
+                    if (a._timeLogged) { const th = Math.floor(a._timeLogged/60); cardMeta.push('⏱ ' + (th ? th + 'h' : '') + (a._timeLogged%60) + 'm'); }
+                    if (a._timerStart) cardMeta.push('<span style="color:#22c55e;">● Live</span>');
+                    if ((a._comments||[]).length) cardMeta.push('💬 ' + a._comments.length);
+                    if ((a._attachments||[]).length) cardMeta.push('📎 ' + a._attachments.length);
+                    if ((a._blockedBy||[]).length) cardMeta.push('<span style="color:#ef4444;">🚫 Blocked</span>');
+                    if (a._recurring) cardMeta.push('🔁');
+                    if (cardMeta.length) html += '<div style="font-size:9px;color:var(--sf-text-weak);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;">' + cardMeta.join(' ') + '</div>';
+                    if (tags.length) html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:10px;">' + tags.join('') + '</div>';
+                    html += '</div>';
+                });
+                // Quick add
+                html += '<div style="margin-top:6px;"><input type="text" placeholder="+ Add card…" style="width:100%;padding:6px 8px;font-size:12px;border:1px dashed var(--sf-border);border-radius:4px;background:transparent;" onkeydown="if(event.key===\'Enter\'&&this.value){app.quickAddTask(this.value,\'' + status + '\');this.value=\'\';}"></div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        } else if (v === 'list') {
+            acts.sort((a,b) => {
+                const po = {High:0,Normal:1,Low:2};
+                return (po[a.priority]||1) - (po[b.priority]||1) || (a.dueDate||'9').localeCompare(b.dueDate||'9');
+            });
+            html += '<div class="card"><div style="padding:0;"><table class="compact-table"><thead><tr><th>Type</th><th>Subject</th><th>Contact</th><th>Deal</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
+            acts.forEach(a => {
+                const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+                const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+                const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+                html += '<tr style="cursor:pointer;' + (isOverdue?'background:#fef2f2;':'') + '" onclick="app.openTaskDetail(\'' + a.id + '\')">'
+                    + '<td>' + (typeIcons[a.type]||'') + ' ' + (a.type||'') + '</td>'
+                    + '<td style="font-weight:600;">' + (a.subject||'') + '</td>'
+                    + '<td>' + (con ? '<a onclick="event.stopPropagation();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + con.name + '</a>' : '') + '</td>'
+                    + '<td>' + (deal ? deal.name : '') + '</td>'
+                    + '<td style="color:' + (isOverdue?'#ef4444':'inherit') + ';">' + (a.dueDate||'') + (isOverdue?' ⚠':'') + '</td>'
+                    + '<td><span style="color:' + (priorityColors[a.priority]||'#3b82f6') + ';font-weight:600;">' + (a.priority||'Normal') + '</span></td>'
+                    + '<td>' + (a.status||'') + '</td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        } else if (v === 'calendar') {
+            const today = new Date();
+            const year = today.getFullYear(), month = today.getMonth();
+            const first = new Date(year, month, 1), last = new Date(year, month+1, 0);
+            const startDay = first.getDay(), daysInMonth = last.getDate();
+            const days = [];
+            const prev = new Date(year, month, 0);
+            for (let i = startDay-1; i >= 0; i--) days.push({day: prev.getDate()-i, other: true});
+            for (let d = 1; d <= daysInMonth; d++) days.push({day: d, other: false});
+            const rem = 7-(days.length%7); if (rem<7) for (let i=1;i<=rem;i++) days.push({day:i,other:true});
+            const todayStr = today.toISOString().slice(0,10);
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            html += '<div style="font-weight:700;font-size:14px;margin-bottom:8px;">' + monthNames[month] + ' ' + year + '</div>';
+            html += '<div class="cal-grid">' + 'Sun,Mon,Tue,Wed,Thu,Fri,Sat'.split(',').map(d => '<div class="cal-hdr">'+d+'</div>').join('');
+            days.forEach(d => {
+                const ds = d.other ? '' : year+'-'+String(month+1).padStart(2,'0')+'-'+String(d.day).padStart(2,'0');
+                const dayActs = ds ? acts.filter(a => a.dueDate === ds) : [];
+                html += '<div class="cal-day ' + (d.other?'other':'') + ' ' + (ds===todayStr?'today':'') + '"><div class="cal-day-n">' + d.day + '</div>';
+                dayActs.slice(0,3).forEach(a => {
+                    const pC = {High:'#ef4444',Normal:'#3b82f6',Low:'#9ca3af'};
+                    html += '<div class="cal-e" style="background:' + (pC[a.priority]||'#3b82f6') + ';color:#fff;cursor:pointer;" onclick="app.openTaskDetail(\'' + a.id + '\')">' + esc((a.subject||'').slice(0,15)) + '</div>';
+                });
+                if (dayActs.length > 3) html += '<div style="font-size:9px;color:var(--sf-text-weak);">+' + (dayActs.length-3) + ' more</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    createTaskFromTemplate(tmpl) {
+        document.getElementById('taskTmplMenu').style.display = 'none';
+        const templates = {
+            call: {type:'Call', subject:'Follow-up Call', priority:'Normal', _checklist:[{text:'Review contact history',done:false},{text:'Prepare talking points',done:false},{text:'Make the call',done:false},{text:'Log notes',done:false}]},
+            email: {type:'Email', subject:'Send Proposal', priority:'Normal', _checklist:[{text:'Draft proposal',done:false},{text:'Review numbers',done:false},{text:'Send email',done:false},{text:'Follow up in 3 days',done:false}]},
+            meeting: {type:'Meeting', subject:'Schedule Meeting', priority:'Normal', _checklist:[{text:'Find available times',done:false},{text:'Send calendar invite',done:false},{text:'Prepare agenda',done:false},{text:'Send reminder day-of',done:false}]},
+            dd: {type:'Task', subject:'Due Diligence Task', priority:'High', _labels:['orange'], _checklist:[{text:'Gather documents',done:false},{text:'Review financials',done:false},{text:'Flag issues',done:false},{text:'Write summary',done:false}]},
+            review: {type:'Task', subject:'Document Review', priority:'Normal', _checklist:[{text:'Read document',done:false},{text:'Note questions',done:false},{text:'Send feedback',done:false}]}
+        };
+        const t = templates[tmpl]; if (!t) return;
+        const newAct = {...t, id:'act-'+Date.now(), status:'Not Started', dueDate:null, createdAt:new Date().toISOString()};
+        this.data.activities.push(newAct);
+        firestoreUpsert('activities', newAct); this.persist();
+        this.openTaskDetail(newAct.id);
+    },
+
+    archiveTask(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        a._archived = true;
+        firestoreUpsert('activities', a); this.persist();
+        this.renderTaskBoard();
+    },
+
+    toggleRecurring(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        const freq = prompt('Recurring frequency (daily/weekly/monthly) or blank to disable:', a._recurring || '');
+        if (freq === null) return;
+        a._recurring = freq || null;
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    _showArchived: false,
+    _activeTimer: null,
+
+    startTaskTimer(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (this._activeTimer && this._activeTimer !== id) { this.stopTaskTimer(this._activeTimer); }
+        a._timerStart = Date.now();
+        this._activeTimer = id;
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    stopTaskTimer(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a || !a._timerStart) return;
+        const elapsed = Math.floor((Date.now() - a._timerStart) / 60000);
+        if (!a._timeLogged) a._timeLogged = 0;
+        a._timeLogged += elapsed;
+        delete a._timerStart;
+        if (this._activeTimer === id) this._activeTimer = null;
+        if (!a._activity_log) a._activity_log = [];
+        a._activity_log.push({action: 'Logged ' + elapsed + ' min', date: new Date().toISOString()});
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    addManualTime(id) {
+        const mins = parseInt(prompt('Minutes to add:', '30'));
+        if (!mins || isNaN(mins)) return;
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (!a._timeLogged) a._timeLogged = 0;
+        a._timeLogged += mins;
+        if (!a._activity_log) a._activity_log = [];
+        a._activity_log.push({action: 'Manually logged ' + mins + ' min', date: new Date().toISOString()});
+        firestoreUpsert('activities', a); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    addTaskDependency(id) {
+        const name = prompt('This task is blocked by (enter task subject):');
+        if (!name) return;
+        const blocker = this.data.activities.find(a => (a.subject||'').toLowerCase().includes(name.toLowerCase()));
+        if (!blocker) { alert('Task not found.'); return; }
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        if (!a._blockedBy) a._blockedBy = [];
+        if (!a._blockedBy.includes(blocker.id)) a._blockedBy.push(blocker.id);
+        if (!blocker._blocks) blocker._blocks = [];
+        if (!blocker._blocks.includes(id)) blocker._blocks.push(id);
+        firestoreUpsert('activities', a); firestoreUpsert('activities', blocker); this.persist();
+        document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove();
+        this.openTaskDetail(id);
+    },
+
+    async aiSuggestNextSteps(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        const el = document.getElementById('taskAiPanel');
+        if (el) el.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--sf-brand);">✨ Thinking...</div>';
+        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+        const checklist = (a._checklist||[]).map(c => (c.done?'✓':'○') + ' ' + c.text).join(', ');
+        const prompt = 'You are a productivity advisor for an investment banker. Given this task, suggest 3 specific next actions and any risks. Be concise.\n\nTask: ' + (a.subject||'') + '\nType: ' + (a.type||'') + '\nStatus: ' + (a.status||'') + '\nPriority: ' + (a.priority||'') + '\nNotes: ' + (a.notes||'None') + '\nChecklist: ' + (checklist||'None') + '\nContact: ' + (con?con.name:'None') + '\nDeal: ' + (deal?deal.name:'None') + '\nTime logged: ' + (a._timeLogged||0) + ' min';
+        const result = await this.askGemini(prompt);
+        if (el) this._showAIPanel('taskAiPanel', result);
+    },
+
+    _taskSavedViews: null,
+    saveTaskView() {
+        const name = prompt('Name this view:');
+        if (!name) return;
+        if (!this._taskSavedViews) this._taskSavedViews = JSON.parse(localStorage.getItem('matthewsCRM_taskViews') || '[]');
+        this._taskSavedViews.push({name, filters: {...this._taskFilter}, view: this._taskView});
+        localStorage.setItem('matthewsCRM_taskViews', JSON.stringify(this._taskSavedViews));
+        this.renderTaskBoard();
+    },
+
+    loadTaskView(idx) {
+        if (!this._taskSavedViews) this._taskSavedViews = JSON.parse(localStorage.getItem('matthewsCRM_taskViews') || '[]');
+        const v = this._taskSavedViews[idx];
+        if (!v) return;
+        this._taskFilter = {...v.filters};
+        this._taskView = v.view || 'board';
+        this.renderTaskBoard();
+    },
+
+    quickAddTask(subject, status) {
+        const newAct = {id: 'act-' + Date.now(), type: 'Task', subject, status, priority: 'Normal', dueDate: null, notes: null, createdAt: new Date().toISOString()};
+        this.data.activities.push(newAct);
+        firestoreUpsert('activities', newAct); this.persist();
+        this.renderTaskBoard();
+    },
+
+    dragActivity(e, id) { e.dataTransfer.setData('text/plain', id); e.target.classList.add('dragging'); },
+
+    dropActivity(e, newStatus) {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const act = this.data.activities.find(a => a.id === id);
+        if (!act || act.status === newStatus) return;
+        this.logChange('activity', id, act.subject||act.type, [{field:'status', from: act.status, to: newStatus}]);
+        act.status = newStatus;
+        if (newStatus === 'Completed' && act.contactId) {
+            const con = this.data.contacts.find(c => c.id === act.contactId);
+            if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) { con.la = today; firestoreUpsert('contacts', con); } }
+        }
+        if (newStatus === 'Completed' && act._recurring) {
+            const clone = JSON.parse(JSON.stringify(act));
+            clone.id = 'act-' + Date.now();
+            clone.status = 'Not Started';
+            clone.createdAt = new Date().toISOString();
+            if (clone._checklist) clone._checklist.forEach(c => c.done = false);
+            clone._comments = [];
+            const d = new Date(act.dueDate || Date.now());
+            if (act._recurring === 'daily') d.setDate(d.getDate()+1);
+            else if (act._recurring === 'weekly') d.setDate(d.getDate()+7);
+            else if (act._recurring === 'monthly') d.setMonth(d.getMonth()+1);
+            clone.dueDate = d.toISOString().slice(0,10);
+            this.data.activities.push(clone);
+            firestoreUpsert('activities', clone);
+        }
+        firestoreUpsert('activities', act);
+        this.persist();
+        this.renderTaskBoard();
+    },
+
+    _taskLabels: {red:'Urgent',orange:'Follow-up',yellow:'Waiting On',green:'Money',blue:'Admin',purple:'Personal'},
+
+    openTaskDetail(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) { this.editActivity(id); return; }
+        const con = this.data.contacts.find(c => c.id === (a.contactId||a.contact_id));
+        const deal = this.data.deals.find(d => d.id === (a.dealId||a.deal_id));
+        const acct = this.data.accounts.find(x => x.id === a.accountId);
+        const typeIcons = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄',Text:'💬'};
+        const isOverdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0,10) && a.status !== 'Completed';
+        const labels = a._labels || [];
+        const checklist = a._checklist || [];
+        const comments = a._comments || [];
+        const attachments = a._attachments || [];
+        const checkDone = checklist.filter(c => c.done).length;
+        const pColors = {High:'#ef4444',Normal:'#3b82f6',Low:'#9ca3af'};
+        let h = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;" onclick="if(event.target===this)this.remove();">';
+        h += '<div style="background:#fff;border-radius:8px;width:700px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation();">';
+        h += '<div style="padding:16px 20px;border-bottom:1px solid var(--sf-border-weak);display:flex;justify-content:space-between;align-items:flex-start;">';
+        h += '<div><div style="font-size:11px;color:var(--sf-text-weak);">' + (typeIcons[a.type]||'') + ' ' + esc(a.type||'Activity') + '</div>';
+        h += '<div style="font-size:18px;font-weight:700;margin:4px 0;">' + esc(a.subject||'') + '</div>';
+        h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">';
+        labels.forEach(l => { h += '<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:' + l + ';color:#fff;font-weight:600;">' + esc(this._taskLabels[l]||l) + '</span>'; });
+        h += '</div></div>';
+        h += '<button onclick="this.closest(\'[style*=fixed]\').remove();" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--sf-text-weak);">✕</button></div>';
+        h += '<div style="display:flex;gap:0;">';
+        h += '<div style="flex:1;padding:16px 20px;border-right:1px solid var(--sf-border-weak);min-width:0;">';
+        h += '<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Labels</div><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+        Object.entries(this._taskLabels).forEach(([color, name]) => { const active = labels.includes(color); h += '<span style="font-size:10px;padding:3px 8px;border-radius:3px;background:' + (active?color:'#f3f4f6') + ';color:' + (active?'#fff':'#666') + ';cursor:pointer;font-weight:600;" onclick="app.toggleTaskLabel(\'' + id + '\',\'' + color + '\')">' + name + '</span>'; });
+        h += '</div></div>';
+        h += '<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Notes</div>';
+        h += '<textarea id="taskDetailNotes" style="width:100%;min-height:60px;padding:8px;font-size:13px;border:1px solid var(--sf-border);border-radius:4px;font-family:inherit;resize:vertical;" onblur="app.saveTaskNotes(\'' + id + '\',this.value)">' + esc(a.notes||'') + '</textarea></div>';
+        h += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Checklist' + (checklist.length?' ('+checkDone+'/'+checklist.length+')':'') + '</span><button class="btn-small" onclick="app.addTaskCheckItem(\'' + id + '\')">+ Add</button></div>';
+        if (checklist.length) { h += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin-bottom:6px;overflow:hidden;"><div style="width:' + (checkDone/checklist.length*100) + '%;background:#22c55e;border-radius:2px;"></div></div>'; checklist.forEach((item,i) => { h += '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;"><input type="checkbox" ' + (item.done?'checked':'') + ' onchange="app.toggleTaskCheck(\'' + id + '\','+i+',this.checked)" style="width:auto;min-height:auto;"><span style="' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + '">' + esc(item.text) + '</span></div>'; }); }
+        h += '</div>';
+        h += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;">Attachments ('+attachments.length+')</span><button class="btn-small" onclick="app.addTaskAttachment(\'' + id + '\')">+ Add</button></div>';
+        attachments.forEach((att,i) => { h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;"><a href="' + esc(att.url) + '" target="_blank" style="color:var(--sf-brand);">📎 ' + esc(att.name) + '</a><button class="btn-small" onclick="app.removeTaskAttachment(\'' + id + '\','+i+')" style="font-size:10px;color:var(--sf-error);">✕</button></div>'; });
+        h += '</div>';
+        h += '<div><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Comments</div>';
+        h += '<div style="display:flex;gap:6px;margin-bottom:8px;"><input type="text" id="taskCommentInput" placeholder="Add a comment…" style="flex:1;min-height:30px;padding:4px 8px;font-size:12px;" onkeydown="if(event.key===\'Enter\')app.addTaskComment(\'' + id + '\')"><button class="btn-small" onclick="app.addTaskComment(\'' + id + '\')">Post</button></div>';
+        comments.slice().reverse().forEach(c => { h += '<div style="padding:6px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;"><div style="color:var(--sf-text-weak);font-size:10px;">' + (c.date?new Date(c.date).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'') + '</div><div>' + esc(c.text) + '</div></div>'; });
+        h += '</div>';
+        // AI panel
+        h += '<div id="taskAiPanel"></div>';
+        // Activity log
+        const actLog = a._activity_log || [];
+        if (actLog.length) {
+            h += '<div style="margin-top:12px;"><div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">Activity Log</div>';
+            actLog.slice(-10).reverse().forEach(l => { h += '<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--sf-border-weak);color:var(--sf-text-weak);">' + (l.date?new Date(l.date).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' — ':'') + esc(l.action) + '</div>'; });
+            h += '</div>';
+        }
+        h += '</div>';
+        h += '<div style="width:200px;padding:16px;flex-shrink:0;">';
+        h += '<div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:8px;">Details</div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Status:</span> ' + (a.status||'') + '</div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Priority:</span> <span style="color:' + (pColors[a.priority]||'#3b82f6') + ';font-weight:600;">' + (a.priority||'Normal') + '</span></div>';
+        h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Due:</span> ' + (a.dueDate||'None') + (isOverdue?' <span style="color:#ef4444;">⚠</span>':'') + '</div>';
+        if (con) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Contact:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewContact(\'' + con.id + '\');" style="color:var(--sf-brand);cursor:pointer;">' + esc(con.name) + '</a></div>';
+        if (deal) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Deal:</span> <a onclick="this.closest(\'[style*=fixed]\').remove();app.viewDealDetail(\'' + deal.id + '\');" style="color:#8b5cf6;cursor:pointer;">' + esc(deal.name) + '</a></div>';
+        if (acct) h += '<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--sf-text-weak);">Account:</span> ' + esc(acct.name) + '</div>';
+        // Time tracking
+        const timeLogged = a._timeLogged || 0;
+        const hrs = Math.floor(timeLogged/60); const mins = timeLogged%60;
+        h += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--sf-border-weak);">';
+        h += '<div style="font-size:10px;font-weight:700;color:var(--sf-text-weak);text-transform:uppercase;margin-bottom:4px;">⏱ Time Tracked</div>';
+        h += '<div style="font-size:16px;font-weight:700;margin-bottom:4px;">' + (hrs ? hrs + 'h ' : '') + mins + 'm</div>';
+        if (a._timerStart) { h += '<button class="btn-small" style="width:100%;background:#fee2e2;color:#991b1b;" onclick="app.stopTaskTimer(\'' + id + '\')">⏹ Stop Timer</button>'; }
+        else { h += '<button class="btn-small" style="width:100%;background:#dcfce7;color:#166534;" onclick="app.startTaskTimer(\'' + id + '\')">▶ Start Timer</button>'; }
+        h += '<button class="btn-small" style="width:100%;margin-top:2px;" onclick="app.addManualTime(\'' + id + '\')">+ Log Time</button>';
+        h += '</div>';
+        // Dependencies
+        const blockedBy = (a._blockedBy||[]).map(bid => this.data.activities.find(x => x.id === bid)).filter(Boolean);
+        const blocks = (a._blocks||[]).map(bid => this.data.activities.find(x => x.id === bid)).filter(Boolean);
+        if (blockedBy.length || blocks.length) {
+            h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--sf-border-weak);font-size:11px;">';
+            if (blockedBy.length) { h += '<div style="color:var(--sf-error);font-weight:600;margin-bottom:2px;">🚫 Blocked by:</div>'; blockedBy.forEach(b => { h += '<div style="padding:1px 0;cursor:pointer;color:var(--sf-brand);" onclick="this.closest(\'[style*=fixed]\').remove();app.openTaskDetail(\'' + b.id + '\');">' + esc(b.subject||b.type) + '</div>'; }); }
+            if (blocks.length) { h += '<div style="color:var(--sf-warning);font-weight:600;margin-top:4px;margin-bottom:2px;">⏳ Blocks:</div>'; blocks.forEach(b => { h += '<div style="padding:1px 0;cursor:pointer;color:var(--sf-brand);" onclick="this.closest(\'[style*=fixed]\').remove();app.openTaskDetail(\'' + b.id + '\');">' + esc(b.subject||b.type) + '</div>'; }); }
+            h += '</div>';
+        }
+        h += '<div style="margin-top:16px;display:flex;flex-direction:column;gap:4px;">';
+        h += '<button class="btn-small" style="width:100%;" onclick="this.closest(\'[style*=fixed]\').remove();app.editActivity(\'' + id + '\')">✏ Edit</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.addTaskDependency(\'' + id + '\')">🔗 Add Dependency</button>';
+        h += '<button class="btn-small" style="width:100%;background:#e8f0fe;color:#1a73e8;" onclick="app.aiSuggestNextSteps(\'' + id + '\')">✨ AI Suggest</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.searchGoogleDrive(\'' + esc((a.subject||'').replace(/'/g,"\\'")) + '\')">🔍 Search Drive</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.duplicateTask(\'' + id + '\')">📋 Duplicate</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="app.toggleRecurring(\'' + id + '\')">' + (a._recurring ? '🔁 Recurring: ' + a._recurring : '🔁 Make Recurring') + '</button>';
+        h += '<button class="btn-small" style="width:100%;" onclick="this.closest(\'[style*=fixed]\').remove();app.archiveTask(\'' + id + '\');">📦 Archive</button>';
+        h += '<button class="btn-small" style="width:100%;color:var(--sf-error);" onclick="if(confirm(\'Delete?\')){this.closest(\'[style*=fixed]\').remove();app.deleteActivity(\'' + id + '\');}">🗑 Delete</button>';
+        h += '</div></div></div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', h);
+    },
+
+    saveTaskNotes(id, val) { const a = this.data.activities.find(x => x.id === id); if (!a) return; a.notes = val||null; firestoreUpsert('activities', a); this.persist(); },
+
+    toggleTaskLabel(id, color) { const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._labels) a._labels = []; const idx = a._labels.indexOf(color); if (idx >= 0) a._labels.splice(idx,1); else a._labels.push(color); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    addTaskCheckItem(id) { const text = prompt('Checklist item:'); if (!text) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._checklist) a._checklist = []; a._checklist.push({text, done:false}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    toggleTaskCheck(id, idx, checked) { const a = this.data.activities.find(x => x.id === id); if (!a||!a._checklist) return; a._checklist[idx].done = checked; firestoreUpsert('activities', a); this.persist(); },
+
+    addTaskComment(id) { const input = document.getElementById('taskCommentInput'); if (!input||!input.value.trim()) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._comments) a._comments = []; a._comments.push({text:input.value.trim(), date:new Date().toISOString()}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    addTaskAttachment(id) { const name = prompt('Name:'); if (!name) return; const url = prompt('URL:'); if (!url) return; const a = this.data.activities.find(x => x.id === id); if (!a) return; if (!a._attachments) a._attachments = []; a._attachments.push({name,url}); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    removeTaskAttachment(id, idx) { const a = this.data.activities.find(x => x.id === id); if (!a||!a._attachments) return; a._attachments.splice(idx,1); firestoreUpsert('activities', a); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(id); },
+
+    duplicateTask(id) { const orig = this.data.activities.find(x => x.id === id); if (!orig) return; const clone = JSON.parse(JSON.stringify(orig)); clone.id = 'act-'+Date.now(); clone.subject = (clone.subject||'')+' (Copy)'; clone.status = 'Not Started'; clone.createdAt = new Date().toISOString(); if (clone._checklist) clone._checklist.forEach(c => c.done=false); clone._comments = []; this.data.activities.push(clone); firestoreUpsert('activities', clone); this.persist(); document.querySelector('[style*="fixed"][style*="z-index:1000"]')?.remove(); this.openTaskDetail(clone.id); },
+
+    _fundView: 'overview',
+
+    _fundDefaults() {
+        if (!this.data._fund) this.data._fund = {
+            name: 'Matthews Capital Partners',
+            entity: 'Series LLC',
+            state: 'Texas',
+            targetLaunch: '2026-09-01',
+            targetSize: 0.5,
+            sbaLenders: [],
+            serviceProviders: [],
+            documents: [],
+            monthlyReports: [],
+            hundredDayPlan: []
+        };
+        if (!this.data._fund.phases) this.data._fund.phases = {
+            'Entity Formation': [
+                {text:'Decide: amend existing LLC or form new Series LLC',done:false,deadline:'2026-05-15'},
+                {text:'Draft operating agreement',done:false,deadline:'2026-05-31'},
+                {text:'File with Texas Secretary of State',done:false,deadline:'2026-06-01'},
+                {text:'Obtain EIN from IRS',done:false,deadline:'2026-06-05'},
+                {text:'Designate registered agent in Texas',done:false,deadline:'2026-06-01'},
+                {text:'Open business bank account',done:false,deadline:'2026-06-15'},
+                {text:'Set up business credit card',done:false,deadline:'2026-06-15'},
+                {text:'Obtain business insurance (E&O, general liability)',done:false,deadline:'2026-06-30'}
+            ],
+            'SBA Loan Preparation': [
+                {text:'Write business plan',done:false,deadline:'2026-06-15'},
+                {text:'Prepare personal financial statement',done:false,deadline:'2026-06-15'},
+                {text:'Gather 3 years personal tax returns',done:false,deadline:'2026-06-01'},
+                {text:'Build resume/CV highlighting relevant experience',done:false,deadline:'2026-06-10'},
+                {text:'Research SBA 7(a) lenders in DFW',done:false,deadline:'2026-06-15'},
+                {text:'Submit SBA pre-qualification with 3+ lenders',done:false,deadline:'2026-06-30'},
+                {text:'Determine equity injection amount (10-20%)',done:false,deadline:'2026-06-30'}
+            ],
+            'Deal Sourcing': [
+                {text:'Define acquisition criteria (revenue, SDE, industry, geography)',done:false,deadline:'2026-05-15'},
+                {text:'Create profiles on BizBuySell and BusinessBroker.net',done:false,deadline:'2026-05-20'},
+                {text:'Reach out to 10+ business brokers in DFW',done:false,deadline:'2026-06-15'},
+                {text:'Join SCORE and local business acquisition networks',done:false,deadline:'2026-06-01'},
+                {text:'Set up deal alert notifications on listing platforms',done:false,deadline:'2026-05-25'},
+                {text:'Review 50+ target businesses',done:false,deadline:'2026-08-01'},
+                {text:'Submit 3-5 LOIs',done:false,deadline:'2026-08-15'},
+                {text:'Enter exclusivity on target acquisition',done:false,deadline:'2026-08-31'}
+            ],
+            'Due Diligence & Close': [
+                {text:'Engage acquisition attorney',done:false,deadline:'2026-07-15'},
+                {text:'Engage CPA for tax due diligence',done:false,deadline:'2026-07-15'},
+                {text:'Complete financial DD (3yr tax returns, SDE verification)',done:false,deadline:'2026-08-15'},
+                {text:'Complete customer concentration analysis',done:false,deadline:'2026-08-15'},
+                {text:'Assess key person risk and transition plan',done:false,deadline:'2026-08-15'},
+                {text:'Review lease terms and transferability',done:false,deadline:'2026-08-15'},
+                {text:'Finalize SBA loan approval',done:false,deadline:'2026-08-31'},
+                {text:'Execute purchase agreement',done:false,deadline:'2026-09-01'},
+                {text:'Close acquisition',done:false,deadline:'2026-09-15'}
+            ],
+            'Post-Acquisition (100 Days)': [
+                {text:'Week 1-2: Meet all employees individually',done:false,deadline:''},
+                {text:'Week 1-2: Review all customer contracts and relationships',done:false,deadline:''},
+                {text:'Week 1-2: Assess cash flow and immediate needs',done:false,deadline:''},
+                {text:'Week 3-4: Implement financial controls and reporting',done:false,deadline:''},
+                {text:'Week 3-4: Stabilize operations and retain key employees',done:false,deadline:''},
+                {text:'Month 2: Identify quick wins (cost savings, pricing)',done:false,deadline:''},
+                {text:'Month 2: Begin customer outreach and relationship building',done:false,deadline:''},
+                {text:'Month 3: Launch first growth initiative',done:false,deadline:''},
+                {text:'Month 3: Set 12-month KPI targets',done:false,deadline:''}
+            ]
+        };
+        return this.data._fund;
+    },
+
+    renderFundLaunch() {
+        const fund = this._fundDefaults();
+        const v = this._fundView;
+        const today = new Date().toISOString().slice(0,10);
+        const launchDate = new Date(fund.targetLaunch);
+        const daysToLaunch = Math.ceil((launchDate - new Date()) / 86400000);
+
+        let totalItems = 0, doneItems = 0;
+        Object.values(fund.phases).forEach(items => { totalItems += items.length; doneItems += items.filter(i => i.done).length; });
+        const overallPct = totalItems > 0 ? Math.round(doneItems / totalItems * 100) : 0;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">'
+            + '<div><div style="font-size:11px;color:var(--sf-text-weak);">Private Equity Fund</div><h2 style="margin:0;">' + (fund.name||'Fund Launch') + '</h2></div>'
+            + '<div style="display:flex;gap:6px;align-items:center;">'
+            + '<div class="cal-view-tabs">'
+            + '<button class="cal-view-tab ' + (v==='overview'?'active':'') + '" onclick="app._fundView=\'overview\';app.renderFundLaunch();">Overview</button>'
+            + '<button class="cal-view-tab ' + (v==='sba'?'active':'') + '" onclick="app._fundView=\'sba\';app.renderFundLaunch();">SBA Loans</button>'
+            + '<button class="cal-view-tab ' + (v==='docs'?'active':'') + '" onclick="app._fundView=\'docs\';app.renderFundLaunch();">Documents</button>'
+            + '<button class="cal-view-tab ' + (v==='providers'?'active':'') + '" onclick="app._fundView=\'providers\';app.renderFundLaunch();">Advisors</button>'
+            + '<button class="cal-view-tab ' + (v==='accounting'?'active':'') + '" onclick="app._fundView=\'accounting\';app.renderFundLaunch();">Accounting</button>'
+            + '</div></div></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value" style="color:' + (daysToLaunch <= 30 ? '#ef4444' : daysToLaunch <= 90 ? '#f59e0b' : '#3b82f6') + ';">' + daysToLaunch + '</div><div class="ps-label">Days to Launch</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + overallPct + '%</div><div class="ps-label">Complete</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + doneItems + '/' + totalItems + '</div><div class="ps-label">Tasks Done</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (fund.sbaLenders||[]).length + '</div><div class="ps-label">SBA Lenders</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (fund.serviceProviders||[]).length + '</div><div class="ps-label">Advisors</div></div>'
+            + '</div>';
+
+        html += '<div style="display:flex;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-bottom:16px;"><div style="width:' + overallPct + '%;background:linear-gradient(90deg,#7e22ce,#a855f7);border-radius:4px;"></div></div>';
+
+        if (v === 'overview') html += this._renderFundOverview(fund, today);
+        else if (v === 'sba') html += this._renderSBALenders(fund);
+        else if (v === 'docs') html += this._renderFundDocs(fund);
+        else if (v === 'providers') html += this._renderServiceProviders(fund);
+        else if (v === 'accounting') html += this._renderFundAccounting(fund);
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    _renderFundOverview(fund, today) {
+        let html = '';
+        Object.entries(fund.phases).forEach(([phase, items]) => {
+            const done = items.filter(i => i.done).length;
+            const pct = Math.round(done / items.length * 100);
+            const overdue = items.filter(i => !i.done && i.deadline && i.deadline < today).length;
+            const phaseColors = {'Entity Formation':'#3b82f6','SBA Loan Preparation':'#22c55e','Deal Sourcing':'#8b5cf6','Due Diligence & Close':'#f59e0b','Post-Acquisition (100 Days)':'#ef4444'};
+            const color = phaseColors[phase] || '#6b7280';
+            html += '<div class="card" style="margin-bottom:10px;' + (pct === 100 ? 'opacity:0.7;' : '') + '">'
+                + '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">'
+                + '<span style="display:flex;align-items:center;gap:8px;"><span style="width:10px;height:10px;border-radius:50%;background:' + color + ';"></span>' + phase + '</span>'
+                + '<span style="font-size:11px;color:' + (pct===100?'var(--sf-success)':'var(--sf-text-weak)') + ';font-weight:600;">' + pct + '% (' + done + '/' + items.length + ')' + (overdue ? ' · <span style="color:var(--sf-error);">' + overdue + ' overdue</span>' : '') + '</span>'
+                + '</div><div style="padding:4px 12px;">';
+            html += '<div style="display:flex;height:4px;background:#e5e7eb;border-radius:2px;margin:6px 0 8px;overflow:hidden;"><div style="width:' + pct + '%;background:' + color + ';border-radius:2px;"></div></div>';
+            items.forEach((item, i) => {
+                const isOverdue = !item.done && item.deadline && item.deadline < today;
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<input type="checkbox" ' + (item.done?'checked':'') + ' onchange="app.toggleFundItem(\'' + phase + '\',' + i + ',this.checked)" style="width:auto;min-height:auto;">'
+                    + '<span style="flex:1;' + (item.done?'text-decoration:line-through;color:var(--sf-text-weak);':'') + (isOverdue?'color:var(--sf-error);':'') + '">' + esc(item.text) + '</span>'
+                    + (item.deadline ? '<span style="font-size:10px;color:' + (isOverdue?'var(--sf-error)':'var(--sf-text-weak)') + ';">' + item.deadline + '</span>' : '')
+                    + '</div>';
+            });
+            html += '<div style="padding:4px 0;"><button class="btn-small" onclick="app.addFundItem(\'' + phase + '\')">+ Add item</button></div>';
+            html += '</div></div>';
+        });
+        return html;
+    },
+
+    toggleFundItem(phase, idx, checked) {
+        const fund = this.data._fund;
+        if (!fund || !fund.phases || !fund.phases[phase] || !fund.phases[phase][idx]) return;
+        fund.phases[phase][idx].done = checked;
+        this._syncMeta(); this.persist();
+    },
+
+    addFundItem(phase) {
+        if (!this.data._fund || !this.data._fund.phases || !this.data._fund.phases[phase]) return;
+        const text = prompt('New task:');
+        if (!text) return;
+        const deadline = prompt('Deadline (YYYY-MM-DD, or leave blank):', '') || '';
+        this.data._fund.phases[phase].push({text, done: false, deadline});
+        this._syncMeta(); this.persist();
+        this.renderFundLaunch();
+    },
+
+    _renderSBALenders(fund) {
+        let html = '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">SBA Lender Pipeline <button class="btn-small" onclick="app.addSBALender()">+ Add Lender</button></div><div style="padding:0;">';
+        if ((fund.sbaLenders||[]).length) {
+            html += '<table class="compact-table"><thead><tr><th>Lender</th><th>Contact</th><th>Status</th><th>Rate</th><th>Term</th><th>Max Amount</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+            fund.sbaLenders.forEach((l, i) => {
+                const statusColors = {'Researching':'#9ca3af','Applied':'#3b82f6','In Review':'#f59e0b','Approved':'#22c55e','Declined':'#ef4444','Closed':'#7e22ce'};
+                html += '<tr><td style="font-weight:600;">' + (l.name||'') + '</td><td>' + (l.contact||'') + '</td>'
+                    + '<td><span style="padding:2px 8px;border-radius:3px;font-size:10px;font-weight:600;background:' + (statusColors[l.status]||'#9ca3af') + '22;color:' + (statusColors[l.status]||'#9ca3af') + ';">' + (l.status||'Researching') + '</span></td>'
+                    + '<td>' + (l.rate||'—') + '</td><td>' + (l.term||'—') + '</td><td>' + (l.maxAmount ? '$'+l.maxAmount+'K' : '—') + '</td>'
+                    + '<td style="font-size:11px;">' + (l.notes||'').slice(0,40) + '</td>'
+                    + '<td><button class="btn-small" onclick="app.editSBALender(' + i + ')">Edit</button></td></tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No lenders tracked yet.</div>';
+        }
+        html += '</div></div>';
+
+        html += '<div class="card" style="margin-top:12px;"><div class="card-header">SBA Loan Calculator</div><div style="padding:16px;">'
+            + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Loan Amount ($)</label><input type="number" id="sbaCalcAmount" value="350000" oninput="app.calcSBA()"></div>'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Interest Rate (%)</label><input type="number" id="sbaCalcRate" value="10.5" step="0.1" oninput="app.calcSBA()"></div>'
+            + '<div class="form-group" style="margin:0;"><label style="font-size:11px;">Term (years)</label><input type="number" id="sbaCalcTerm" value="10" oninput="app.calcSBA()"></div></div>'
+            + '<div id="sbaCalcResult" style="font-size:13px;"></div></div></div>';
+        setTimeout(() => this.calcSBA(), 100);
+        return html;
+    },
+
+    calcSBA() {
+        const P = parseFloat(document.getElementById('sbaCalcAmount')?.value) || 0;
+        const r = (parseFloat(document.getElementById('sbaCalcRate')?.value) || 0) / 100 / 12;
+        const n = (parseFloat(document.getElementById('sbaCalcTerm')?.value) || 0) * 12;
+        if (!P || !r || !n) return;
+        const payment = P * (r * Math.pow(1+r,n)) / (Math.pow(1+r,n) - 1);
+        const totalPaid = payment * n;
+        const totalInterest = totalPaid - P;
+        const el = document.getElementById('sbaCalcResult');
+        if (el) el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;">'
+            + '<div><div style="font-size:20px;font-weight:700;color:var(--sf-brand);">$' + Math.round(payment).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Monthly Payment</div></div>'
+            + '<div><div style="font-size:20px;font-weight:700;">$' + Math.round(totalPaid).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Total Paid</div></div>'
+            + '<div><div style="font-size:20px;font-weight:700;color:var(--sf-error);">$' + Math.round(totalInterest).toLocaleString() + '</div><div style="font-size:10px;color:var(--sf-text-weak);">Total Interest</div></div></div>';
+    },
+
+    addSBALender() {
+        const name = prompt('Lender name:'); if (!name) return;
+        const contact = prompt('Contact name:', '') || '';
+        const status = prompt('Status (Researching/Applied/In Review/Approved/Declined):', 'Researching') || 'Researching';
+        if (!this.data._fund.sbaLenders) this.data._fund.sbaLenders = [];
+        this.data._fund.sbaLenders.push({name, contact, status, rate:'', term:'', maxAmount:'', notes:'', created: new Date().toISOString()});
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    editSBALender(idx) {
+        const l = this.data._fund.sbaLenders[idx]; if (!l) return;
+        l.name = prompt('Lender:', l.name) || l.name;
+        l.contact = prompt('Contact:', l.contact) || l.contact;
+        l.status = prompt('Status (Researching/Applied/In Review/Approved/Declined/Closed):', l.status) || l.status;
+        l.rate = prompt('Rate offered:', l.rate) || l.rate;
+        l.term = prompt('Term (years):', l.term) || l.term;
+        l.maxAmount = prompt('Max amount ($K):', l.maxAmount) || l.maxAmount;
+        l.notes = prompt('Notes:', l.notes) || l.notes;
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    _renderFundDocs(fund) {
+        const categories = ['Entity Formation','SBA Application','Target Business','Closing','Post-Acquisition'];
+        const statuses = {needed:'#ef4444',progress:'#f59e0b',complete:'#22c55e'};
+        if (!fund.documents) fund.documents = [];
+        let html = '';
+        categories.forEach(cat => {
+            const docs = fund.documents.filter(d => d.category === cat);
+            html += '<div class="card" style="margin-bottom:10px;"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">' + cat + ' <button class="btn-small" onclick="app.addFundDoc(\'' + cat + '\')">+ Add</button></div><div style="padding:8px 12px;">';
+            if (docs.length) {
+                docs.forEach((d, i) => {
+                    const globalIdx = fund.documents.indexOf(d);
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                        + '<div style="display:flex;align-items:center;gap:8px;">'
+                        + '<span style="width:8px;height:8px;border-radius:50%;background:' + (statuses[d.status]||'#ef4444') + ';"></span>'
+                        + (d.url ? '<a href="' + d.url + '" target="_blank" style="color:var(--sf-brand);font-weight:600;">' + d.name + '</a>' : '<span>' + d.name + '</span>')
+                        + '</div><div style="display:flex;gap:4px;">'
+                        + '<select onchange="app.data._fund.documents[' + globalIdx + '].status=this.value;app._syncMeta();app.persist();app.renderFundLaunch();" style="font-size:10px;padding:1px 4px;min-height:20px;"><option value="needed" ' + (d.status==='needed'?'selected':'') + '>Needed</option><option value="progress" ' + (d.status==='progress'?'selected':'') + '>In Progress</option><option value="complete" ' + (d.status==='complete'?'selected':'') + '>Complete</option></select>'
+                        + '</div></div>';
+                });
+            } else { html += '<div style="font-size:11px;color:var(--sf-text-weak);padding:4px 0;">No documents yet.</div>'; }
+            html += '</div></div>';
+        });
+        return html;
+    },
+
+    addFundDoc(category) {
+        const name = prompt('Document name:'); if (!name) return;
+        const url = prompt('Google Drive URL (optional):', '') || '';
+        if (!this.data._fund.documents) this.data._fund.documents = [];
+        this.data._fund.documents.push({name, category, url, status: 'needed'});
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    _renderServiceProviders(fund) {
+        const roles = ['Attorney','CPA/Accountant','Insurance Broker','SBA Lender','Business Broker','SCORE Mentor','Financial Advisor','Other'];
+        if (!fund.serviceProviders) fund.serviceProviders = [];
+        let html = '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Service Providers & Advisors <button class="btn-small" onclick="app.addServiceProvider()">+ Add</button></div><div style="padding:0;">';
+        if (fund.serviceProviders.length) {
+            html += '<table class="compact-table"><thead><tr><th>Role</th><th>Name</th><th>Firm</th><th>Phone</th><th>Email</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
+            fund.serviceProviders.forEach((sp, i) => {
+                const linked = sp.contactId ? this.data.contacts.find(c => c.id === sp.contactId) : null;
+                html += '<tr><td style="font-weight:600;">' + (sp.role||'') + '</td>'
+                    + '<td>' + (linked ? '<a onclick="app.viewContact(\'' + linked.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + linked.name + '</a>' : (sp.name||'')) + '</td>'
+                    + '<td>' + (sp.firm||'') + '</td><td>' + (sp.phone||'') + '</td><td>' + (sp.email||'') + '</td>'
+                    + '<td><span style="padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;background:' + (sp.engaged?'#dcfce7;color:#166534':'#f3f4f6;color:#374151') + ';">' + (sp.engaged?'Engaged':'Prospect') + '</span></td>'
+                    + '<td style="font-size:11px;">' + (sp.notes||'').slice(0,40) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else { html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No service providers yet.</div>'; }
+        html += '</div></div>';
+        return html;
+    },
+
+    addServiceProvider() {
+        const role = prompt('Role (Attorney, CPA, Insurance Broker, SBA Lender, Business Broker, SCORE Mentor):', 'Attorney') || 'Other';
+        const name = prompt('Name:'); if (!name) return;
+        const firm = prompt('Firm:', '') || '';
+        const phone = prompt('Phone:', '') || '';
+        const email = prompt('Email:', '') || '';
+        const contactName = prompt('Link to CRM contact (name, or leave blank):', '');
+        const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
+        if (!this.data._fund.serviceProviders) this.data._fund.serviceProviders = [];
+        this.data._fund.serviceProviders.push({role, name, firm, phone, email, contactId: contact?.id||null, engaged: false, notes: ''});
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    _renderFundAccounting(fund) {
+        if (!fund.accounting) fund.accounting = {equity: 0, sbaLoan: 0, monthlyPayment: 0, cashReserve: 0, distributions: 0};
+        const a = fund.accounting;
+        const totalCapital = (a.equity||0) + (a.sbaLoan||0);
+        const nav = totalCapital - (a.distributions||0);
+        const reports = fund.monthlyReports || [];
+
+        let html = '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.equity||0).toLocaleString() + '</div><div class="ps-label">Personal Equity</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.sbaLoan||0).toLocaleString() + '</div><div class="ps-label">SBA Loan</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCapital.toLocaleString() + '</div><div class="ps-label">Total Capital</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.monthlyPayment||0).toLocaleString() + '</div><div class="ps-label">Monthly SBA Payment</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + (a.cashReserve||0).toLocaleString() + '</div><div class="ps-label">Cash Reserve</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + nav.toLocaleString() + '</div><div class="ps-label">Fund NAV</div></div>'
+            + '</div>';
+
+        html += '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Fund Accounting <button class="btn-small" onclick="app.editFundAccounting()">Edit</button></div>'
+            + '<div style="padding:16px;font-size:12px;color:var(--sf-text-weak);">Update your fund accounting figures by clicking Edit. These numbers track your personal capital deployment and SBA loan obligations.</div></div>';
+
+        html += '<div class="card" style="margin-top:12px;"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">Monthly Reports <button class="btn-small" onclick="app.addMonthlyReport()">+ Add Report</button></div><div style="padding:0;">';
+        if (reports.length) {
+            html += '<table class="compact-table"><thead><tr><th>Month</th><th>Revenue</th><th>Expenses</th><th>Net Income</th><th>Cash Flow</th><th>Notes</th></tr></thead><tbody>';
+            reports.forEach(r => {
+                const net = (r.revenue||0) - (r.expenses||0);
+                html += '<tr><td style="font-weight:600;">' + (r.month||'') + '</td><td>$' + (r.revenue||0).toLocaleString() + '</td><td>$' + (r.expenses||0).toLocaleString() + '</td>'
+                    + '<td style="color:' + (net>=0?'var(--sf-success)':'var(--sf-error)') + ';font-weight:600;">$' + net.toLocaleString() + '</td>'
+                    + '<td>$' + (r.cashFlow||0).toLocaleString() + '</td><td style="font-size:11px;">' + (r.notes||'').slice(0,40) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else { html += '<div style="padding:24px;text-align:center;color:var(--sf-text-weak);">No monthly reports yet. Add one after your first month of operations.</div>'; }
+        html += '</div></div>';
+        return html;
+    },
+
+    editFundAccounting() {
+        const a = this.data._fund.accounting || {};
+        a.equity = parseFloat(prompt('Personal equity invested ($):', a.equity||0)) || 0;
+        a.sbaLoan = parseFloat(prompt('SBA loan amount ($):', a.sbaLoan||0)) || 0;
+        a.monthlyPayment = parseFloat(prompt('Monthly SBA payment ($):', a.monthlyPayment||0)) || 0;
+        a.cashReserve = parseFloat(prompt('Cash reserve ($):', a.cashReserve||0)) || 0;
+        a.distributions = parseFloat(prompt('Total distributions to date ($):', a.distributions||0)) || 0;
+        this.data._fund.accounting = a;
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    addMonthlyReport() {
+        const month = prompt('Month (e.g. 2026-10):', new Date().toISOString().slice(0,7)); if (!month) return;
+        const revenue = parseFloat(prompt('Revenue ($):', '0')) || 0;
+        const expenses = parseFloat(prompt('Expenses ($):', '0')) || 0;
+        const cashFlow = parseFloat(prompt('Operating cash flow ($):', '0')) || 0;
+        const notes = prompt('Notes:', '') || '';
+        if (!this.data._fund.monthlyReports) this.data._fund.monthlyReports = [];
+        this.data._fund.monthlyReports.push({month, revenue, expenses, cashFlow, notes});
+        this._syncMeta(); this.persist(); this.renderFundLaunch();
+    },
+
+    renderInvestors() {
+        if (!this.data.investors) this.data.investors = [];
+        const investors = this.data.investors;
+        const totalCommitted = investors.reduce((s,i) => s + (i.committed||0), 0);
+        const totalCalled = investors.reduce((s,i) => s + (i.called||0), 0);
+        const totalDistributed = investors.reduce((s,i) => s + (i.distributed||0), 0);
+        const unfunded = totalCommitted - totalCalled;
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'
+            + '<h2 style="margin:0;">Investors (LPs)</h2>'
+            + '<button class="btn-primary" onclick="app.addInvestor()">+ Add Investor</button></div>';
+
+        html += '<div class="pipeline-stats">'
+            + '<div class="pipeline-stat"><div class="ps-value">' + investors.length + '</div><div class="ps-label">Total LPs</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCommitted.toFixed(1) + 'M</div><div class="ps-label">Committed</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalCalled.toFixed(1) + 'M</div><div class="ps-label">Called</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + unfunded.toFixed(1) + 'M</div><div class="ps-label">Unfunded</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">$' + totalDistributed.toFixed(1) + 'M</div><div class="ps-label">Distributed</div></div>'
+            + '<div class="pipeline-stat"><div class="ps-value">' + (totalCalled > 0 ? (totalDistributed / totalCalled).toFixed(2) + 'x' : '—') + '</div><div class="ps-label">DPI</div></div>'
+            + '</div>';
+
+        if (investors.length) {
+            html += '<div class="card"><div style="padding:0;"><table class="compact-table"><thead><tr>'
+                + '<th>Investor</th><th>Type</th><th>Contact</th><th>Committed</th><th>Called</th><th>Unfunded</th><th>Distributed</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            investors.forEach((inv, i) => {
+                const contact = inv.contactId ? this.data.contacts.find(c => c.id === inv.contactId) : null;
+                html += '<tr>'
+                    + '<td style="font-weight:600;">' + (inv.name||'') + '</td>'
+                    + '<td>' + (inv.type||'') + '</td>'
+                    + '<td>' + (contact ? '<a onclick="app.viewContact(\'' + contact.id + '\')" style="color:var(--sf-brand);cursor:pointer;">' + contact.name + '</a>' : '—') + '</td>'
+                    + '<td>$' + (inv.committed||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + (inv.called||0).toFixed(1) + 'M</td>'
+                    + '<td>$' + ((inv.committed||0) - (inv.called||0)).toFixed(1) + 'M</td>'
+                    + '<td>$' + (inv.distributed||0).toFixed(1) + 'M</td>'
+                    + '<td><span style="padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:' + (inv.status==='Active'?'#dcfce7;color:#166534':inv.status==='Prospect'?'#dbeafe;color:#1e40af':'#f3f4f6;color:#374151') + ';">' + (inv.status||'Active') + '</span></td>'
+                    + '<td><button class="btn-small" onclick="app.editInvestor(' + i + ')">Edit</button> <button class="btn-small" onclick="app.logCapitalCall(' + i + ')">Call</button> <button class="btn-small" onclick="app.logDistribution(' + i + ')">Dist</button></td></tr>';
+            });
+            html += '</tbody></table></div></div>';
+        } else {
+            html += '<div style="text-align:center;padding:40px;color:var(--sf-text-weak);">No investors yet. Click "+ Add Investor" to start tracking LPs.</div>';
+        }
+
+        // Communication log
+        const comms = (this.data._investorComms||[]).slice(0,15);
+        if (comms.length) {
+            html += '<div class="card" style="margin-top:12px;"><div class="card-header">Recent Investor Communications</div><div style="padding:12px;">';
+            comms.forEach(cm => {
+                html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--sf-border-weak);font-size:12px;">'
+                    + '<span style="color:var(--sf-text-weak);min-width:90px;">' + (cm.date||'').slice(0,10) + '</span>'
+                    + '<span style="font-weight:600;">' + (cm.investor||'') + '</span>'
+                    + '<span>' + (cm.type||'') + ': ' + (cm.note||'') + '</span></div>';
+            });
+            html += '</div></div>';
+        }
+
+        document.getElementById('content').innerHTML = html;
+    },
+
+    addInvestor() {
+        const name = prompt('Investor/LP name:');
+        if (!name) return;
+        const type = prompt('Type (Individual, Family Office, Fund of Funds, Institution, Endowment):', 'Individual') || 'Individual';
+        const commitStr = prompt('Commitment amount ($M):', '0');
+        if (commitStr === null) return;
+        const committed = parseFloat(commitStr) || 0;
+        const contactName = prompt('Link to CRM contact (name, or leave blank):', '');
+        const contact = contactName ? this.data.contacts.find(c => (c.name||'').toLowerCase().includes(contactName.toLowerCase())) : null;
+        if (!this.data.investors) this.data.investors = [];
+        this.data.investors.push({id: 'inv-' + Date.now(), name, type, committed, called: 0, distributed: 0, status: 'Active', contactId: contact ? contact.id : null, created: new Date().toISOString()});
+        this.persist();
+        this.renderInvestors();
+    },
+
+    editInvestor(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const name = prompt('Name:', inv.name); if (name === null) return;
+        const type = prompt('Type:', inv.type); if (type === null) return;
+        const committed = parseFloat(prompt('Committed ($M):', inv.committed)); if (isNaN(committed)) return;
+        const status = prompt('Status (Active/Prospect/Exited):', inv.status) || inv.status;
+        inv.name = name; inv.type = type; inv.committed = committed; inv.status = status;
+        this._syncMeta(); this.persist(); this.renderInvestors();
+    },
+
+    logCapitalCall(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const amount = parseFloat(prompt('Capital call amount ($M):', ''));
+        if (!amount || isNaN(amount)) return;
+        inv.called = (inv.called||0) + amount;
+        if (!this.data._investorComms) this.data._investorComms = [];
+        this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Capital Call', note: '$' + amount.toFixed(1) + 'M called'});
+        this._syncMeta(); this.persist(); this.renderInvestors();
+    },
+
+    logDistribution(idx) {
+        const inv = this.data.investors[idx];
+        if (!inv) return;
+        const amount = parseFloat(prompt('Distribution amount ($M):', ''));
+        if (!amount || isNaN(amount)) return;
+        inv.distributed = (inv.distributed||0) + amount;
+        if (!this.data._investorComms) this.data._investorComms = [];
+        this.data._investorComms.unshift({date: new Date().toISOString(), investor: inv.name, type: 'Distribution', note: '$' + amount.toFixed(1) + 'M distributed'});
+        this._syncMeta(); this.persist(); this.renderInvestors();
+    },
+
+    renderReferrals() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Referrals</h2>
+                <button class="btn-primary" onclick="app.openReferralForm()">New Referral</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>From</th><th>To</th><th>Type</th><th>Status</th><th>Date</th><th>Notes</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${this.data.referrals.length ? this.data.referrals.map(r => {
+                                const from = this.data.contacts.find(c => c.id === r.from_id);
+                                const to = this.data.contacts.find(c => c.id === r.to_id);
+                                return `<tr>
+                                    <td>${from ? `<a onclick="app.viewContact('${from.id}')" style="cursor:pointer; color:#3b82f6;">${from.name}</a>` : r.from_id || ''}</td>
+                                    <td>${to ? `<a onclick="app.viewContact('${to.id}')" style="cursor:pointer; color:#3b82f6;">${to.name}</a>` : r.to_id || ''}</td>
+                                    <td>${r.type || ''}</td>
+                                    <td><span class="badge ref-status-${(r.status||'pending').toLowerCase()}">${r.status || 'Pending'}</span></td>
+                                    <td>${r.date || ''}</td>
+                                    <td>${r.notes || ''}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editReferral('${r.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteReferral('${r.id}')">Delete</button>
+                                    </td>
+                                </tr>`;
+                            }).join('') : '<tr><td colspan="7" class="text-muted">No referrals yet. Click "New Referral" to create one.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    openReferralForm() {
+        document.getElementById('referralId').value = '';
+        document.getElementById('referralFrom').value = '';
+        document.getElementById('referralTo').value = '';
+        document.getElementById('referralType').value = 'Business';
+        document.getElementById('referralStatus').value = 'Pending';
+        document.getElementById('referralDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('referralNotes').value = '';
+        this.updateReferralSelects();
+        this.openModal('modalReferral');
+    },
+
+    editReferral(id) {
+        const r = this.data.referrals.find(x => x.id === id);
+        if (!r) return;
+        this.updateReferralSelects();
+        document.getElementById('referralId').value = r.id;
+        document.getElementById('referralFrom').value = r.from_id || '';
+        document.getElementById('referralTo').value = r.to_id || '';
+        document.getElementById('referralType').value = r.type || 'Business';
+        document.getElementById('referralStatus').value = r.status || 'Pending';
+        document.getElementById('referralDate').value = r.date || '';
+        document.getElementById('referralNotes').value = r.notes || '';
+        this.openModal('modalReferral');
+    },
+
+    updateReferralSelects() {
+        const opts = '<option value="">Select...</option>' + this.data.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        document.getElementById('referralFrom').innerHTML = opts;
+        document.getElementById('referralTo').innerHTML = opts;
+    },
+
+    async saveReferral(e) {
+        e.preventDefault();
+        const id = document.getElementById('referralId').value;
+        const referral = {
+            from_id: document.getElementById('referralFrom').value,
+            to_id: document.getElementById('referralTo').value,
+            type: document.getElementById('referralType').value,
+            status: document.getElementById('referralStatus').value,
+            date: document.getElementById('referralDate').value || null,
+            notes: document.getElementById('referralNotes').value || null
+        };
+        if (id) {
+            const idx = this.data.referrals.findIndex(r => r.id === id);
+            if (idx >= 0) { this.data.referrals[idx] = {...this.data.referrals[idx], ...referral}; firestoreUpsert('referrals', this.data.referrals[idx]); }
+        } else {
+            const newRef = {...referral, id: 'ref-' + Date.now(), created_at: new Date().toISOString()};
+            this.data.referrals.push(newRef);
+            firestoreUpsert('referrals', newRef);
+        }
+        this.persist();
+        this.closeModal('modalReferral');
+        this.render();
+    },
+
+    deleteReferral(id) {
+        if (!confirm('Delete this referral?')) return;
+        this.data.referrals = this.data.referrals.filter(r => r.id !== id); firestoreDelete('referrals', id);
+        this.persist(); this.render();
+    },
+
+    renderEmails() {
+        const html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Emails</h2>
+                <button class="btn-primary" onclick="app.openEmailForm()">Log Email</button>
+            </div>
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th><th>Contact</th><th>Deal</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${this.data.emails.length ? this.data.emails.sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(e => {
+                                const contact = this.data.contacts.find(c => c.id === e.contact_id);
+                                const deal = this.data.deals.find(d => d.id === e.deal_id);
+                                return `<tr>
+                                    <td>${e.date || ''}</td>
+                                    <td>${e.subject || ''}</td>
+                                    <td>${e.from_addr || ''}</td>
+                                    <td>${e.to_addr || ''}</td>
+                                    <td>${contact ? `<a onclick="app.viewContact('${contact.id}')" style="cursor:pointer; color:#3b82f6;">${contact.name}</a>` : ''}</td>
+                                    <td>${deal ? deal.name : ''}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editEmail('${e.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteEmail('${e.id}')">Delete</button>
+                                    </td>
+                                </tr>`;
+                            }).join('') : '<tr><td colspan="7" class="text-muted">No emails logged yet. Click "Log Email" to add one.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    openEmailForm() {
+        document.getElementById('emailId').value = '';
+        document.getElementById('emailSubject').value = '';
+        document.getElementById('emailFrom').value = '';
+        document.getElementById('emailTo').value = '';
+        document.getElementById('emailContact').value = '';
+        document.getElementById('emailDeal').value = '';
+        document.getElementById('emailDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('emailBody').value = '';
+        this.updateEmailSelects();
+        this.openModal('modalEmail');
+    },
+
+    editEmail(id) {
+        const e = this.data.emails.find(x => x.id === id);
+        if (!e) return;
+        this.updateEmailSelects();
+        document.getElementById('emailId').value = e.id;
+        document.getElementById('emailSubject').value = e.subject || '';
+        document.getElementById('emailFrom').value = e.from_addr || '';
+        document.getElementById('emailTo').value = e.to_addr || '';
+        document.getElementById('emailContact').value = e.contact_id || '';
+        document.getElementById('emailDeal').value = e.deal_id || '';
+        document.getElementById('emailDate').value = e.date || '';
+        document.getElementById('emailBody').value = e.body || '';
+        this.openModal('modalEmail');
+    },
+
+    updateEmailSelects() {
+        document.getElementById('emailContact').innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        document.getElementById('emailDeal').innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+    },
+
+    async saveEmail(e) {
+        e.preventDefault();
+        const id = document.getElementById('emailId').value;
+        const email = {
+            subject: document.getElementById('emailSubject').value,
+            from_addr: document.getElementById('emailFrom').value || null,
+            to_addr: document.getElementById('emailTo').value || null,
+            contact_id: document.getElementById('emailContact').value || null,
+            deal_id: document.getElementById('emailDeal').value || null,
+            date: document.getElementById('emailDate').value || null,
+            body: document.getElementById('emailBody').value || null
+        };
+        this.autoLinkEmail(email);
+        if (id) {
+            const idx = this.data.emails.findIndex(x => x.id === id);
+            if (idx >= 0) { this.data.emails[idx] = {...this.data.emails[idx], ...email}; firestoreUpsert('emails', this.data.emails[idx]); }
+        } else {
+            const newEmail = {...email, id: 'eml-' + Date.now(), created_at: new Date().toISOString()};
+            this.autoLinkEmail(newEmail);
+            this.data.emails.push(newEmail);
+            firestoreUpsert('emails', newEmail);
+            const newAct = {
+                id: 'act-' + Date.now() + '-e',
+                type: 'Email',
+                subject: 'Email: ' + (email.subject || '(no subject)'),
+                contactId: newEmail.contact_id || null,
+                accountId: null,
+                dealId: newEmail.deal_id || null,
+                dueDate: newEmail.date || new Date().toISOString().split('T')[0],
+                status: 'Closed',
+                notes: (email.from_addr ? 'From: ' + email.from_addr + ' ' : '') + (email.to_addr ? 'To: ' + email.to_addr : ''),
+                createdAt: new Date().toISOString()
+            };
+            this.data.activities.push(newAct);
+            firestoreUpsert('activities', newAct);
+        }
+        this.persist();
+        this.closeModal('modalEmail');
+        this.render();
+    },
+
+    deleteEmail(id) {
+        if (!confirm('Delete this email record?')) return;
+        this.data.emails = this.data.emails.filter(e => e.id !== id); firestoreDelete('emails', id);
+        this.persist(); this.render();
+    },
+
+    renderReports() {
+        const stages = ['Prospect', 'Pitch', 'Mandate', 'Due Diligence', 'Negotiation', 'Closed Won', 'Closed Lost'];
+        const stageColors = ['#94a3b8', '#3b82f6', '#8b5cf6', '#f59e0b', '#f97316', '#22c55e', '#ef4444'];
+        const stageValues = stages.map(s => this.data.deals.filter(d => d.stage === s).reduce((sum, d) => sum + (d.value || 0), 0));
+        const maxVal = Math.max(...stageValues, 1);
+
+        const wonDeals = this.data.deals.filter(d => d.stage === 'Closed Won');
+        const lostDeals = this.data.deals.filter(d => d.stage === 'Closed Lost');
+        const wonCount = wonDeals.length;
+        const lostCount = lostDeals.length;
+        const totalClosed = wonCount + lostCount;
+
+        const actTypes = ['Call', 'Email', 'Meeting', 'Follow-up', 'Note', 'Task'];
+        const actColors = ['#6366f1', '#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b'];
+        const actCounts = actTypes.map(t => this.data.activities.filter(a => a.type === t).length);
+        const maxAct = Math.max(...actCounts, 1);
+
+        const tiers = ['1-VIP', '2', '3', '4', '5'];
+        const tierColors = ['#22c55e', '#3b82f6', '#f59e0b', '#94a3b8', '#d1d5db'];
+        const tierCounts = tiers.map(t => this.data.contacts.filter(c => c.tier === t).length);
+        const totalContacts = this.data.contacts.length || 1;
+
+        const html = `
+            <h2>Reports</h2>
+            <div class="dash-grid">
+                <div class="dash-section">
+                    <h3>Pipeline Value by Stage ($M)</h3>
+                    <div class="chart-bar-container">
+                        ${stages.map((s, i) => `
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar-value">$${stageValues[i].toFixed(0)}M</div>
+                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
+                                    <div class="chart-bar" style="background:${stageColors[i]}; height:${Math.max(stageValues[i] / maxVal * 100, 3)}%; width:100%;"></div>
+                                </div>
+                                <div class="chart-bar-label">${s}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="dash-section">
+                    <h3>Win / Loss Rate</h3>
+                    ${totalClosed > 0 ? `
+                        <div style="display:flex; align-items:center; gap:24px; justify-content:center; padding:20px 0;">
+                            <div style="text-align:center;">
+                                <div style="font-size:48px; font-weight:700; color:#22c55e;">${Math.round(wonCount/totalClosed*100)}%</div>
+                                <div style="font-size:13px; color:#6b7280;">Win Rate</div>
+                            </div>
+                            <div style="width:1px; height:60px; background:#e5e7eb;"></div>
+                            <div>
+                                <div style="margin-bottom:8px;"><span style="display:inline-block; width:12px; height:12px; background:#22c55e; border-radius:2px; margin-right:8px;"></span>Won: ${wonCount} ($${wonDeals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M)</div>
+                                <div><span style="display:inline-block; width:12px; height:12px; background:#ef4444; border-radius:2px; margin-right:8px;"></span>Lost: ${lostCount} ($${lostDeals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M)</div>
+                            </div>
+                        </div>
+                    ` : '<p class="text-muted" style="text-align:center; padding:20px;">No closed deals yet</p>'}
+                </div>
+                <div class="dash-section">
+                    <h3>Activities by Type</h3>
+                    <div class="chart-bar-container">
+                        ${actTypes.map((t, i) => `
+                            <div class="chart-bar-wrapper">
+                                <div class="chart-bar-value">${actCounts[i]}</div>
+                                <div style="flex:1; display:flex; align-items:flex-end; width:100%;">
+                                    <div class="chart-bar" style="background:${actColors[i]}; height:${Math.max(actCounts[i] / maxAct * 100, 3)}%; width:100%;"></div>
+                                </div>
+                                <div class="chart-bar-label">${t}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="dash-section">
+                    <h3>Contact Tier Distribution</h3>
+                    <div style="padding:12px 0;">
+                        ${tiers.map((t, i) => `
+                            <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                                <div style="width:60px; font-size:13px; font-weight:500;">Tier ${t}</div>
+                                <div style="flex:1; background:#f3f4f6; border-radius:4px; height:24px; overflow:hidden;">
+                                    <div style="height:100%; background:${tierColors[i]}; width:${tierCounts[i]/totalContacts*100}%; border-radius:4px; display:flex; align-items:center; justify-content:flex-end; padding-right:6px; min-width:${tierCounts[i] > 0 ? '30px' : '0'};">
+                                        <span style="font-size:11px; font-weight:600; color:#fff;">${tierCounts[i]}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    renderSettings() {
+        const dataSize = new Blob([JSON.stringify(this.data)]).size;
+        const dataSizeStr = dataSize > 1024*1024 ? (dataSize/1024/1024).toFixed(1) + ' MB' : (dataSize/1024).toFixed(0) + ' KB';
+        const lastBackup = localStorage.getItem('matthewsCRM_lastBackup') || 'Never';
+        const html = `
+            <h2>Setup</h2>
+
+            <div class="card" style="border-left:4px solid var(--sf-warning); padding:16px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                    <span style="font-size:20px;">⚠️</span>
+                    <div>
+                        <div style="font-weight:700; font-size:14px;">Backup Your Data</div>
+                        <div style="font-size:12px; color:var(--sf-text-weak);">Your data syncs to Firebase Firestore (cloud) and works across devices. Local backups are still recommended as an extra safety net.</div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn-primary" onclick="app.backupJSON()">Download Backup Now</button>
+                    <button onclick="app.openModal('modalJsonImport')">Restore from Backup</button>
+                    <span style="font-size:12px; color:var(--sf-text-weakest);">Last backup: ${lastBackup} · Data size: ${dataSizeStr}</span>
+                </div>
+            </div>
+
+            <div class="card" style="padding:16px;">
+                <h3>Data Summary</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:16px;">
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('contacts')"><div class="label">Contacts</div><div class="value">${this.fmt(this.data.contacts.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('accounts')"><div class="label">Accounts</div><div class="value">${this.fmt(this.data.accounts.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('deals')"><div class="label">Processes</div><div class="value">${this.fmt(this.data.deals.length)}</div></div>
+                    <div class="stat-card" style="cursor:pointer;" onclick="app.navigate('activities')"><div class="label">Activities</div><div class="value">${this.fmt(this.data.activities.length)}</div></div>
+                    <div class="stat-card"><div class="label">Emails</div><div class="value">${this.data.emails.length}</div></div>
+                    <div class="stat-card"><div class="label">Referrals</div><div class="value">${this.data.referrals.length}</div></div>
+                </div>
+
+                <h3 style="margin-top:24px;">Data Tools</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button onclick="app.showDuplicates()">Find Duplicate Contacts</button>
+                    <button onclick="app.enableAutoBackup()">Enable Weekly Backup Reminder</button>
+                </div>
+
+                <h3 style="margin-top:24px;">Export</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button onclick="app.exportCsv('contacts')">Contacts CSV</button>
+                    <button onclick="app.exportCsv('accounts')">Accounts CSV</button>
+                    <button onclick="app.exportCsv('deals')">Processes CSV</button>
+                    <button onclick="app.exportVcf()">Contacts vCard (.vcf)</button>
+                    <button onclick="app.backupJSON()">Full Backup (JSON)</button>
+                </div>
+
+                <h3 style="margin-top:24px;">Import</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button class="btn-primary" onclick="app.openModal('modalCsvImport')">Import CSV</button>
+                    <button class="btn-primary" onclick="app.openModal('modalVcfImport')">Import vCard (.vcf)</button>
+                    <button class="btn-primary" onclick="app.openModal('modalJsonImport')">Restore from JSON Backup</button>
+                </div>
+
+                <h3 style="margin-top:24px;">Social Media Import</h3>
+                <div style="font-size:12px; color:var(--sf-text-weak); margin-bottom:8px;">
+                    <strong>Instagram files to import:</strong><br>
+                    • <code>followers_and_following/followers_1.json</code> — your followers (has IG usernames)<br>
+                    • <code>followers_and_following/following.json</code> — who you follow<br>
+                    • <code>contacts/synced_contacts.json</code> — phone contacts (has phone numbers)<br>
+                    • <code>messages/inbox/[person]/message_1.json</code> — DM threads<br>
+                    Import each file separately.
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <button class="btn-primary" onclick="document.getElementById('igImportFile').click();">📷 Import Instagram Data</button>
+                    <input type="file" id="igImportFile" accept=".json,.zip" style="display:none;" onchange="app.importInstagramData(this.files[0])">
+                    <button class="btn-primary" onclick="document.getElementById('fbImportFile').click();">📘 Import Facebook Data</button>
+                    <input type="file" id="fbImportFile" accept=".json,.zip" style="display:none;" onchange="app.importFacebookData(this.files[0])">
+                    <button onclick="app.bulkIgHandles();">📷 Bulk Add IG Handles</button>
+                    <button onclick="document.getElementById('socialCsvFile').click();">📋 Import Social CSV</button>
+                    <input type="file" id="socialCsvFile" accept=".csv,.txt" style="display:none;" onchange="app.importSocialCsv(this.files[0])">
+                </div>
+                <div style="margin-top:8px;">
+                    <button onclick="app.cleanupSocialImports();">🧹 Clean Up Social Imports</button>
+                </div>
+                <div id="socialImportStatus"></div>
+
+                <h3 style="margin-top:24px;">iPhone Sync</h3>
+                <div style="font-size:13px; line-height:1.6; background:var(--sf-bg); padding:12px; border-radius:4px;">
+                    <strong>Import from iPhone:</strong> Mac Contacts → select all (Cmd+A) → drag to desktop → Import vCard above.<br>
+                    <strong>Export to iPhone:</strong> Export vCard above → AirDrop to iPhone → tap "Add All Contacts".
+                </div>
+
+                <h3 style="margin-top:24px; color:var(--sf-error);">Danger Zone</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button style="border-color:var(--sf-error); color:var(--sf-error);" onclick="if(confirm('This will DELETE ALL DATA and cannot be undone. Are you sure?') && confirm('LAST CHANCE — really delete everything?')){localStorage.removeItem('matthewsCRM'); location.reload();}">Delete All Data</button>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    backupJSON() {
+        const json = JSON.stringify(this.data, null, 2);
+        const blob = new Blob([json], {type: 'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `matthews-crm-backup-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        localStorage.setItem('matthewsCRM_lastBackup', new Date().toLocaleDateString());
+    },
+
+    exportJSON() { this.backupJSON(); },
+
+    enableAutoBackup() {
+        localStorage.setItem('matthewsCRM_autoBackupEnabled', 'true');
+        alert('Weekly backup reminder enabled. You\'ll see a reminder on the dashboard every 7 days.');
+    },
+
+    // === Best-in-class search ===
+    _searchTimer: null,
+    _searchIdx: -1,
+    _searchResults: [],
+
+    _searchScore(item, terms) {
+        let score = 0;
+        const vals = Object.values(item).filter(v => typeof v === 'string').join(' ').toLowerCase();
+        for (const t of terms) {
+            if (vals.includes(t)) score++;
+            // Boost for name matches
+            if ((item.name||'').toLowerCase().includes(t)) score += 3;
+            // Boost for exact starts
+            if ((item.name||'').toLowerCase().startsWith(t)) score += 5;
+        }
+        return score;
+    },
+
+    liveSearch(term) {
+        clearTimeout(this._searchTimer);
+        const dd = document.getElementById('liveSearchResults');
+        if (!dd) return;
+        if (!term || term.length < 1) { dd.style.display = 'none'; return; }
+        this._searchTimer = setTimeout(() => this._runLiveSearch(term), 80);
+    },
+
+    _runLiveSearch(term) {
+        const dd = document.getElementById('liveSearchResults');
+        if (!dd) return;
+        const terms = term.toLowerCase().split(/\s+/).filter(Boolean);
+        const s = (item) => this._searchScore(item, terms);
+
+        const contacts = this.data.contacts.map(c => ({...c, _score: s(c), _type:'contact'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 5);
+        const accounts = this.data.accounts.map(a => ({...a, _score: s(a), _type:'account'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const events = this.data.events.map(e => ({...e, _score: s(e), _type:'event'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const deals = this.data.deals.map(d => ({...d, _score: s(d), _type:'deal'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const activities = this.data.activities.map(a => ({...a, name: a.subject||a.type, _score: s({...a, name: a.subject||a.type}), _type:'activity'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const investors = (this.data.investors||[]).map(i => ({...i, _score: s(i), _type:'investor'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+        const fundItems = [];
+        if (this.data._fund?.phases) { Object.entries(this.data._fund.phases).forEach(([phase, items]) => { items.forEach(item => { const fi = {name: item.text, phase, _type:'funditem'}; fi._score = s(fi); if (fi._score > 0) fundItems.push(fi); }); }); }
+        const providers = (this.data._fund?.serviceProviders||[]).map(sp => ({...sp, _score: s({...sp, name: sp.name||sp.role}), _type:'provider'})).filter(r => r._score > 0).sort((a,b) => b._score - a._score).slice(0, 3);
+
+        this._searchResults = [...contacts, ...accounts, ...events, ...deals, ...activities.slice(0,3), ...investors, ...fundItems.slice(0,3), ...providers];
+        this._searchIdx = -1;
+
+        if (!this._searchResults.length) {
+            dd.innerHTML = '<div style="padding:16px; text-align:center; color:var(--sf-text-weak); font-size:13px;">No results for "' + esc(term) + '"</div>';
+            dd.style.display = 'block';
+            return;
+        }
+
+        const hl = (text, t) => {
+            if (!text) return '';
+            let result = esc(String(text));
+            for (const w of t) result = result.replace(new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<mark style="background:#fff3cd;padding:0;">$1</mark>');
+            return result;
+        };
+
+        const icons = {contact:'👤', account:'🏢', event:'📅', deal:'📊', activity:'☑️', investor:'💰', funditem:'🚀', provider:'🤝'};
+        const colors = {contact:'#a094ed', account:'#7f8de1', event:'#e6853d', deal:'#fcb95b', activity:'#48c3cc', investor:'#0ea5e9', funditem:'#7e22ce', provider:'#22c55e'};
+
+        let html = '';
+        const sections = [{type:'contact',label:'Contacts',items:contacts},{type:'account',label:'Accounts',items:accounts},{type:'event',label:'Events',items:events},{type:'deal',label:'Processes',items:deals},{type:'activity',label:'Activities',items:activities.slice(0,3)},{type:'investor',label:'Investors',items:investors},{type:'funditem',label:'Fund Launch',items:fundItems.slice(0,3)},{type:'provider',label:'Advisors',items:providers}];
+
+        for (const sec of sections) {
+            if (!sec.items.length) continue;
+            html += `<div style="padding:4px 12px; font-size:10px; font-weight:700; text-transform:uppercase; color:var(--sf-text-weakest); background:var(--sf-bg); letter-spacing:0.5px;">${sec.label}</div>`;
+            for (const item of sec.items) {
+                const globalIdx = this._searchResults.indexOf(item);
+                const sub = sec.type === 'contact' ? [item.pc_number||item.mobile, item.pe_email||item.we_email, item.obligation].filter(Boolean).join(' · ')
+                    : sec.type === 'account' ? [item.type, item.industry].filter(Boolean).join(' · ')
+                    : sec.type === 'event' ? [item.type, item.address, item.status].filter(Boolean).join(' · ')
+                    : sec.type === 'deal' ? [item.stage, item.value ? '$'+item.value+'M' : '', item.sde ? 'SDE $'+item.sde+'K' : ''].filter(Boolean).join(' · ')
+                    : sec.type === 'activity' ? [item.type, item.status, item.dueDate].filter(Boolean).join(' · ')
+                    : sec.type === 'investor' ? [item.type, item.committed ? '$'+item.committed+'M committed' : ''].filter(Boolean).join(' · ')
+                    : sec.type === 'funditem' ? [item.phase].filter(Boolean).join(' · ')
+                    : sec.type === 'provider' ? [item.role, item.firm].filter(Boolean).join(' · ')
+                    : '';
+                html += `<div class="live-search-item" data-idx="${globalIdx}" onclick="app.selectSearchResult(${globalIdx})" onmouseenter="app._searchIdx=${globalIdx};app._highlightSearchItem();" style="padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--sf-border-weak);">
+                    <div style="width:28px; height:28px; border-radius:50%; background:${colors[sec.type]}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${icons[sec.type]}</div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${hl(item.name, terms)}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${hl(sub, terms)}</div>
+                    </div>
+                </div>`;
+            }
+        }
+
+        const totalCount = this.data.contacts.filter(c => s(c) > 0).length + this.data.accounts.filter(a => s(a) > 0).length + this.data.events.filter(e => s(e) > 0).length + this.data.deals.filter(d => s(d) > 0).length + this.data.activities.filter(a => s({...a, name:a.subject||a.type}) > 0).length + (this.data.investors||[]).filter(i => s(i) > 0).length;
+        if (totalCount > this._searchResults.length) {
+            html += `<div onclick="app.fullSearch('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; text-align:center; cursor:pointer; font-size:12px; color:var(--sf-brand); font-weight:600; background:var(--sf-bg);">View all ${totalCount} results →</div>`;
+        }
+        html += `<div onclick="app.searchGoogleDrive('${term.replace(/'/g,"\\'")}')" style="padding:10px 12px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--sf-border-weak); background:var(--sf-bg-alt);">
+            <span style="font-size:16px;">🔍</span> <span style="color:var(--sf-brand); font-weight:500;">Search Google Drive for "${esc(term)}"</span>
+        </div>`;
+        if (false) {
+        }
+
+        dd.innerHTML = html;
+        dd.style.display = 'block';
+    },
+
+    _highlightSearchItem() {
+        document.querySelectorAll('.live-search-item').forEach((el, i) => {
+            el.style.background = parseInt(el.dataset.idx) === this._searchIdx ? '#eef4fc' : '';
+        });
+    },
+
+    searchKeydown(e) {
+        const dd = document.getElementById('liveSearchResults');
+        if (!dd || dd.style.display === 'none') {
+            if (e.key === 'Enter' && e.target.value) { this.fullSearch(e.target.value); }
+            return;
+        }
+        if (e.key === 'ArrowDown') { e.preventDefault(); this._searchIdx = Math.min(this._searchIdx + 1, this._searchResults.length - 1); this._highlightSearchItem(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); this._searchIdx = Math.max(this._searchIdx - 1, -1); this._highlightSearchItem(); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (this._searchIdx >= 0) this.selectSearchResult(this._searchIdx); else this.fullSearch(e.target.value); }
+        else if (e.key === 'Escape') { dd.style.display = 'none'; }
+    },
+
+    selectSearchResult(idx) {
+        const item = this._searchResults[idx];
+        if (!item) return;
+        this.closeLiveSearch();
+        document.getElementById('globalSearch').value = '';
+        if (item._type === 'contact') this.viewContact(item.id);
+        else if (item._type === 'account') this.viewAccount(item.id);
+        else if (item._type === 'event') this.viewEvent(item.id);
+        else if (item._type === 'deal') this.viewDealDetail(item.id);
+        else if (item._type === 'activity') this.editActivity(item.id);
+        else if (item._type === 'investor') this.navigate('investors');
+        else if (item._type === 'funditem') this.navigate('fundlaunch');
+        else if (item._type === 'provider') { this._fundView = 'providers'; this.navigate('fundlaunch'); }
+    },
+
+    closeLiveSearch() {
+        const dd = document.getElementById('liveSearchResults');
+        if (dd) dd.style.display = 'none';
+    },
+
+    fullSearch(term) {
+        this.closeLiveSearch();
+        document.getElementById('globalSearch').value = '';
+        if (!term) return;
+        const terms = term.toLowerCase().split(/\s+/).filter(Boolean);
+        const s = (item) => this._searchScore(item, terms);
+        const contacts = this.data.contacts.filter(c => s(c) > 0).sort((a,b) => s(b) - s(a));
+        const accounts = this.data.accounts.filter(a => s(a) > 0).sort((a,b) => s(b) - s(a));
+        const events = this.data.events.filter(e => s(e) > 0).sort((a,b) => s(b) - s(a));
+        const deals = this.data.deals.filter(d => s(d) > 0).sort((a,b) => s(b) - s(a));
+        const acts = this.data.activities.filter(a => s({...a, name:a.subject||a.type}) > 0).sort((a,b) => s({...b,name:b.subject||b.type}) - s({...a,name:a.subject||a.type}));
+        const invs = (this.data.investors||[]).filter(i => s(i) > 0).sort((a,b) => s(b) - s(a));
+        const total = contacts.length + accounts.length + events.length + deals.length + acts.length + invs.length;
+        const html = `
+            <h2>Search Results for "${term}" <span style="font-size:14px; font-weight:400; color:var(--sf-text-weak);">(${total} results)</span></h2>
+            ${contacts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-contact" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">C</span> Contacts (${contacts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>PC#</th><th>PE@</th><th>Tier</th><th>Obligation</th></tr></thead><tbody>
+                ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:var(--sf-brand);font-weight:600;">${c.name}</td><td>${c.pc_number||c.mobile||''}</td><td>${c.pe_email||''}</td><td><span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span></td><td>${(c.obligation||'').split(',').map(o=>o.trim()).filter(Boolean).map(o=>'<span class="tag-pill">'+o+'</span>').join(' ')}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${accounts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-account" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">A</span> Accounts (${accounts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Type</th><th>Industry</th></tr></thead><tbody>
+                ${accounts.map(a => `<tr style="cursor:pointer;" onclick="app.viewAccount('${a.id}')"><td style="color:var(--sf-brand);font-weight:600;">${a.name}</td><td>${a.type||''}</td><td>${a.industry||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${events.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-activity" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">E</span> Events (${events.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Status</th></tr></thead><tbody>
+                ${events.map(e => `<tr style="cursor:pointer;" onclick="app.viewEvent('${e.id}')"><td style="color:var(--sf-brand);font-weight:600;">${e.name||''}</td><td>${e.type||''}</td><td>${e.start ? new Date(e.start).toLocaleDateString() : ''}</td><td>${e.status||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${deals.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span class="obj-icon obj-icon-deal" style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;">P</span> Processes (${deals.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Stage</th><th>Value</th></tr></thead><tbody>
+                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td style="color:var(--sf-brand);font-weight:600;">${d.name}</td><td>${d.stage||''}</td><td>$${(d.value||0).toFixed(1)}M</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${acts.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;background:#48c3cc;">T</span> Activities (${acts.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Type</th><th>Subject</th><th>Due</th><th>Status</th></tr></thead><tbody>
+                ${acts.slice(0,15).map(a => `<tr style="cursor:pointer;" onclick="app.editActivity('${a.id}')"><td>${a.type||''}</td><td style="color:var(--sf-brand);font-weight:600;">${a.subject||''}</td><td>${a.dueDate||''}</td><td>${a.status||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${invs.length ? `<div class="related-list card" style="margin-bottom:12px;"><div class="card-header"><span style="width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;background:#0ea5e9;">$</span> Investors (${invs.length})</div><div class="card-body-flush"><table class="compact-table"><thead><tr><th>Name</th><th>Type</th><th>Committed</th><th>Status</th></tr></thead><tbody>
+                ${invs.map(i => `<tr style="cursor:pointer;" onclick="app.navigate('investors')"><td style="color:var(--sf-brand);font-weight:600;">${i.name||''}</td><td>${i.type||''}</td><td>$${(i.committed||0).toFixed(1)}M</td><td>${i.status||''}</td></tr>`).join('')}
+            </tbody></table></div></div>` : ''}
+            ${!total ? '<div style="text-align:center; padding:40px; color:var(--sf-text-weak); font-size:14px;">No results found for "'+term+'"</div>' : ''}
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    _clearContactForm() {
+        ['contactId','contactName','contactPeEmail','contactWeEmail','contactPcNumber','contactWcNumber','contactMobile','contactPhone','contactHomePhone','contactOtherPhone','contactFax','contactAddress','contactCompany','contactTier','contactVip','contactLA','contactBirthdate','contactTitle','contactLeadSource','contactAssistantName','contactAssistantPhone','contactInstagram','contactFacebook','contactLinkedin','contactLinkedinProfile','contactLisnProfile','contactLiSnP','contactPlaybook','contactTags','contactNotes'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        document.getElementById('contactTier').value = '3';
+        document.getElementById('contactVip').value = '';
+        document.querySelectorAll('.obligation-cb').forEach(cb => cb.checked = false);
+        document.getElementById('contactLeadSource').value = '';
+        document.getElementById('contactReferredBy').value = '';
+        document.getElementById('contactPinned').value = '';
+    },
+    openContactForm() {
+        this._clearContactForm();
+        this.openModal('modalContact');
+    },
+
+    editContact(id) {
+        const c = this.data.contacts.find(x => x.id === id);
+        if (!c) return;
+        this._clearContactForm();
+        document.getElementById('contactId').value = c.id;
+        document.getElementById('contactName').value = c.name || '';
+        document.getElementById('contactPeEmail').value = c.pe_email || '';
+        document.getElementById('contactWeEmail').value = c.we_email || '';
+        document.getElementById('contactPcNumber').value = c.pc_number || '';
+        document.getElementById('contactWcNumber').value = c.wc_number || '';
+        document.getElementById('contactMobile').value = c.mobile || '';
+        document.getElementById('contactPhone').value = c.phone || '';
+        document.getElementById('contactHomePhone').value = c.home_phone || '';
+        document.getElementById('contactOtherPhone').value = c.other_phone || '';
+        document.getElementById('contactFax').value = c.fax || '';
+        document.getElementById('contactAddress').value = c.address || '';
+        document.getElementById('contactCompany').value = c.accountId || c.account_id || '';
+        document.getElementById('contactTier').value = c.tier || '3';
+        document.getElementById('contactVip').value = c.vip ? 'true' : '';
+        const obVals = (c.obligation||'').split(',').map(s=>s.trim());
+        document.querySelectorAll('.obligation-cb').forEach(cb => cb.checked = obVals.includes(cb.value));
+        document.getElementById('contactLA').value = c.la || c.last_activity_display || '';
+        document.getElementById('contactBirthdate').value = c.birthdate || '';
+        document.getElementById('contactTitle').value = c.title || '';
+        document.getElementById('contactLeadSource').value = c.lead_source || '';
+        document.getElementById('contactReferredBy').value = c.referred_by || '';
+        document.getElementById('contactPinned').value = c.pinned || '';
+        document.getElementById('contactAssistantName').value = c.assistant_name || '';
+        document.getElementById('contactAssistantPhone').value = c.assistant_phone || '';
+        document.getElementById('contactInstagram').value = c.instagram || '';
+        document.getElementById('contactFacebook').value = c.facebook || '';
+        document.getElementById('contactLinkedin').value = c.linkedin || '';
+        document.getElementById('contactLinkedinProfile').value = c.linkedin_profile || '';
+        document.getElementById('contactLisnProfile').value = c.lisn_profile || '';
+        document.getElementById('contactLiSnP').value = c.liSnP || '';
+        document.getElementById('contactPlaybook').value = c.playbook || '';
+        document.getElementById('contactTags').value = c.tags || '';
+        document.getElementById('contactNotes').value = c.notes || '';
+        this.openModal('modalContact');
+    },
+
+    viewContact(id) {
+        this.currentRecord = this.data.contacts.find(c => c.id === id);
+        if (!this.currentRecord) return;
+        this.trackView('contact', id, this.currentRecord.name);
+        this.currentView = 'contactDetail';
+        location.hash = 'contactDetail:' + id;
+        this.render();
+    },
+
+    renderContactDetail() {
+        const c = this.currentRecord;
+        if (!c) { this.currentView = 'contacts'; this.render(); return; }
+        const account = this.data.accounts.find(a => a.id === c.accountId);
+        const activities = this.data.activities.filter(a => a.contactId === c.id);
+        const deals = this.data.deals.filter(d => (this.data.dealContacts || []).some(dc => dc.deal_id === d.id && dc.contact_id === c.id) || d.accountId === c.accountId);
+        const contactEvents = this.data.events.filter(e => e.contactId === c.id || (e.attendees || '').toLowerCase().includes((c.name||'').toLowerCase()));
+        const dsla = this.calculateDSLA(c.la);
+        const asClass = 'as-' + this.calculateAS(dsla);
+
+        const initials = (c.name || '').split(' ').map(s => s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+        const todayStr = new Date().toISOString().split('T')[0];
+        const isOpen = s => s === 'Open' || s === 'Not Started' || s === 'In Progress' || s === 'Waiting';
+        // Also match activities by contact_id (snake_case from SF import)
+        const allActs = this.data.activities.filter(a => (a.contactId || a.contact_id) === c.id);
+        const openTasks = allActs.filter(a => isOpen(a.status));
+        const allTimeline = [...allActs].sort((a,b) => ((b.dueDate||b.due_date||b.createdAt)||'').localeCompare((a.dueDate||a.due_date||a.createdAt)||''));
+
+        const sfField = (label, value, fieldKey, type) => {
+            if (!fieldKey) return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value">${value || '—'}</div></div>`;
+            return `<div class="sf-detail-field"><div class="sf-detail-field-label">${label}</div><div class="sf-detail-field-value" style="cursor:pointer;" onclick="app.inlineDetailEdit('${c.id}','${fieldKey}','${type||'text'}',this)" title="Click to edit">${value || '—'}</div></div>`;
+        };
+
+        const html = `
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
+            <!-- SF Highlighted Panel -->
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div class="sf-hl-icon obj-icon-contact">${initials || 'C'}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">Contact</div>
+                        <div class="sf-hl-title">${c.name}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button onclick="app.editContact('${c.id}')">Edit</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Task'; app.onActivityTypeChange(); app.openActivityForm();">New Task</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Call'; app.onActivityTypeChange(); app.openActivityForm();">Log a Call</button>
+                        <button onclick="document.getElementById('activityContact').value='${c.id}'; document.getElementById('activityType').value='Meeting'; app.onActivityTypeChange(); app.openActivityForm();">New Event</button>
+                        <button onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Email</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiContactSuggest('${c.id}')">✨ AI Suggest</button>
+                        <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDraftEmail('${c.id}')">✨ Draft Email</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">PC#</div><div class="sf-hl-field-value">${c.pc_number ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${c.pc_number}');" style="color:var(--sf-brand);">${c.pc_number}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">WC#</div><div class="sf-hl-field-value">${c.wc_number ? `<a href="#" onclick="event.preventDefault(); app.logCallFromTap('${c.id}','${c.wc_number}');" style="color:var(--sf-brand);">${c.wc_number}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">PE@</div><div class="sf-hl-field-value">${c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">WE@</div><div class="sf-hl-field-value">${c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Title</div><div class="sf-hl-field-value">${c.title || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Account</div><div class="sf-hl-field-value">${account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Tier</div><div class="sf-hl-field-value">${c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Instagram</div><div class="sf-hl-field-value">${c.instagram ? `<a href="https://instagram.com/${esc(c.instagram.replace('@',''))}" target="_blank" style="color:var(--sf-brand);">@${esc(c.instagram.replace('@',''))}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">LinkedIn</div><div class="sf-hl-field-value">${c.linkedin ? `<a href="${esc(c.linkedin)}" target="_blank" style="color:var(--sf-brand);">Profile ↗</a>` : '—'}</div></div>
+                </div>
+            </div>
+
+            <div id="aiContactPanel"></div>
+            <div id="aiEmailDraft"></div>
+            <!-- SF two-column layout: Left (Related/Details) + Right (Activity sidebar) -->
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+                <!-- LEFT COLUMN — Related / Details tabs -->
+                <div style="flex:1; min-width:0;">
+                    <div class="detail-tabs" id="contactDetailTabs" style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px 4px 0 0; margin-bottom:0;">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'cdDetails')">Details</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'cdRelated')">Related</div>
+                    </div>
+
+                    <!-- RELATED -->
+                    <div id="cdRelated" style="display:none; background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:16px;">
+                        <div class="related-list card" style="margin-bottom:12px;">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-deal" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">P</span>
+                                Processes <span class="related-count">(${deals.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.openDealForm();">New</button>
+                            </div>
+                            <div class="card-body-flush">
+                            ${deals.length ? `<table><thead><tr><th>Process Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead><tbody>
+                                ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')">
+                                    <td style="color:var(--sf-brand); font-weight:600;">${d.name}</td>
+                                    <td><span class="badge stage-${(d.stage||'').replace(/\s/g,'').toLowerCase()}">${d.stage||''}</span></td>
+                                    <td>$${(d.value||0).toFixed(1)}M</td>
+                                    <td>${d.closeDate || d.close_date || '—'}</td>
+                                </tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No processes.</div>'}
+                            </div>
+                        </div>
+                        <div class="related-list card">
+                            <div class="card-header">
+                                <span class="obj-icon obj-icon-activity" style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700;">E</span>
+                                Events <span class="related-count">(${contactEvents.length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="document.getElementById('eventContact').value='${c.id}'; app.openEventForm();">New</button>
+                            </div>
+                            <div class="card-body-flush">
+                            ${contactEvents.length ? `<table><thead><tr><th>Event Name</th><th>Type</th><th>Date</th><th>Address</th><th>Status</th></tr></thead><tbody>
+                                ${contactEvents.map(e => `<tr style="cursor:pointer;" onclick="app.viewEvent('${e.id}')">
+                                    <td style="color:var(--sf-brand); font-weight:600;">${e.name||''}</td>
+                                    <td>${e.type||''}</td>
+                                    <td>${e.start ? new Date(e.start).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : ''}</td>
+                                    <td>${e.address||''}</td>
+                                    <td>${e.status||''}</td>
+                                </tr>`).join('')}
+                            </tbody></table>` : '<div style="padding:16px; font-size:13px; color:var(--sf-text-weak);">No events.</div>'}
+                            </div>
+                        </div>
+                        ${this.renderQuickLinks('contact', c)}
+                        <div class="related-list card">
+                            <div class="card-header">
+                                <span style="width:20px; height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:700; background:#0078d4;">F</span>
+                                Files <span class="related-count">(${(c.files||[]).length})</span>
+                                <button class="btn-small" style="margin-left:auto;" onclick="app.addContactFile('${c.id}')">Add File</button>
+                            </div>
+                            <div style="padding:8px 16px;">
+                            ${(c.files||[]).length ? (c.files||[]).map((f,i) => `<div style="display:flex; align-items:center; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--sf-border-weak); font-size:13px;">
+                                <a href="${f.url}" target="_blank" style="color:var(--sf-brand); font-weight:500; display:flex; align-items:center; gap:6px;">📄 ${f.name}</a>
+                                <button class="btn-small" onclick="app.removeContactFile('${c.id}',${i})" style="padding:1px 6px; font-size:11px; color:var(--sf-error);">✕</button>
+                            </div>`).join('') : '<div style="font-size:13px; color:var(--sf-text-weak);">No files. Click Add File to link a OneDrive document.</div>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DETAILS (default) -->
+                    <div id="cdDetails" style="background:#fff; border:1px solid var(--sf-border-weak); border-top:none; border-radius:0 0 4px 4px; padding:20px;">
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Contact Information</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Name', c.name, 'name')}
+                            ${sfField('Account Name', account ? `<a onclick="app.viewAccount('${account.id}')" style="cursor:pointer; color:var(--sf-brand);">${account.name}</a>` : null)}
+                            ${sfField('Obligation', c.obligation ? c.obligation.split(',').map(o => o.trim()).filter(Boolean).map(o => `<span class="tag-pill">${o}</span>`).join(' ') : null, 'obligation', 'multi-obligation')}
+                            ${sfField('Birthdate', c.birthdate ? (d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + " '" + String(d.getFullYear()).slice(-2))(new Date(c.birthdate+'T12:00:00')) : null, 'birthdate', 'date')}
+                            ${sfField('Title', c.title, 'title')}
+                            ${sfField('PE@', c.pe_email ? `<a href="mailto:${c.pe_email}" style="color:var(--sf-brand);">${c.pe_email}</a>` : null, 'pe_email', 'email')}
+                            ${sfField('WE@', c.we_email ? `<a href="mailto:${c.we_email}" style="color:var(--sf-brand);">${c.we_email}</a>` : null, 'we_email', 'email')}
+                            ${sfField('Lead Source', c.lead_source, 'lead_source')}
+                            ${sfField('Referred By', c.referred_by, 'referred_by')}
+                            ${sfField('Profile Completeness', (() => { const pct = this.contactCompleteness(c); const color = pct >= 80 ? 'var(--sf-success)' : pct >= 50 ? 'var(--sf-warning)' : 'var(--sf-error)'; return `<span style="color:${color}; font-weight:600;">${pct}%</span> <span style="font-size:11px; color:var(--sf-text-weakest);">complete</span>`; })())}
+                            ${sfField('PC#', c.pc_number ? `<a href="tel:${c.pc_number}" style="color:var(--sf-brand);">${c.pc_number}</a>` : null, 'pc_number', 'tel')}
+                            ${sfField('WC#', c.wc_number ? `<a href="tel:${c.wc_number}" style="color:var(--sf-brand);">${c.wc_number}</a>` : null, 'wc_number', 'tel')}
+                            ${sfField('Mobile', c.mobile ? `<a href="tel:${c.mobile}" style="color:var(--sf-brand);">${c.mobile}</a>` : null, 'mobile', 'tel')}
+                            ${sfField('Phone', c.phone ? `<a href="tel:${c.phone}" style="color:var(--sf-brand);">${c.phone}</a>` : null, 'phone', 'tel')}
+                            ${sfField('Home Phone', c.home_phone, 'home_phone', 'tel')}
+                            ${sfField('Other Phone', c.other_phone, 'other_phone', 'tel')}
+                            ${sfField('Tier', c.tier ? `<span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier}</span>` : null, 'tier', 'select-tier')}
+                        </div>
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Address</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Mailing Address', c.address, 'address')}
+                            ${sfField('Country', c.mailing_country, 'mailing_country')}
+                        </div>
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Social</h3>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 32px;">
+                            ${sfField('Instagram', c.instagram ? `<a href="https://instagram.com/${esc(c.instagram.replace('@',''))}" target="_blank" style="color:var(--sf-brand);">@${esc(c.instagram.replace('@',''))}</a>` : null, 'instagram')}
+                            ${sfField('Facebook', c.facebook ? `<a href="${esc(c.facebook)}" target="_blank" style="color:var(--sf-brand);">Profile ↗</a>` : null, 'facebook', 'url')}
+                            ${sfField('LinkedIn', c.linkedin ? `<a href="${c.linkedin}" target="_blank" style="color:var(--sf-brand);">${c.linkedin}</a>` : null, 'linkedin', 'url')}
+                            ${sfField('Tags', c.tags ? c.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag-pill">${t}</span>`).join(' ') : null, 'tags')}
+                        </div>
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Description</h3>
+                        <div class="sf-detail-field"><div class="sf-detail-field-value" style="cursor:pointer; white-space:pre-wrap;" onclick="app.inlineDetailEdit('${c.id}','notes','textarea',this)" title="Click to edit">${c.notes || '—'}</div></div>
+
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Connections <button class="btn-small" style="float:right;" onclick="app.addConnection('${c.id}')">+ Add</button></h3>
+                        ${(() => {
+                            const conns = (this.data._connections||[]).filter(cn => cn.from === c.id || cn.to === c.id);
+                            if (!conns.length) return '<div style="font-size:12px;color:var(--sf-text-weak);padding:4px 0;">No connections yet. Click + Add to map who this contact knows.</div>';
+                            return '<div style="display:flex;flex-direction:column;gap:6px;">' + conns.map(cn => {
+                                const otherId = cn.from === c.id ? cn.to : cn.from;
+                                const other = this.data.contacts.find(x => x.id === otherId);
+                                if (!other) return '';
+                                const strengthColors = {strong:'#22c55e',medium:'#f59e0b',weak:'#9ca3af'};
+                                return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--sf-border-weak);">'
+                                    + '<div style="display:flex;align-items:center;gap:8px;">'
+                                    + '<div style="width:8px;height:8px;border-radius:50%;background:' + (strengthColors[cn.strength]||'#9ca3af') + ';"></div>'
+                                    + '<div><a onclick="app.viewContact(\'' + other.id + '\')" style="color:var(--sf-brand);cursor:pointer;font-weight:600;font-size:13px;">' + other.name + '</a>'
+                                    + '<div style="font-size:11px;color:var(--sf-text-weak);">' + (cn.type||'Knows') + (cn.context ? ' · ' + cn.context : '') + '</div></div></div>'
+                                    + '<button class="btn-small" onclick="app.removeConnection(\'' + c.id + '\',\'' + cn.id + '\')" style="font-size:10px;color:var(--sf-error);">✕</button></div>';
+                            }).join('') + '</div>';
+                        })()}
+
+                        ${(c.ig_messages && c.ig_messages.length) ? `
+                        <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:24px 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">📷 Instagram Messages (${c.ig_messages.length})</h3>
+                        <div style="max-height:300px; overflow-y:auto;">
+                            ${c.ig_messages.slice(-20).reverse().map(m => `
+                                <div style="padding:6px 0; border-bottom:1px solid var(--sf-border-weak); font-size:12px;">
+                                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                        <span style="font-weight:600; color:${m.from === c.name || m.from === (c.instagram||'').replace('@','') ? 'var(--sf-brand)' : 'var(--sf-text)'};">${esc(m.from)}</span>
+                                        <span style="font-size:10px; color:var(--sf-text-weakest);">${m.date ? new Date(m.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}) : ''}</span>
+                                    </div>
+                                    <div style="color:var(--sf-text-weak);">${esc(m.text)}</div>
+                                </div>
+                            `).join('')}
+                        </div>` : ''}
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN — Activity sidebar (always visible, like SF) -->
+                <div style="width:380px; flex-shrink:0; position:sticky; top:0;">
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05);">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">Activity</div>
+                        <!-- Composer buttons -->
+                        <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; gap:4px; flex-wrap:wrap;">
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Call')" style="background:#e8f5e9; color:#2e7d32; border-color:#c8e6c9;">📞 Call</button>
+                                <button class="btn-small" onclick="app.logTextFromTap('${c.id}','${c.pc_number||c.mobile||c.wc_number||c.phone||''}')" style="background:#e3f2fd; color:#1565c0; border-color:#bbdefb;">💬 Text</button>
+                                <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Task')" style="background:#e0f7fa; color:#00838f; border-color:#b2ebf2;">☑️ Task</button>
+                                <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Meeting')" style="background:#fff3e0; color:#e65100; border-color:#ffe0b2;">📅 Event</button>
+                                <button class="btn-small" onclick="app.quickActivityForm('${c.id}','Email')" style="background:#e8eaf6; color:#3949ab; border-color:#c5cae9;">📧 Email</button>
+                            </div>
+                        </div>
+                        <!-- Filters -->
+                        <div style="padding:8px 16px; border-bottom:1px solid var(--sf-border-weak); font-size:11px; color:var(--sf-text-weak);">
+                            Filters: All time · All activities · All types
+                        </div>
+                        <!-- Upcoming & Overdue -->
+                        <div style="padding:12px 16px; border-bottom:1px solid var(--sf-border-weak);">
+                            <div style="font-weight:700; font-size:13px; margin-bottom:8px;">▾ Upcoming & Overdue</div>
+                            ${openTasks.length ? openTasks.map(a => {
+                                const dd = a.dueDate || a.due_date || '';
+                                const isOverdue = dd && dd < todayStr;
+                                return `<div style="display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak);">
+                                    <input type="checkbox" onclick="app.completeActivity('${a.id}')" style="width:14px; height:14px; margin-top:2px; cursor:pointer;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:12px; font-weight:600;"><a onclick="app.editActivity('${a.id}')" style="color:var(--sf-brand); cursor:pointer;">${a.subject}</a></div>
+                                        <div style="font-size:11px; color:${isOverdue ? 'var(--sf-error)' : 'var(--sf-text-weak)'};">${a.type} · ${isOverdue ? 'OVERDUE · ' : ''}${dd || 'No date'}</div>
+                                    </div>
+                                </div>`;
+                            }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px 0;">No upcoming activities.<br>Get started by scheduling a task.</div>'}
+                        </div>
+                        <!-- Past Activity -->
+                        <div style="padding:12px 16px; max-height:400px; overflow-y:auto;">
+                            ${allTimeline.filter(a => !isOpen(a.status)).length ? allTimeline.filter(a => !isOpen(a.status)).map(a => {
+                                const btnStyles = {Call:{bg:'#e8f5e9',color:'#2e7d32',border:'#c8e6c9'}, Email:{bg:'#e8eaf6',color:'#3949ab',border:'#c5cae9'}, Meeting:{bg:'#fff3e0',color:'#e65100',border:'#ffe0b2'}, Task:{bg:'#e0f7fa',color:'#00838f',border:'#b2ebf2'}, Note:{bg:'#e8f5e9',color:'#2e7d32',border:'#c8e6c9'}, 'Follow-up':{bg:'#fff3e0',color:'#e65100',border:'#ffe0b2'}};
+                                const iconEmojis = {Call:'📞',Email:'📧',Meeting:'📅',Task:'☑️',Note:'📝','Follow-up':'🔄'};
+                                const st = btnStyles[a.type] || {bg:'#f3f3f3',color:'#444',border:'#ccc'};
+                                const dd = a.dueDate || a.due_date || (a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '');
+                                return `<div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--sf-border-weak); position:relative; overflow:visible;">
+                                    <div style="display:inline-flex; align-items:center; padding:3px 8px; font-size:12px; border-radius:4px; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; flex-shrink:0; height:26px;">${iconEmojis[a.type]||'📋'} ${a.type}</div>
+                                    <div style="flex:1; min-width:0;">
+                                        <div style="font-size:12px; font-weight:600;"><a onclick="app.editActivity('${a.id}')" style="cursor:pointer; color:var(--sf-brand);">${a.subject || '(no subject)'}</a></div>
+                                        <div style="font-size:11px; color:var(--sf-text-weak);">${a.type} · ${dd}${a.callResult ? ' · ' + a.callResult : ''}${a.address ? ' · 📍' + a.address : ''}</div>
+                                        ${a.notes ? `<div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; max-height:32px; overflow:hidden;">${(a.notes||'').substring(0,120)}</div>` : ''}
+                                    </div>
+                                    <div style="flex-shrink:0; position:relative;">
+                                        <button class="btn-small" onclick="event.stopPropagation(); app.toggleRowMenu('cdact_${a.id}')" style="padding:1px 6px; font-size:11px;">▸</button>
+                                        <div id="rowMenu_cdact_${a.id}" style="display:none; position:absolute; right:0; top:24px; background:#fff; border:1px solid var(--sf-border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:100px;">
+                                            <div onclick="app.editActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">Edit</div>
+                                            <div onclick="app.deleteActivity('${a.id}')" style="padding:6px 12px; cursor:pointer; font-size:12px; color:var(--sf-error);" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background=''">Delete</div>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            }).join('') : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center;">No past activity. Past meetings and tasks marked as done show up here.</div>'}
+                        </div>
+                    </div>
+                    <!-- Playbook -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;${c.playbook?' border-left:4px solid #8b5cf6;':''}">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;${c.playbook?' color:#8b5cf6;':''}">🎯 Playbook</div>
+                        <div style="padding:12px 16px; font-size:13px; white-space:pre-wrap; cursor:pointer; ${!c.playbook?'color:var(--sf-text-weak);':''}" onclick="app.inlineDetailEdit('${c.id}','playbook','textarea',this)" title="Click to edit">${c.playbook || 'Add relationship scripts, shared interests, alumni connections...'}</div>
+                    </div>
+                    <!-- Gmail Emails -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-weight:700; font-size:13px;">📧 Emails</span>
+                            ${this.isGmailConnected() ? '<span style="font-size:11px; color:var(--sf-success);">● Connected</span>' : `<button class="btn-small" onclick="app.connectGmail()" style="font-size:11px;">Connect Gmail</button>`}
+                        </div>
+                        <div id="gmailEmails" style="padding:8px 16px; max-height:300px; overflow-y:auto;">
+                            ${this.isGmailConnected() ? '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Loading emails...</div>' : '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">Connect Gmail to see email history</div>'}
+                        </div>
+                    </div>
+                    <!-- *Notes section -->
+                    <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; box-shadow:0 2px 2px rgba(0,0,0,0.05); margin-top:12px;">
+                        <div style="padding:10px 16px; border-bottom:1px solid var(--sf-border-weak); font-weight:700; font-size:13px;">*Notes</div>
+                        <div style="padding:12px 16px;">
+                            <textarea id="contactGeneralNotes" onblur="app.saveGeneralNotes('${c.id}', this.value)" style="width:100%; min-height:100px; padding:8px 10px; font-size:13px; border:1px solid var(--sf-border); border-radius:4px; font-family:inherit; resize:vertical;">${(c.general_notes || '').replace(/</g,'&lt;')}</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'contacts\'; app.render();">Contacts</a> / ' + esc(c.name);
+        // Load Gmail emails async (non-blocking)
+        if (this.isGmailConnected()) {
+            this.fetchGmailForContact(c).then(emails => {
+                const el = document.getElementById('gmailEmails');
+                if (!el) return;
+                if (!emails.length) { el.innerHTML = '<div style="font-size:12px; color:var(--sf-text-weak); text-align:center; padding:8px;">No emails found</div>'; return; }
+                // Update Last Activity from most recent email date
+                if (emails.length && emails[0].date) {
+                    const emailDate = new Date(emails[0].date).toISOString().split('T')[0];
+                    const contact = this.data.contacts.find(x => x.id === c.id);
+                    if (contact && (!contact.la || emailDate > contact.la)) {
+                        contact.la = emailDate;
+                        firestoreUpsert('contacts', contact);
+                        this.persist();
+                    }
+                }
+                el.innerHTML = emails.map(e => {
+                    const fromName = (e.from||'').replace(/<.*>/,'').trim() || e.from;
+                    const dateStr = e.date ? new Date(e.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+                    const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${e.id}`;
+                    return `<a href="${gmailLink}" target="_blank" style="display:block; padding:8px 4px; border-bottom:1px solid var(--sf-border-weak); text-decoration:none; color:inherit; border-radius:4px; transition:background 0.1s;" onmouseover="this.style.background='var(--sf-bg)'" onmouseout="this.style.background=''">
+                        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                            <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; color:var(--sf-brand);">${esc(e.subject)}</div>
+                            <span style="font-size:10px; color:var(--sf-text-weakest); margin-left:8px; white-space:nowrap;">${dateStr}</span>
+                        </div>
+                        <div style="font-size:11px; color:var(--sf-text-weak); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(fromName)}</div>
+                        <div style="font-size:11px; color:var(--sf-text-weakest); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(e.snippet)}</div>
+                    </a>`;
+                }).join('');
+            });
+        }
+    },
+
+    // Complete an activity (mark as Closed)
+    completeActivity(id) {
+        const act = this.data.activities.find(a => a.id === id);
+        if (act) {
+            act.status = 'Completed';
+            firestoreUpsert('activities', act);
+            if (act.contactId || act.contact_id) {
+                const con = this.data.contacts.find(c => c.id === (act.contactId || act.contact_id));
+                if (con) { const today = new Date().toISOString().split('T')[0]; if (!con.la || con.la < today) { con.la = today; firestoreUpsert('contacts', con); } }
+            }
+            this.persist();
+            this.render();
+        }
+    },
+
+    // Filter contact timeline by type
+    addConnection(contactId) {
+        const name = prompt('Who does this contact know? (enter name):');
+        if (!name) return;
+        const other = this.data.contacts.find(c => (c.name||'').toLowerCase().includes(name.toLowerCase()));
+        if (!other) { alert('Contact not found.'); return; }
+        if (other.id === contactId) return;
+        if (!this.data._connections) this.data._connections = [];
+        const exists = this.data._connections.find(cn => (cn.from === contactId && cn.to === other.id) || (cn.from === other.id && cn.to === contactId));
+        if (exists) { alert('Connection already exists.'); return; }
+        const type = prompt('Relationship type:', 'Knows') || 'Knows';
+        const context = prompt('Context (e.g. "Met at conference", "College roommates"):', '') || '';
+        const strength = prompt('Strength (strong/medium/weak):', 'medium') || 'medium';
+        this.data._connections.push({id: 'conn-' + Date.now(), from: contactId, to: other.id, type, context, strength, created: new Date().toISOString()});
+        this._syncMeta();
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    removeConnection(contactId, connId) {
+        if (!this.data._connections) return;
+        this.data._connections = this.data._connections.filter(cn => cn.id !== connId);
+        this._syncMeta();
+        this.persist();
+        this.renderContactDetail();
+    },
+
+    filterContactTimeline(contactId, type) {
+        const list = document.getElementById('cdTimelineList');
+        if (!list) return;
+        const items = list.children;
+        for (const item of items) {
+            if (type === 'all') { item.style.display = ''; }
+            else { item.style.display = item.innerHTML.includes('>' + type + '<') || item.innerHTML.includes('>' + type + ' ·') ? '' : 'none'; }
+        }
+    },
+
+    switchDetailTab(el, panelId) {
+        const tabContainer = el.parentElement;
+        tabContainer.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        // Hide all detail panels on the page, then show the target
+        const allPanelIds = ['cdDetails','cdActivity','cdRelated','cdActivities','cdDeals','cdEmails','cdReferrals','adContacts','adDeals','adActivities','adEmails'];
+        allPanelIds.forEach(id => { const p = document.getElementById(id); if (p) p.style.display = 'none'; });
+        const target = document.getElementById(panelId);
+        if (target) target.style.display = '';
+    },
+
+    openAccountForm() {
+        document.getElementById('accountId').value = '';
+        document.getElementById('accountName').value = '';
+        document.getElementById('accountIndustry').value = '';
+        document.getElementById('accountWebsite').value = '';
+        document.getElementById('accountAddress').value = '';
+        document.getElementById('accountType').value = 'Prospect';
+        document.getElementById('accountDriveLink').value = '';
+        document.getElementById('accountNotes').value = '';
+        document.getElementById('accountOwnership').value = '';
+        document.getElementById('accountAcqDate').value = '';
+        document.getElementById('accountEntryVal').value = '';
+        document.getElementById('accountCurrentVal').value = '';
+        document.getElementById('accountInvested').value = '';
+        document.getElementById('accountRevenue').value = '';
+        document.getElementById('accountEBITDA').value = '';
+        document.getElementById('accountPortStatus').value = 'Active';
+        document.getElementById('portfolioFields').style.display = 'none';
+        this.openModal('modalAccount');
+    },
+
+    editAccount(id) {
+        const account = this.data.accounts.find(a => a.id === id);
+        if (!account) return;
+        document.getElementById('accountId').value = account.id;
+        document.getElementById('accountName').value = account.name;
+        document.getElementById('accountIndustry').value = account.industry || '';
+        document.getElementById('accountWebsite').value = account.website || '';
+        document.getElementById('accountAddress').value = account.address || '';
+        document.getElementById('accountType').value = account.type || 'Prospect';
+        document.getElementById('accountDriveLink').value = account.driveLink || '';
+        document.getElementById('accountNotes').value = account.notes || '';
+        document.getElementById('accountOwnership').value = account.ownership || '';
+        document.getElementById('accountAcqDate').value = account.acqDate || '';
+        document.getElementById('accountEntryVal').value = account.entryVal || '';
+        document.getElementById('accountCurrentVal').value = account.currentVal || '';
+        document.getElementById('accountInvested').value = account.invested || '';
+        document.getElementById('accountRevenue').value = account.revenue || '';
+        document.getElementById('accountEBITDA').value = account.ebitda || '';
+        document.getElementById('accountPortStatus').value = account.portStatus || 'Active';
+        document.getElementById('portfolioFields').style.display = account.type === 'Portfolio Company' ? '' : 'none';
+        this.openModal('modalAccount');
+    },
+
+    viewAccount(id) {
+        this.currentRecord = this.data.accounts.find(a => a.id === id);
+        if (!this.currentRecord) return;
+        this.trackView('account', id, this.currentRecord.name);
+        this.currentView = 'accountDetail';
+        location.hash = 'accountDetail:' + id;
+        this.render();
+    },
+
+    renderAccountDetail() {
+        const a = this.currentRecord;
+        if (!a) { this.currentView = 'accounts'; this.render(); return; }
+        const contacts = this.data.contacts.filter(c => c.accountId === a.id);
+        const deals = this.data.deals.filter(d => d.accountId === a.id);
+        const activities = this.data.activities.filter(act => act.accountId === a.id || contacts.some(c => c.id === act.contactId));
+        const emails = this.data.emails.filter(e => contacts.some(c => c.id === e.contact_id));
+
+        const acctInitial = (a.name || '').split(' ').filter(Boolean).slice(0,2).map(s => s[0]).join('').toUpperCase() || 'A';
+        const html = `
+            <div class="detail-back" onclick="history.back();">&#8592; Back</div>
+            <div class="sf-highlight">
+                <div class="sf-hl-top">
+                    <div class="sf-hl-icon obj-icon-account">${acctInitial}</div>
+                    <div class="sf-hl-meta">
+                        <div class="sf-hl-eyebrow">Account</div>
+                        <div class="sf-hl-title">${a.name}</div>
+                    </div>
+                    <div class="sf-hl-actions">
+                        <button class="btn-small" onclick="app.editAccount('${a.id}')">Edit</button>
+                        <button class="btn-small" onclick="app.openContactForm(); document.getElementById('contactCompany').value='${a.id}';">New Contact</button>
+                        <button class="btn-small" onclick="app.openDealForm(); document.getElementById('dealAccount').value='${a.id}';">New Process</button>
+                        <button class="btn-small" onclick="app.openEventForm(); document.getElementById('eventAccount').value='${a.id}';">New Event</button>
+                    </div>
+                </div>
+                <div class="sf-hl-fields">
+                    <div><div class="sf-hl-field-label">Type</div><div class="sf-hl-field-value">${a.type || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Industry</div><div class="sf-hl-field-value">${a.industry || '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Website</div><div class="sf-hl-field-value">${a.website ? `<a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank" style="color:var(--sf-brand);">${a.website}</a>` : '—'}</div></div>
+                    <div><div class="sf-hl-field-label">Contacts</div><div class="sf-hl-field-value">${contacts.length}</div></div>
+                    <div><div class="sf-hl-field-label">Processes</div><div class="sf-hl-field-value">${deals.length}</div></div>
+                    <div><div class="sf-hl-field-label">Pipeline</div><div class="sf-hl-field-value">$${deals.reduce((s,d)=>s+(d.value||0),0).toFixed(0)}M</div></div>
+                    <div><div class="sf-hl-field-label">Events</div><div class="sf-hl-field-value">${this.data.events.filter(e => e.accountId === a.id).length}</div></div>
+                </div>
+            </div>
+            <div class="detail-container">
+                <div class="detail-sidebar">
+                    <div class="side-header">Account Details</div>
+                    <div class="side-body">
+                    ${a.industry ? `<div class="detail-field"><div class="detail-field-label">Industry</div><div class="detail-field-value">${a.industry}</div></div>` : ''}
+                    ${a.website ? `<div class="detail-field"><div class="detail-field-label">Website</div><div class="detail-field-value"><a href="${a.website.startsWith('http') ? a.website : 'https://'+a.website}" target="_blank">${a.website}</a></div></div>` : ''}
+                    ${a.address ? `<div class="detail-field"><div class="detail-field-label">Address</div><div class="detail-field-value">${a.address}</div></div>` : ''}
+                    ${a.notes ? `<div class="detail-field"><div class="detail-field-label">Notes</div><div class="detail-field-value" style="white-space:pre-wrap;">${a.notes}</div></div>` : ''}
+                    </div>
+                </div>
+                <div class="detail-main">
+                    <div class="detail-tabs" id="accountDetailTabs">
+                        <div class="detail-tab active" onclick="app.switchDetailTab(this, 'adContacts')">Contacts (${contacts.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adDeals')">Deals (${deals.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adActivities')">Activities (${activities.length})</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adAssets')">Assets</div>
+                        <div class="detail-tab" onclick="app.switchDetailTab(this, 'adEmails')">Emails (${emails.length})</div>
+                    </div>
+                    <div id="adContacts">
+                        ${contacts.length ? `<table><thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Tier</th></tr></thead><tbody>
+                            ${contacts.map(c => `<tr style="cursor:pointer;" onclick="app.viewContact('${c.id}')"><td style="color:#3b82f6; font-weight:500;">${c.name}</td><td>${c.email||''}</td><td>${c.mobile||''}</td><td><span class="badge tier-${(c.tier||'').replace('-','').toLowerCase()}">${c.tier||''}</span></td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No contacts linked to this account</p>'}
+                    </div>
+                    <div id="adDeals" style="display:none;">
+                        ${deals.length ? `<table><thead><tr><th>Deal</th><th>Stage</th><th>Value</th><th>Close Date</th></tr></thead><tbody>
+                            ${deals.map(d => `<tr style="cursor:pointer;" onclick="app.viewDealDetail('${d.id}')"><td>${d.name}</td><td><span class="badge stage-${(d.stage||'').replace(/\s/g,'').toLowerCase()}">${d.stage||''}</span></td><td>$${d.value}M</td><td>${d.closeDate||''}</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No deals for this account</p>'}
+                    </div>
+                    <div id="adActivities" style="display:none;">
+                        <div class="timeline">
+                            ${activities.length ? activities.sort((x,y) => (y.dueDate||y.createdAt||'').localeCompare(x.dueDate||x.createdAt||'')).map(act => `
+                                <div class="timeline-item ${act.type.toLowerCase()}" style="cursor:pointer;" onclick="app.editActivity('${act.id}')">
+                                    <div class="timeline-date">${act.dueDate || new Date(act.createdAt).toLocaleDateString()}</div>
+                                    <div class="timeline-title">${act.subject}</div>
+                                    <div class="timeline-note">${act.type} - ${act.status}</div>
+                                </div>
+                            `).join('') : '<p class="text-muted">No activities</p>'}
+                        </div>
+                    </div>
+                    <div id="adEmails" style="display:none;">
+                        ${emails.length ? `<table><thead><tr><th>Date</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
+                            ${emails.map(e => `<tr><td>${e.date||''}</td><td>${e.subject||''}</td><td>${e.from_addr||''}</td><td>${e.to_addr||''}</td></tr>`).join('')}
+                        </tbody></table>` : '<p class="text-muted">No emails</p>'}
+                    </div>
+                    <div id="adAssets" style="display:none;">
+                        <div style="background:#fff; border:1px solid var(--sf-border-weak); border-radius:4px; padding:16px;">
+                            <h3 style="font-size:13px; text-transform:uppercase; color:var(--sf-text-weak); letter-spacing:0.5px; margin:0 0 12px 0; padding-bottom:8px; border-bottom:1px solid var(--sf-border-weak);">Property & Assets</h3>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px;">
+                                ${['Oncor Account #','Appliance Models','Room Dimensions','Property Notes','Insurance Policy #','HOA Contact','Mortgage Lender','Property Tax ID'].map(label => {
+                                    const key = 'asset_' + label.toLowerCase().replace(/[^a-z0-9]/g,'_');
+                                    const val = (a.assets||{})[key] || '';
+                                    return `<div><div style="font-size:11px; color:var(--sf-text-weak); margin-bottom:2px;">${label}</div><div style="font-size:13px; cursor:pointer; min-height:20px; ${!val?'color:var(--sf-text-weakest);':''}" onclick="const v=prompt('${label.replace(/'/g,"\\'")}:','${val.replace(/'/g,"\\'")}'); if(v!==null){const acct=app.data.accounts.find(x=>x.id==='${a.id}'); if(!acct.assets) acct.assets={}; acct.assets['${key}']=v; app.persist(); firestoreUpsert('accounts',acct); app.renderAccountDetail();}">${val || 'Click to add'}</div></div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('breadcrumb').innerHTML = '<a onclick="app.currentView=\'accounts\'; app.render();">Accounts</a> / ' + esc(a.name);
+    },
+
+    openDealForm() {
+        document.getElementById('dealId').value = '';
+        document.getElementById('dealName').value = '';
+        document.getElementById('dealAccount').value = '';
+        document.getElementById('dealValue').value = '';
+        document.getElementById('dealStage').value = 'Prospect';
+        document.getElementById('dealSector').value = '';
+        document.getElementById('dealSource').value = '';
+        document.getElementById('dealSourceContact').value = '';
+        document.getElementById('dealProbability').value = '';
+        document.getElementById('dealAskingPrice').value = '';
+        document.getElementById('dealSDE').value = '';
+        document.getElementById('dealOwnerInvolvement').value = '';
+        document.getElementById('dealListingURL').value = '';
+        document.getElementById('dealMultiple').textContent = '—';
+        document.getElementById('dealCloseDate').value = '';
+        document.getElementById('dealDriveLink').value = '';
+        document.getElementById('dealFeeStructure').value = '';
+        document.getElementById('dealCounterparties').value = '';
+        document.getElementById('dealTechNotes').value = '';
+        document.getElementById('dealNotes').value = '';
+        document.querySelectorAll('.cv-cb').forEach(cb => cb.checked = false);
+        this.openModal('modalDeal');
+    },
+
+    editDeal(id) {
+        const deal = this.data.deals.find(d => d.id === id);
+        if (!deal) return;
+        document.getElementById('dealId').value = deal.id;
+        document.getElementById('dealName').value = deal.name;
+        document.getElementById('dealAccount').value = deal.accountId || '';
+        document.getElementById('dealValue').value = deal.value || '';
+        document.getElementById('dealStage').value = deal.stage || 'Prospect';
+        document.getElementById('dealSector').value = deal.sector || '';
+        document.getElementById('dealSource').value = deal.source || '';
+        document.getElementById('dealSourceContact').value = deal.sourceContact || '';
+        document.getElementById('dealAskingPrice').value = deal.askingPrice || '';
+        document.getElementById('dealSDE').value = deal.sde || '';
+        document.getElementById('dealOwnerInvolvement').value = deal.ownerInvolvement || '';
+        document.getElementById('dealListingURL').value = deal.listingURL || '';
+        if (deal.askingPrice && deal.sde && deal.sde > 0) document.getElementById('dealMultiple').textContent = (deal.askingPrice/deal.sde).toFixed(1) + 'x';
+        document.getElementById('dealProbability').value = deal.probability || '';
+        document.getElementById('dealCloseDate').value = deal.closeDate || '';
+        document.getElementById('dealDriveLink').value = deal.driveLink || '';
+        document.getElementById('dealFeeStructure').value = deal.feeStructure || '';
+        document.getElementById('dealCounterparties').value = deal.counterparties || '';
+        document.getElementById('dealTechNotes').value = deal.techNotes || '';
+        document.getElementById('dealNotes').value = deal.notes || '';
+        const cvVals = (deal.continuationVehicle||'').split(',').map(s=>s.trim());
+        document.querySelectorAll('.cv-cb').forEach(cb => cb.checked = cvVals.includes(cb.value));
+        this.openModal('modalDeal');
+    },
+
+    _clearActivityForm() {
+        ['activityId','activitySubject','activityContact','activityAccount','activityDeal','activityDueDate','activityDateTime','activityNotes','activityCallDuration','activityLocation','activityEndDateTime'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        document.getElementById('activityType').value = 'Call';
+        document.getElementById('activityStatus').value = 'Not Started';
+        document.getElementById('activityPriority').value = 'Normal';
+        document.getElementById('activityCallDirection').value = 'Outbound';
+        document.getElementById('activityCallResult').value = '';
+        this.onActivityTypeChange();
+    },
+
+    openActivityForm() {
+        this._clearActivityForm();
+        document.getElementById('activityDueDate').value = new Date().toISOString().split('T')[0];
+        this.openModal('modalActivity');
+    },
+
+    editActivity(id) {
+        const a = this.data.activities.find(x => x.id === id);
+        if (!a) return;
+        this._clearActivityForm();
+        document.getElementById('activityId').value = a.id;
+        document.getElementById('activityType').value = a.type || 'Call';
+        document.getElementById('activitySubject').value = a.subject || '';
+        document.getElementById('activityContact').value = a.contactId || a.contact_id || '';
+        document.getElementById('activityAccount').value = a.accountId || a.account_id || '';
+        document.getElementById('activityDeal').value = a.dealId || a.deal_id || '';
+        document.getElementById('activityDueDate').value = a.dueDate || a.due_date || '';
+        document.getElementById('activityDateTime').value = a.dateTime || '';
+        // Map old status values
+        const statusMap = {'Open':'Not Started','Closed':'Completed'};
+        document.getElementById('activityStatus').value = statusMap[a.status] || a.status || 'Not Started';
+        document.getElementById('activityPriority').value = a.priority || 'Normal';
+        document.getElementById('activityNotes').value = a.notes || '';
+        if (a.callDirection) document.getElementById('activityCallDirection').value = a.callDirection;
+        if (a.callDuration) document.getElementById('activityCallDuration').value = a.callDuration;
+        if (a.callResult) document.getElementById('activityCallResult').value = a.callResult;
+        if (a.address) document.getElementById('activityLocation').value = a.address;
+        if (a.endDateTime) document.getElementById('activityEndDateTime').value = a.endDateTime;
+        this.onActivityTypeChange();
+        this.openModal('modalActivity');
+    },
+
+    updateSelectOptions() {
+        const accountSelect = document.getElementById('contactCompany');
+        const dealAccountSelect = document.getElementById('dealAccount');
+        const activityContactSelect = document.getElementById('activityContact');
+        const activityAccountSelect = document.getElementById('activityAccount');
+        const activityDealSelect = document.getElementById('activityDeal');
+
+        accountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        dealAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        activityContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        activityAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        activityDealSelect.innerHTML = '<option value="">None</option>' + this.data.deals.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+        const eventAccountSelect = document.getElementById('eventAccount');
+        const eventContactSelect = document.getElementById('eventContact');
+        if (eventAccountSelect) eventAccountSelect.innerHTML = '<option value="">None</option>' + this.data.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+        if (eventContactSelect) eventContactSelect.innerHTML = '<option value="">None</option>' + this.data.contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    },
+
+    openModal(id) {
+        document.getElementById(id).classList.add('show');
+    },
+
+    closeModal(id) {
+        document.getElementById(id).classList.remove('show');
+    },
+
+    // CSV Export
+    exportCsv(type) {
+        const items = this.data[type];
+        if (!items || !items.length) { alert('No data to export'); return; }
+        const headers = Object.keys(items[0]);
+        const csv = [headers.join(','), ...items.map(item => headers.map(h => {
+            let val = item[h] || '';
+            val = String(val).replace(/"/g, '""');
+            return val.includes(',') || val.includes('"') || val.includes('\n') ? `"${val}"` : val;
+        }).join(','))].join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${type}-export-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+    },
+
+    // CSV Import
+    csvData: null,
+    handleCsvFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            const lines = text.split('\n').filter(l => l.trim());
+            if (lines.length < 2) { alert('CSV file is empty or has no data rows.'); return; }
+            const headers = this.parseCsvLine(lines[0]);
+            const rows = lines.slice(1).map(line => {
+                const vals = this.parseCsvLine(line);
+                const obj = {};
+                headers.forEach((h, i) => obj[h.trim()] = (vals[i] || '').trim());
+                return obj;
+            });
+            this.csvData = {headers, rows};
+            document.getElementById('csvImportBtn').style.display = '';
+            document.getElementById('csvPreview').innerHTML = `
+                <p style="margin:12px 0; font-size:13px;"><strong>${rows.length} rows</strong> found with columns: ${headers.join(', ')}</p>
+                <div class="csv-preview-table">
+                    <table>
+                        <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.slice(0, 5).map(r => `<tr>${headers.map(h => `<td>${r[h] || ''}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>
+                </div>
+                ${rows.length > 5 ? `<p class="text-muted" style="font-size:12px; margin-top:4px;">Showing first 5 of ${rows.length} rows</p>` : ''}
+            `;
+        };
+        reader.readAsText(file);
+    },
+
+    parseCsvLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQuotes) {
+                if (ch === '"' && line[i+1] === '"') { current += '"'; i++; }
+                else if (ch === '"') { inQuotes = false; }
+                else { current += ch; }
+            } else {
+                if (ch === '"') { inQuotes = true; }
+                else if (ch === ',') { result.push(current); current = ''; }
+                else { current += ch; }
+            }
+        }
+        result.push(current);
+        return result;
+    },
+
+    async executeCsvImport() {
+        if (!this.csvData || !this.csvData.rows.length) return;
+        const target = document.getElementById('csvTarget').value;
+        const rows = this.csvData.rows;
+        let imported = 0;
+
+        try {
+            for (const row of rows) {
+                const record = {id: target.slice(0, 3) + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4), created_at: new Date().toISOString()};
+                if (target === 'contacts') {
+                    record.name = row.Name || row.name || row['First Name'] ? (row['First Name'] || '') + ' ' + (row['Last Name'] || '') : 'Unknown';
+                    record.name = record.name.trim() || row.Name || row.name || 'Unknown';
+                    record.email = row.Email || row.email || '';
+                    record.mobile = row.Mobile || row.mobile || row['Mobile Phone'] || row.Phone || row.phone || '';
+                    record.phone = row.Phone || row.phone || row['Business Phone'] || '';
+                    record.address = row.Address || row.address || row['Mailing Address'] || '';
+                    record.tier = row.Tier || row.tier || '3';
+                    record.title = row.Title || row.title || '';
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                } else if (target === 'accounts') {
+                    record.name = row.Name || row.name || row['Account Name'] || row['Company'] || 'Unknown';
+                    record.industry = row.Industry || row.industry || '';
+                    record.website = row.Website || row.website || '';
+                    record.address = row.Address || row.address || row['Billing Address'] || '';
+                    record.type = row.Type || row.type || 'Prospect';
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                } else if (target === 'deals') {
+                    record.name = row.Name || row.name || row['Deal Name'] || row['Process Name'] || 'Unknown';
+                    record.value = parseFloat(row.Value || row.value || row.Amount || 0);
+                    record.stage = row.Stage || row.stage || 'Prospect';
+                    record.sector = row.Sector || row.sector || '';
+                    record.probability = parseInt(row.Probability || row.probability || 0);
+                    record.close_date = row['Close Date'] || row.close_date || row.closeDate || null;
+                    record.notes = row.Notes || row.notes || row.Description || '';
+                }
+
+                if (target === 'contacts') this.data.contacts.push(record);
+                else if (target === 'accounts') this.data.accounts.push(record);
+                else if (target === 'deals') this.data.deals.push(record);
+                imported++;
+            }
+            this.persist();
+            alert(`Successfully imported ${imported} of ${rows.length} ${target}.`);
+            this.csvData = null;
+            this.closeModal('modalCsvImport');
+            document.getElementById('csvPreview').innerHTML = '';
+            document.getElementById('csvImportBtn').style.display = 'none';
+            this.updateSelectOptions();
+            this.render();
+        } catch (err) { alert('Import error: ' + err.message); }
+    },
+
+    // vCard (.vcf) export — iPhone/Apple Contacts compatible with emoji labels
+    exportVcf() {
+        const contacts = this.data.contacts;
+        if (!contacts.length) { alert('No contacts to export'); return; }
+        const ve = v => String(v || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+        const cards = contacts.map(c => {
+            const parts = (c.name || '').trim().split(/\s+/);
+            const last = parts.length > 1 ? parts.pop() : '';
+            const first = parts.join(' ');
+            const acct = this.data.accounts.find(a => a.id === c.accountId);
+            const lines = [
+                'BEGIN:VCARD',
+                'VERSION:3.0',
+                `N:${ve(last)};${ve(first)};;;`,
+                `FN:${ve(c.name)}`,
+            ];
+            if (acct) lines.push(`ORG:${ve(acct.name)}`);
+            if (c.title) lines.push(`TITLE:${ve(c.title)}`);
+            // Emails with labels
+            if (c.pe_email) lines.push(`EMAIL;TYPE=HOME;X-ABLabel=🏠 Personal:${ve(c.pe_email)}`);
+            if (c.we_email) lines.push(`EMAIL;TYPE=WORK;X-ABLabel=💼 Work:${ve(c.we_email)}`);
+            if (c.email && c.email !== c.pe_email && c.email !== c.we_email) lines.push(`EMAIL;TYPE=INTERNET:${ve(c.email)}`);
+            // Phone numbers with emoji labels
+            if (c.pc_number) lines.push(`TEL;TYPE=CELL;X-ABLabel=📱 Personal Cell:${ve(c.pc_number)}`);
+            if (c.wc_number) lines.push(`TEL;TYPE=WORK,CELL;X-ABLabel=💼 Work Cell:${ve(c.wc_number)}`);
+            if (c.mobile && c.mobile !== c.pc_number && c.mobile !== c.wc_number) lines.push(`TEL;TYPE=CELL:${ve(c.mobile)}`);
+            if (c.phone && c.phone !== c.pc_number && c.phone !== c.wc_number) lines.push(`TEL;TYPE=WORK,VOICE;X-ABLabel=🏢 Office:${ve(c.phone)}`);
+            if (c.home_phone) lines.push(`TEL;TYPE=HOME,VOICE;X-ABLabel=🏠 Home:${ve(c.home_phone)}`);
+            if (c.other_phone) lines.push(`TEL;TYPE=OTHER;X-ABLabel=📞 Other:${ve(c.other_phone)}`);
+            if (c.fax) lines.push(`TEL;TYPE=FAX:${ve(c.fax)}`);
+            if (c.assistant_phone) lines.push(`TEL;TYPE=WORK;X-ABLabel=📞 Assistant:${ve(c.assistant_phone)}`);
+            // Address
+            if (c.address) lines.push(`ADR;TYPE=HOME:;;${ve(c.address)};;;;`);
+            // Birthday
+            if (c.birthdate) lines.push(`BDAY:${c.birthdate.replace(/-/g, '')}`);
+            // Social profiles
+            if (c.instagram) lines.push(`X-SOCIALPROFILE;type=instagram;x-user=${ve(c.instagram.replace('@',''))}:https://instagram.com/${ve(c.instagram.replace('@',''))}`);
+            if (c.facebook) lines.push(`X-SOCIALPROFILE;type=facebook:${ve(c.facebook)}`);
+            if (c.linkedin) lines.push(`URL;X-ABLabel=LinkedIn:${ve(c.linkedin)}`);
+            // Notes — include obligation, tier, tags for context
+            const notesParts = [];
+            if (c.obligation) notesParts.push('Obligation: ' + c.obligation);
+            if (c.tier) notesParts.push('Tier: ' + c.tier);
+            if (c.tags) notesParts.push('Tags: ' + c.tags);
+            if (c.notes) notesParts.push(c.notes);
+            if (c.general_notes) notesParts.push(c.general_notes);
+            if (notesParts.length) lines.push(`NOTE:${ve(notesParts.join(' | '))}`);
+            if (c.tags) lines.push(`CATEGORIES:${ve(c.tags)}`);
+            lines.push('END:VCARD');
+            return lines.join('\r\n');
+        }).join('\r\n');
+        const blob = new Blob([cards], {type: 'text/vcard;charset=utf-8'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `matthews-crm-contacts-${new Date().toISOString().split('T')[0]}.vcf`;
+        a.click();
+    },
+
+    // vCard (.vcf) import — parses iPhone/Apple exported vCards
+    vcfData: null,
+    handleVcfFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            const parsed = this.parseVcf(text);
+            if (!parsed.length) { alert('No contacts found in file'); return; }
+            // dedupe against existing (by email or phone)
+            const existing = this.data.contacts;
+            const dupes = parsed.filter(p => existing.some(c =>
+                (p.email && c.email && p.email.toLowerCase() === c.email.toLowerCase()) ||
+                (p.mobile && c.mobile && p.mobile.replace(/\D/g,'') === c.mobile.replace(/\D/g,''))
+            ));
+            this.vcfData = parsed;
+            document.getElementById('vcfImportBtn').style.display = '';
+            document.getElementById('vcfPreview').innerHTML = `
+                <p style="margin:12px 0; font-size:13px;"><strong>${parsed.length} contacts</strong> found in file.</p>
+                ${dupes.length ? `<div class="dup-banner"><strong>${dupes.length}</strong> appear to be duplicates of existing contacts (matched by email/phone) and will be skipped.</div>` : ''}
+                <div class="csv-preview-table">
+                    <table>
+                        <thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Company</th></tr></thead>
+                        <tbody>${parsed.slice(0, 10).map(p => `<tr><td>${p.name}</td><td>${p.email || ''}</td><td>${p.mobile || ''}</td><td>${p.company || ''}</td></tr>`).join('')}</tbody>
+                    </table>
+                </div>
+                ${parsed.length > 10 ? `<p class="text-muted" style="font-size:12px; margin-top:4px;">Showing first 10 of ${parsed.length}</p>` : ''}
+            `;
+        };
+        reader.readAsText(file);
+    },
+
+    parseVcf(text) {
+        // handle line-folded vCards (lines starting with space/tab continue previous)
+        const unfolded = text.replace(/\r?\n[ \t]/g, '');
+        const blocks = unfolded.split(/BEGIN:VCARD/i).slice(1);
+        const unesc = v => String(v || '').replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
+        const result = [];
+        for (const block of blocks) {
+            const body = block.split(/END:VCARD/i)[0];
+            const lines = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const c = {};
+            for (const line of lines) {
+                const colonIdx = line.indexOf(':');
+                if (colonIdx < 0) continue;
+                const keyPart = line.slice(0, colonIdx).toUpperCase();
+                const value = line.slice(colonIdx + 1);
+                const baseKey = keyPart.split(';')[0];
+                if (baseKey === 'FN') c.name = unesc(value);
+                else if (baseKey === 'N' && !c.name) {
+                    const parts = value.split(';').map(unesc);
+                    c.name = [parts[1], parts[0]].filter(Boolean).join(' ').trim();
+                }
+                else if (baseKey === 'EMAIL' && !c.email) c.email = unesc(value);
+                else if (baseKey === 'TEL') {
+                    if (/CELL|MOBILE|IPHONE/i.test(keyPart) && !c.mobile) c.mobile = unesc(value);
+                    else if (!c.phone) c.phone = unesc(value);
+                }
+                else if (baseKey === 'ORG') c.company = unesc(value.split(';')[0]);
+                else if (baseKey === 'TITLE') c.title = unesc(value);
+                else if (baseKey === 'ADR' && !c.address) {
+                    const parts = value.split(';').map(unesc);
+                    c.address = parts.slice(2).filter(Boolean).join(', ');
+                }
+                else if (baseKey === 'BDAY') {
+                    const v = unesc(value);
+                    if (/^\d{8}$/.test(v)) c.birthdate = `${v.slice(0,4)}-${v.slice(4,6)}-${v.slice(6,8)}`;
+                    else if (/^\d{4}-\d{2}-\d{2}/.test(v)) c.birthdate = v.slice(0, 10);
+                }
+                else if (baseKey === 'URL' && !c.linkedin) c.linkedin = unesc(value);
+                else if (baseKey === 'NOTE') c.notes = unesc(value);
+                else if (baseKey === 'CATEGORIES') c.tags = unesc(value);
+            }
+            if (c.name || c.email || c.mobile) result.push(c);
+        }
+        return result;
+    },
+
+    async executeVcfImport() {
+        if (!this.vcfData || !this.vcfData.length) return;
+        const parsed = this.vcfData;
+        const existing = this.data.contacts;
+        let imported = 0, skipped = 0;
+        try {
+            for (const p of parsed) {
+                // dedupe by email or phone
+                const isDup = existing.some(c =>
+                    (p.email && c.email && p.email.toLowerCase() === c.email.toLowerCase()) ||
+                    (p.mobile && c.mobile && p.mobile.replace(/\D/g,'') === c.mobile.replace(/\D/g,''))
+                );
+                if (isDup) { skipped++; continue; }
+                // match company to existing account (case-insensitive) if provided
+                let accountId = null;
+                if (p.company) {
+                    const acct = this.data.accounts.find(a => (a.name || '').toLowerCase() === p.company.toLowerCase());
+                    accountId = acct ? acct.id : null;
+                }
+                const record = {
+                    id: 'con-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                    name: p.name || 'Unknown',
+                    email: p.email || '',
+                    mobile: p.mobile || '',
+                    phone: p.phone || '',
+                    address: p.address || '',
+                    account_id: accountId,
+                    tier: '3',
+                    title: p.title || null,
+                    birthdate: p.birthdate || null,
+                    linkedin: p.linkedin || null,
+                    tags: p.tags || null,
+                    notes: p.notes || null,
+                    created_at: new Date().toISOString()
+                };
+                this.data.contacts.push(record);
+                imported++;
+            }
+            this.persist();
+            alert(`Imported ${imported} new contacts. Skipped ${skipped} duplicates.`);
+            this.vcfData = null;
+            this.closeModal('modalVcfImport');
+            document.getElementById('vcfPreview').innerHTML = '';
+            document.getElementById('vcfImportBtn').style.display = 'none';
+            this.updateSelectOptions();
+            this.render();
+        } catch (err) { alert('vCard import error: ' + err.message); }
+    },
+
+    // Duplicate detection — groups by similar name/email/phone
+    findDuplicates() {
+        const groups = {};
+        for (const c of this.data.contacts) {
+            const keys = [];
+            if (c.email) keys.push('e:' + c.email.toLowerCase().trim());
+            if (c.mobile) keys.push('m:' + c.mobile.replace(/\D/g,''));
+            if (c.name) keys.push('n:' + c.name.toLowerCase().replace(/\s+/g,'').trim());
+            for (const k of keys) {
+                if (!groups[k]) groups[k] = [];
+                groups[k].push(c);
+            }
+        }
+        const dupes = [];
+        const seen = new Set();
+        for (const k in groups) {
+            if (groups[k].length > 1) {
+                const ids = groups[k].map(c => c.id).sort().join('|');
+                if (!seen.has(ids)) { seen.add(ids); dupes.push(groups[k]); }
+            }
+        }
+        return dupes;
+    },
+
+    showDuplicates() {
+        const dupes = this.findDuplicates();
+        if (!dupes.length) { alert('No duplicate contacts detected.'); return; }
+        const html = `
+            <h2>Duplicate Contacts (${dupes.length} groups)</h2>
+            <p class="text-muted" style="font-size:13px;">Contacts matched on email, mobile, or name. Review and delete the ones you don't need.</p>
+            ${dupes.map(group => `
+                <div class="card" style="margin-bottom:12px;">
+                    <table>
+                        <thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Tier</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${group.map(c => `
+                                <tr>
+                                    <td>${c.name}</td>
+                                    <td>${c.email || ''}</td>
+                                    <td>${c.mobile || ''}</td>
+                                    <td>${c.tier}</td>
+                                    <td>
+                                        <button class="btn-small" onclick="app.editContact('${c.id}')">Edit</button>
+                                        <button class="btn-small" onclick="app.deleteContact('${c.id}'); app.showDuplicates();">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `).join('')}
+        `;
+        document.getElementById('content').innerHTML = html;
+    },
+
+    // Quick add activity from contact detail view
+    quickLogActivity(contactId, type) {
+        const contact = this.data.contacts.find(c => c.id === contactId);
+        if (!contact) return;
+        const subject = prompt(`${type} subject:`);
+        if (!subject) return;
+        const notes = prompt('Notes (optional):') || '';
+        const record = {
+            id: 'act-' + Date.now(),
+            type: type,
+            subject: subject,
+            contact_id: contactId,
+            account_id: contact.accountId || null,
+            deal_id: null,
+            due_date: new Date().toISOString().split('T')[0],
+            status: 'Closed',
+            notes: notes,
+            created_at: new Date().toISOString()
+        };
+        this.data.activities.push(record);
+        contact.la = new Date().toISOString().split('T')[0];
+        this.persist();
+        this.renderContactDetail();
+    }
+};
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarOverlay').classList.toggle('show');
+}
+
+// Override navigate to close sidebar on mobile
+const origNavigate = app.navigate.bind(app);
+app.navigate = function(view) {
+    origNavigate(view);
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebarOverlay').classList.remove('show');
+    }
+};
+
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if (app.currentView !== 'tasks') return;
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); app.openActivityForm(); }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); const s = document.querySelector('[placeholder="Search…"]'); if (s) s.focus(); }
+    else if (e.key === '1') { app._taskView='board'; app.renderTaskBoard(); }
+    else if (e.key === '2') { app._taskView='list'; app.renderTaskBoard(); }
+    else if (e.key === '3') { app._taskView='calendar'; app.renderTaskBoard(); }
+});
+window.addEventListener('beforeunload', () => { if (app._syncMetaTimer) { clearTimeout(app._syncMetaTimer); app._syncMeta(); } });
+document.addEventListener('DOMContentLoaded', async () => {
+    // Auto-sync: if #sync in URL, fetch data from local sync server
+    if (location.hash === '#sync') {
+        try {
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;font-family:sans-serif;background:#f3f3f3;"><div style="font-size:20px;font-weight:600;color:#032d60;margin-bottom:12px;">Syncing from Salesforce...</div><div style="font-size:14px;color:#444;">Loading your contacts, accounts, opportunities, and activities.</div></div>';
+            const res = await fetch('http://localhost:9876/');
+            const data = await res.json();
+            // Merge with existing or replace
+            const existing = JSON.parse(localStorage.getItem('matthewsCRM') || '{}');
+            const merged = {
+                contacts: data.contacts || existing.contacts || [],
+                accounts: data.accounts || existing.accounts || [],
+                deals: data.deals || existing.deals || [],
+                activities: data.activities || existing.activities || [],
+                emails: existing.emails || [],
+                referrals: existing.referrals || [],
+                dealContacts: existing.dealContacts || []
+            };
+            localStorage.setItem('matthewsCRM', JSON.stringify(merged));
+            location.hash = '';
+            location.reload();
+            return;
+        } catch (e) {
+            console.error('Sync failed:', e);
+            location.hash = '';
+        }
+    }
+    app.init();
+    window.addEventListener('hashchange', () => {
+        const h = location.hash.replace('#','');
+        if (h.startsWith('contactDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.contacts.find(c=>c.id===id); if(app.currentRecord) { app.currentView='contactDetail'; app.render(); } }
+        else if (h.startsWith('accountDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.accounts.find(a=>a.id===id); if(app.currentRecord) { app.currentView='accountDetail'; app.render(); } }
+        else if (h.startsWith('activityDetail:')) { const id = h.split(':')[1]; app.currentRecord = app.data.events.find(a=>a.id===id); if(app.currentRecord) { app.currentView='activityDetail'; app.render(); } }
+        else if (h && h !== 'sync') { app.currentView = h; app.render(); }
+    });
+});
+    // Register service worker for offline support
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+            e.preventDefault();
+            const search = document.getElementById('globalSearch');
+            if (search) search.focus();
+        }
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
+            const fab = document.getElementById('fabOptions');
+            if (fab) fab.style.display = 'none';
+        }
+    });
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+            reg.update();
+            if (reg.waiting) { reg.waiting.postMessage({type: 'SKIP_WAITING'}); location.reload(); }
+            reg.addEventListener('updatefound', () => {
+                const nw = reg.installing;
+                nw.addEventListener('statechange', () => {
+                    if (nw.state === 'activated') location.reload();
+                });
+            });
+        }).catch(() => {});
+    }
