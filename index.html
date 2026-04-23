@@ -1095,6 +1095,49 @@ Tone: Professional but personal, not overly formal`;
         }
     },
 
+    // === Email & Document Tracking ===
+    TRACK_BASE: 'https://us-central1-tmc-crm-f3728.cloudfunctions.net',
+
+    addTrackingToEmail(html, campaignId, contactId, email) {
+        const base = this.TRACK_BASE;
+        let tracked = html.replace(/href="(https?:\/\/[^"]+)"/g, (match, url) => {
+            const trackUrl = `${base}/track?t=click&c=${campaignId}&cid=${contactId}&e=${encodeURIComponent(email)}&url=${encodeURIComponent(url)}`;
+            return `href="${trackUrl}"`;
+        });
+        tracked += `<img src="${base}/track?t=open&c=${campaignId}&cid=${contactId}&e=${encodeURIComponent(email)}" width="1" height="1" style="display:none;">`;
+        return tracked;
+    },
+
+    async createTrackedDoc(name, driveUrl, contactId, dealId) {
+        const id = 'doc-' + Date.now();
+        const token = await getAuthToken();
+        if (!token) return null;
+        try {
+            await fetch(this.TRACK_BASE + '/api/tracked_documents', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                body: JSON.stringify({id, name, file_url: driveUrl, contact_id: contactId||null, deal_id: dealId||null})
+            });
+            return `${this.TRACK_BASE}/doc/${id}`;
+        } catch(e) { console.log('Create tracked doc error:', e); return null; }
+    },
+
+    async shareTrackedDoc(contactId) {
+        const c = this.data.contacts.find(x => x.id === contactId);
+        if (!c) return;
+        this.openDrivePicker(async (file) => {
+            const trackUrl = await this.createTrackedDoc(file.name, file.url, contactId, null);
+            if (!trackUrl) { alert('Failed to create tracking link.'); return; }
+            const email = c.pe_email || c.we_email || c.email;
+            if (email) {
+                const mailto = 'mailto:' + email + '?subject=' + encodeURIComponent(file.name) + '&body=' + encodeURIComponent('Hi ' + c.name.split(' ')[0] + ',\n\nPlease find the document here:\n' + trackUrl + '\n\nBest regards');
+                window.open(mailto);
+            } else {
+                prompt('Tracking link (copy and share):', trackUrl);
+            }
+        });
+    },
+
     // === Gmail Integration ===
     GMAIL_CLIENT_ID: '952660161996-el5663ja1ns7q1mg7h90fm471am7kqgd.apps.googleusercontent.com',
     _gmailToken: null,
@@ -7354,6 +7397,7 @@ Tone: Professional but personal, not overly formal`;
                         <button onclick="document.getElementById('emailContact').value='${c.id}'; app.openEmailForm();">Email</button>
                         <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiContactSuggest('${c.id}')">✨ AI Suggest</button>
                         <button style="background:#e8f0fe;color:#1a73e8;" onclick="app.aiDraftEmail('${c.id}')">✨ Draft Email</button>
+                        <button style="background:#fef3c7;color:#92400e;" onclick="app.shareTrackedDoc('${c.id}')">📄 Share Tracked Doc</button>
                     </div>
                 </div>
                 <div class="sf-hl-fields">
